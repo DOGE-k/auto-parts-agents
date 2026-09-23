@@ -1,0 +1,1 @@
+"""Quality document agent."""

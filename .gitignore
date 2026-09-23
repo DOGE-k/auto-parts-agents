@@ -1,0 +1,17 @@
+.conda-env/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+backend/data/
+backend/*.egg-info/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+eab.json

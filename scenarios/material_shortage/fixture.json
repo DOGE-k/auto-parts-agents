@@ -1,0 +1,56 @@
+{
+  "fixture_id": "material-shortage-demo-v1",
+  "data_source": "synthetic_demo_only",
+  "scenario": "material_shortage",
+  "project": {
+    "customer_id": "DEMO-CUSTOMER-002",
+    "product_id": "DEMO-HOUSING-002",
+    "product_name": "演示壳体组件",
+    "order_quantity": 500,
+    "required_delivery_date": "2026-10-20",
+    "currency": "CNY"
+  },
+  "material_demand": {
+    "demand_id": "DEMO-DEM-001",
+    "material_id": "DEMO-AL-102",
+    "required_quantity": "1000",
+    "required_date": "2026-10-01",
+    "inventory": [
+      {"quantity": "350", "status": "available"},
+      {"quantity": "150", "status": "frozen"},
+      {"quantity": "200", "status": "inspection"},
+      {"quantity": "50", "status": "rejected"},
+      {"quantity": "25", "status": "no_batch"}
+    ],
+    "inbound": [
+      {"quantity": "200", "confirmed": true},
+      {"quantity": "100", "confirmed": false}
+    ]
+  },
+  "supplier_options": [
+    {
+      "option_id": "SUPPLY-STANDARD",
+      "supplier_id": "DEMO-SUPPLIER-A",
+      "supplier_name": "演示供应商 A",
+      "unit_price": "11.80",
+      "lead_time_days": 12,
+      "quality_risk": "low",
+      "confirmed_delivery_date": "2026-10-05"
+    },
+    {
+      "option_id": "SUPPLY-EXPEDITE",
+      "supplier_id": "DEMO-SUPPLIER-B",
+      "supplier_name": "演示供应商 B",
+      "unit_price": "14.60",
+      "lead_time_days": 5,
+      "quality_risk": "medium",
+      "confirmed_delivery_date": "2026-09-28"
+    }
+  ],
+  "accepted_quote_reference": {
+    "status": "ACCEPTED",
+    "baseline_material_unit_price": "12.50",
+    "quote_id": "DEMO-QUOTE-002"
+  },
+  "notice": "所有需求、库存、供应商、价格、风险和日期均为演示用合成数据，不代表真实 ERP/MES 记录。"
+}

@@ -1,0 +1,45 @@
+{
+  "fixture_id": "normal-order-demo-v1",
+  "data_source": "synthetic_demo_only",
+  "scenario": "normal_order",
+  "project": {
+    "customer_id": "DEMO-CUSTOMER-001",
+    "product_id": "DEMO-BRACKET-001",
+    "product_name": "演示支架组件",
+    "order_quantity": 120,
+    "currency": "CNY",
+    "required_delivery_date": "2026-11-05"
+  },
+  "quotation": {
+    "bom": [
+      {"material_id": "DEMO-AL-102", "qty_per_product": "2", "unit_price": "12.50"},
+      {"material_id": "DEMO-BOLT-008", "qty_per_product": "4", "unit_price": "2.00"}
+    ],
+    "cost_components": {
+      "processing": "16.00",
+      "outsourcing": "0.00",
+      "inspection": "2.00",
+      "packaging": "1.00",
+      "logistics": "2.00"
+    },
+    "risk_buffer_rate": "0.05",
+    "target_gross_margin": "0.20",
+    "minimum_gross_margin": "0.15"
+  },
+  "material_demand": {
+    "demand_id": "DEMO-DEM-NORMAL-001",
+    "material_id": "DEMO-AL-102",
+    "required_quantity": "240",
+    "inventory": [{"quantity": "300", "status": "available"}],
+    "inbound": []
+  },
+  "delivery": {
+    "material_available_date": "2026-10-20",
+    "capacity_completion_date": "2026-10-24",
+    "quality_wait_days": 2,
+    "buffer_days": 3,
+    "mock_mes_quality_released": true,
+    "mock_document_evidence_complete": true
+  },
+  "notice": "所有客户、产品、价格、产能、质量和日期均为演示用合成数据，不代表真实 ERP/MES 记录。"
+}
