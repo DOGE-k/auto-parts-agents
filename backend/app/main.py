@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +27,11 @@ from app.persistence.models import (
     ProjectRow,
     ReplayRunRow,
 )
+from app.adapters.erp.erpnext import ERPNextClient
+from app.adapters.mes.openmes import OpenMESClient
+from app.integrations.deepseek import DeepSeekClient
+from app.integrations.errors import IntegrationError
+from app.integrations.settings import IntegrationSettings
 from app.runtime.scenarios import decide_approval, get_snapshot, reset_project, run_scenario
 
 
@@ -31,8 +43,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="汽车零部件四智能体动态协作平台",
-    version="0.1.0",
-    description="本地 Mock 演示平台；场景数据和计算规则均明确标记为合成演示内容。",
+    version="0.2.0",
+    description="四智能体协作平台；已提供真实系统连接层，固定场景回放仍为明确标注的测试功能。",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -51,7 +63,138 @@ def _row_dict(row) -> dict:
 @app.get("/api/health", tags=["system"])
 def health(session: Session = Depends(get_session)) -> dict[str, str]:
     session.execute(text("SELECT 1"))
-    return {"status": "ok", "mode": "mock", "database": "connected"}
+    return {"status": "ok", "mode": "local-runtime", "database": "connected"}
+
+
+def _integration_status_error(exc: IntegrationError) -> HTTPException:
+    status_code = exc.status_code if exc.status_code in {401, 403, 404, 409, 422} else 502
+    if exc.code == "not_configured":
+        status_code = 409
+    return HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)})
+
+
+@app.get("/api/integrations/status", tags=["integrations"])
+def integration_status() -> dict:
+    """Report which providers are configured without revealing credentials."""
+    return IntegrationSettings.from_environment().public_status()
+
+
+@app.post("/api/integrations/deepseek/check", tags=["integrations"])
+async def check_deepseek() -> dict:
+    """Send a tiny explicit connectivity check; DeepSeek may bill this request."""
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = DeepSeekClient(
+            settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+        )
+        try:
+            result = await client.chat_completion(
+                [{"role": "user", "content": "Reply with OK."}], max_tokens=8
+            )
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    return {"connected": True, "model": result.get("model", settings.deepseek_model)}
+
+
+@app.post("/api/integrations/erpnext/check", tags=["integrations"])
+async def check_erpnext() -> dict:
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = ERPNextClient(
+            settings.erpnext_base_url,
+            settings.erpnext_api_key,
+            settings.erpnext_api_secret,
+            draft_writes_enabled=settings.erpnext_draft_writes_enabled,
+        )
+        try:
+            result = await client.get_logged_user()
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    return {"connected": True, "authenticated_user": result["user"]}
+
+
+@app.post("/api/integrations/openmes/check", tags=["integrations"])
+async def check_openmes() -> dict:
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = OpenMESClient(
+            settings.openmes_base_url,
+            user_token=settings.openmes_user_token or None,
+            erp_api_key=settings.openmes_erp_api_key or None,
+        )
+        try:
+            health_result = await client.health()
+            user = None
+            if settings.openmes_user_token:
+                user = await client.current_user()
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    return {
+        "connected": True,
+        "health": health_result.get("status"),
+        "authenticated_user": user.get("username") if user else None,
+        "erp_read_api_configured": bool(settings.openmes_erp_api_key),
+    }
+
+
+@app.get("/api/integrations/openmes/work-orders", tags=["integrations"])
+async def openmes_work_orders(
+    status: str | None = None,
+    line_id: int | None = None,
+    due_before: str | None = None,
+    search: str | None = None,
+    per_page: int = Query(default=15, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+) -> dict:
+    """Read actual OpenMES work orders using documented, allowlisted filters."""
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = OpenMESClient(
+            settings.openmes_base_url,
+            user_token=settings.openmes_user_token or None,
+        )
+        try:
+            filters = {
+                key: value
+                for key, value in {
+                    "status": status,
+                    "line_id": line_id,
+                    "due_before": due_before,
+                    "search": search,
+                    "per_page": per_page,
+                    "page": page,
+                }.items()
+                if value is not None
+            }
+            return await client.list_work_orders(filters)
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+
+
+@app.get("/api/integrations/openmes/work-orders/{work_order_id}", tags=["integrations"])
+async def openmes_work_order(work_order_id: str) -> dict:
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = OpenMESClient(
+            settings.openmes_base_url,
+            user_token=settings.openmes_user_token or None,
+        )
+        try:
+            return await client.get_work_order(work_order_id)
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
 
 
 @app.get("/api/projects", tags=["projects"])
