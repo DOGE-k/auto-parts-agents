@@ -216,6 +216,18 @@ export type ProposalDeliveryAssessment = {
   conclusion: string;
 };
 
+export type ProposalCombination = {
+  plan_id: string;
+  option_ids: string[];
+  suppliers: string[];
+  combined_cost: string;
+  currency: string;
+  coverage: { covered_items: string[]; uncovered_items: string[]; shortage_total: number; complete: boolean };
+  overlapping_items: string[];
+  max_lead_time_days: number | null;
+  warnings: string[];
+};
+
 export type ProposalOptions = {
   plan_id?: string;
   quotation_id?: string;
@@ -228,8 +240,41 @@ export type ProposalOptions = {
   recommendation?: string;
   cost_assessments?: ProposalCostAssessment[];
   delivery_assessments?: ProposalDeliveryAssessment[];
+  combination_assessments?: ProposalCombination[];
   data_missing?: { source_skill: string; missing_fields: { field: string; detail: string }[]; need: string }[];
 };
+
+// 方案卡片执行闭环（阶段七）：批准方案 → 起草 PO → 回读
+export type PoDraftResult = {
+  draft?: { draft_id?: string; read_back_verified?: boolean; supplier?: string; schedule_date?: string } | null;
+};
+
+export async function approveProcurementPlan(
+  planId: string,
+  optionId: string,
+  approvedBy: string,
+): Promise<{ success: boolean; status: string; plan_id: string; approval_id: string; selected_option_id: string }> {
+  return api<{ success: boolean; status: string; plan_id: string; approval_id: string; selected_option_id: string }>(`/real-orders/procurement/plans/${encodeURIComponent(planId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      option_id: optionId,
+      approved: true,
+      approved_by: approvedBy,
+      notes: "问答方案卡片人工确认（阶段七执行闭环）",
+    }),
+  });
+}
+
+export async function createPoFromPlan(
+  planId: string,
+  approvalId: string,
+  approvedBy: string,
+): Promise<PoDraftResult> {
+  return api<PoDraftResult>("/real-orders/erp/draft/po-from-plan", {
+    method: "POST",
+    body: JSON.stringify({ plan_id: planId, approval_id: approvalId, approved_by: approvedBy }),
+  });
+}
 
 export async function askAssistant(
   question: string,

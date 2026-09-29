@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, agentRunTypeNames, askAssistant } from "./api";
+import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, createPoFromPlan } from "./api";
 import type {
   AgentRunSummary,
   AgentRunDetail,
@@ -279,6 +279,43 @@ export default function RealBusinessPage() {
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState<AssistantAnswer | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  // 方案卡片执行闭环（阶段七）：confirming → executing → done / error
+  const [proposalExec, setProposalExec] = useState<{
+    option_id: string;
+    stage: "confirming" | "executing";
+    approver: string;
+  } | null>(null);
+  const [proposalExecResult, setProposalExecResult] = useState<{
+    option_id: string;
+    approval_id: string;
+    po_draft_id?: string;
+    read_back_verified?: boolean;
+    error?: string;
+  } | null>(null);
+
+  const executeProposal = useCallback(async (planId: string, optionId: string, approver: string) => {
+    setProposalExec({ option_id: optionId, stage: "executing", approver });
+    setError("");
+    try {
+      const approval = await approveProcurementPlan(planId, optionId, approver);
+      const draftResult = await createPoFromPlan(planId, approval.approval_id, approver);
+      setProposalExecResult({
+        option_id: optionId,
+        approval_id: approval.approval_id,
+        po_draft_id: draftResult.draft?.draft_id,
+        read_back_verified: draftResult.draft?.read_back_verified,
+      });
+      setProposalExec(null);
+      notify(`方案已批准，PO 草稿 ${draftResult.draft?.draft_id ?? ""} 已创建`);
+    } catch (e) {
+      setProposalExecResult({
+        option_id: optionId,
+        approval_id: "",
+        error: e instanceof Error ? e.message : "执行失败",
+      });
+      setProposalExec(null);
+    }
+  }, []);
 
   const submitAssistantQuestion = useCallback(async () => {
     const q = assistantQuestion.trim();
@@ -656,6 +693,10 @@ export default function RealBusinessPage() {
                 <div className="proposal-cards">
                   {(assistantAnswer.proposal_options.supplier_options ?? []).map((opt: ProposalSupplierOption) => {
                     const cost = (assistantAnswer.proposal_options?.cost_assessments ?? []).find((c) => c.option_id === opt.option_id);
+                    const execResult = proposalExecResult?.option_id === opt.option_id ? proposalExecResult : null;
+                    const confirming = proposalExec?.option_id === opt.option_id && proposalExec.stage === "confirming";
+                    const executing = proposalExec?.option_id === opt.option_id && proposalExec.stage === "executing";
+                    const planId = assistantAnswer.proposal_options?.plan_id ?? "";
                     return (
                       <div key={opt.option_id} className={`proposal-card ${opt.is_recommended ? "recommended" : ""}`}>
                         <div className="proposal-card-head">
@@ -678,6 +719,40 @@ export default function RealBusinessPage() {
                           </>
                         )}
                         <div className="proposal-card-note">{opt.recommendation_reason}</div>
+                        {/* 阶段七：方案批准 → PO 草稿（审批门禁内，草稿级写入） */}
+                        {planId && opt.total_cost_complete && (execResult ? (
+                          <div className={`proposal-exec-result ${execResult.error ? "error" : "ok"}`}>
+                            {execResult.error
+                              ? `执行失败：${execResult.error}`
+                              : `✓ 已批准（${execResult.approval_id}），PO 草稿 ${execResult.po_draft_id ?? "?"} ${execResult.read_back_verified ? "回读确认" : "待回读"}`}
+                          </div>
+                        ) : executing ? (
+                          <div className="proposal-executing">执行中：审批 → 起草 PO → 回读...</div>
+                        ) : confirming ? (
+                          <div className="proposal-confirm">
+                            <small>将执行（草稿级写入，不提交）：</small>
+                            <code>审批方案 {planId} 选 {opt.option_id}（{opt.supplier_name}，{opt.total_cost} {opt.currency}）→ 创建采购订单草稿</code>
+                            <div className="proposal-confirm-row">
+                              <input
+                                value={proposalExec?.approver ?? ""}
+                                onChange={(e) => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: e.target.value })}
+                                placeholder="审批人（如 purchase_manager）"
+                              />
+                              <button
+                                className="button primary"
+                                disabled={!proposalExec?.approver.trim()}
+                                onClick={() => void executeProposal(planId, opt.option_id, proposalExec?.approver ?? "")}
+                              >
+                                确认批准并起草
+                              </button>
+                              <button className="button ghost" onClick={() => setProposalExec(null)}>取消</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="button ghost proposal-exec-btn" onClick={() => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: "purchase_manager" })}>
+                            选择此方案并起草 PO（需人工确认）→
+                          </button>
+                        ))}
                       </div>
                     );
                   })}

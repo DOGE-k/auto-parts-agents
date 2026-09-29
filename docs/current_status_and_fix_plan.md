@@ -768,6 +768,24 @@ ERP 物料需求
 
 **写入说明**：本阶段新增技能全部只读或本地记录读写；ERP/MES 零写入。采购分析每次调用生成新本地方案记录（PROC-*），属正常业务留痕。
 
+### 3.16 本轮继续开发：阶段七执行闭环（2026-09-29）
+
+**已完成**（next_development_plan.md 阶段七任务 1-7；写入审批依据：用户 2026-09-29 指令"开始"执行阶段七计划，计划中明确包含卡片批准→PO 草稿写入）：
+
+1. **新真实技能** `procurement.assess_combination(plan_id, option_ids)`：分单采购组合的确定性评估——组合成本=各选项真实价格记录合计（无折扣/系数假设）、覆盖并集、最长物料级交期；同一物料被多选项重复覆盖时明确告警（组合成本含重复采购）；任一选项价格不完整返回 DATA_MISSING。修复了初版漏返回 evidence 字段的问题（测试抓出）。
+2. **协调者**：能力目录扩至 13 个真实工具；prompt 规则 E（组合方案必须用 assess_combination 计算，禁止自行相加；重复覆盖/未覆盖告警必须原样转告）；_collect_proposal 增加 combination_assessments 汇集。
+3. **前端执行闭环**：方案卡片"选择此方案并起草 PO（需人工确认）"→ 内联确认面板（明示写入内容：方案号/选项/供应商/金额/docstatus=0 + 审批人输入框）→ 调既有审批门禁端点 approve → po-from-plan → 卡片回显审批号与 PO 草稿号 + 回读状态；执行中/已执行状态防重复提交。
+4. **验收发现并修复状态联动断链**：首轮验证"方案批准了吗"时协调者如实回答查不到（未乱猜）——根因是问答链 analyze_real 生成的报价没有与 ERP 订单的关联（erp_draft_id 仅在 8 步流程创建草稿后存在）。修复：①analyze_quotation 新增可选 source_erp_order_id（**声明式上下文**：仅当调用方明确给出订单号时记录，不做事后推断）；②find_quotation_by_erp_order 同时匹配 erp_draft_id 与 source_erp_order_id，返回值附带最新方案摘要；③新技能 procurement.find_real_plan_by_quotation（按报价查最新方案状态：审批号/选定选项/PO 草稿号）。
+5. **真实验收（修复后）**：
+   - 卡片批准：PROC-F7422D68E79C + OPT-1（上海铸锻厂 39080 CNY）→ 审批 APR-BCC4EE93ACF6 → PO 草稿 PUR-ORD-2026-00009（首轮）；修复后复验 APR-9005E70E94FC → PUR-ORD-2026-00010（回读确认，docstatus=0）。
+   - 状态联动：问"SAL-ORD-2026-00023 的采购方案批准了吗？PO 草稿生成了吗？"→ 协调者 2 步链（find_real_by_erp_order → find_real_plan_by_quotation）准确回答：方案 PROC-959804A88AA9 状态 PO_DRAFT_CREATED、审批号 APR-9005E70E94FC、PO 草稿 PUR-ORD-2026-00010，与卡片操作一致；并主动指出"报价单本身状态仍为 DRAFT，与方案侧审批状态不一致，建议一并核实"（真实治理观察：问答链报价未走报价审批，记录为待办）。截图 `2026-09-29_proposal_exec_closed_loop.png`、`2026-09-29_proposal_status_linkage.png`。
+   - LLM 在方案问答中主动调用 assess_combination 计算分单组合（方案 B），并原样转告工具告警"无重复覆盖、无未覆盖"。
+6. **测试**：assess_combination 5 例（组合数学/覆盖并集/重复覆盖告警/单选项未覆盖告警/DATA_MISSING/未知选项报错/AIP 注册）；find_latest_plan_by_quotation 间接覆盖。全量 **69 passed**，compileall/build 通过。
+
+**写入说明（真实 ERP 写入记录）**：PUR-ORD-2026-00009/00010 采购订单草稿（docstatus=0，回读确认）；对应审批记录 APR-BCC4EE93ACF6/APR-9005E70E94FC（本地持久化）。协调者本身无写权限；写入全部经人工卡片确认 + 审批门禁。
+
+**遗留（新增）**：问答链报价未走报价审批（方案侧已批准 vs 报价 DRAFT 不一致）——建议方案卡片批准时同步校验报价审批状态或引导先审批报价，列为下一迭代。
+
 ## 8. 当前结论
 
 阶段 1（ERP↔MES 关联）已完成：字段确认、只读接口、关联值回填（WO-2026-001 → SAL-ORD-2026-00001）、LINKED 验证。

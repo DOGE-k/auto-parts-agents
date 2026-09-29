@@ -49,6 +49,29 @@ def create_procurement_aip_service(aic: str = "local-procurement-001") -> AipAge
         handler=real_get_plan,
     )
 
+    async def real_assess_combination(inputs: dict) -> dict:
+        """分单采购组合的确定性评估（覆盖并集/组合成本/最长交期/重复覆盖告警）。"""
+        return await real_order.assess_combination(
+            plan_id=str(inputs["plan_id"]),
+            option_ids=list(inputs.get("option_ids") or []),
+        )
+
+    service.register_skill(
+        skill_id="procurement.assess_combination",
+        skill_name="分单采购组合评估（确定性计算）",
+        handler=real_assess_combination,
+    )
+
+    async def real_find_plan_by_quotation(inputs: dict) -> dict:
+        """按报价编号查找最新采购方案（审批状态/PO 草稿状态联动）。"""
+        return await real_order.find_latest_plan_by_quotation(str(inputs["quotation_id"]))
+
+    service.register_skill(
+        skill_id="procurement.find_real_plan_by_quotation",
+        skill_name="按报价查找最新采购方案状态",
+        handler=real_find_plan_by_quotation,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 净需求计算

@@ -37,6 +37,7 @@ def create_quotation_aip_service(aic: str = "local-quotation-001") -> AipAgentSe
             item_code=str(inputs["item_code"]),
             quantity=int(inputs["quantity"]),
             delivery_date=inputs.get("delivery_date"),
+            source_erp_order_id=inputs.get("erp_order_id"),
         )
 
     service.register_skill(

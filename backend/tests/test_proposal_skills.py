@@ -37,7 +37,8 @@ def _persist_quotation(quotation_id: str, erp_draft_id: str, total_price: str, q
         session.commit()
 
 
-def _persist_plan(plan_id: str, quotation_id: str, *, baseline: str, options: list[dict]) -> None:
+def _persist_plan(plan_id: str, quotation_id: str, *, baseline: str, options: list[dict],
+                  shortage_items: list[dict] | None = None) -> None:
     with SessionLocal() as session:
         session.merge(RealProcurementPlanRow(
             plan_id=plan_id,
@@ -50,9 +51,9 @@ def _persist_plan(plan_id: str, quotation_id: str, *, baseline: str, options: li
                 "status": "PENDING_APPROVAL",
                 "net_requirement": {
                     "has_shortage": True,
-                    "shortage_count": 1,
+                    "shortage_count": len(shortage_items) if shortage_items else 1,
                     "total_estimated_cost": baseline,
-                    "shortage_items": [{"item_id": "CI-RAW", "net_requirement": "1200"}],
+                    "shortage_items": shortage_items or [{"item_id": "CI-RAW", "net_requirement": "1200"}],
                 },
                 "supplier_options": options,
                 "recommended_option_id": options[0]["option_id"] if options else None,
@@ -245,3 +246,68 @@ class ProposalCollectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssessCombinationTests(unittest.IsolatedAsyncioTestCase):
+    """分单采购组合的确定性计算（阶段七）。"""
+
+    def _persist_split_plan(self, plan_id: str) -> None:
+        opt_a = _option("OPT-A", "600.00")
+        opt_a["items"] = [{"item_id": "CI-RAW", "unit_price": "12.5", "price_record": "rec-A", "line_total": "600.00"}]
+        opt_b = _option("OPT-B", "1500.00")
+        opt_b["items"] = [
+            {"item_id": "CI-RAW", "unit_price": "13.0", "price_record": "rec-B1", "line_total": "600.00"},
+            {"item_id": "M10-BOLT", "unit_price": "0.9", "price_record": "rec-B2", "line_total": "900.00"},
+        ]
+        _persist_plan(
+            plan_id, "QUO-CI", baseline="1000.00",
+            options=[opt_a, opt_b],
+            shortage_items=[
+                {"item_id": "CI-RAW", "net_requirement": "1200"},
+                {"item_id": "M10-BOLT", "net_requirement": "3000"},
+            ],
+        )
+
+    async def test_combination_math_coverage_and_overlap(self):
+        self._persist_split_plan("PROC-COMB1")
+        result = await real_order.assess_combination("PROC-COMB1", ["OPT-A", "OPT-B"])
+        self.assertEqual(result["status"], "ok")
+        # 组合成本 = 600 + 1500 = 2100（真实价格记录合计，无系数）
+        self.assertEqual(result["combined_cost"], "2100.00")
+        # 覆盖并集完整
+        self.assertTrue(result["coverage"]["complete"])
+        self.assertEqual(result["coverage"]["covered_items"], ["CI-RAW", "M10-BOLT"])
+        # CI-RAW 被两个选项同时覆盖 → 重复采购告警
+        self.assertEqual(result["overlapping_items"], ["CI-RAW"])
+        self.assertTrue(any("重复覆盖" in w for w in result["warnings"]))
+        # 证据链含两个选项的真实价格记录
+        record_ids = [e["record_id"] for e in result["evidence"]]
+        self.assertIn("rec-A", record_ids)
+        self.assertIn("rec-B2", record_ids)
+        self.assertIn("确定性计算", result["calculation_basis"])
+
+    async def test_single_option_leaves_shortage_uncovered(self):
+        self._persist_split_plan("PROC-COMB2")
+        result = await real_order.assess_combination("PROC-COMB2", ["OPT-A"])
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["coverage"]["complete"])
+        self.assertEqual(result["coverage"]["uncovered_items"], ["M10-BOLT"])
+        self.assertTrue(any("不构成完整采购方案" in w for w in result["warnings"]))
+
+    async def test_incomplete_pricing_blocks_decision(self):
+        bad = _option("OPT-BAD", "", complete=False)
+        _persist_plan("PROC-COMB3", "QUO-CI", baseline="1000.00", options=[bad])
+        result = await real_order.assess_combination("PROC-COMB3", ["OPT-BAD"])
+        self.assertEqual(result["status"], "DATA_MISSING")
+        self.assertTrue(any(f["field"] == "option_total_cost" for f in result["missing_fields"]))
+
+    async def test_unknown_option_reports_available(self):
+        self._persist_split_plan("PROC-COMB4")
+        result = await real_order.assess_combination("PROC-COMB4", ["OPT-NOPE"])
+        self.assertEqual(result["status"], "ERROR")
+        self.assertEqual(result["available_options"], ["OPT-A", "OPT-B"])
+
+    async def test_registered_on_aip_service(self):
+        from app.aip.agents.procurement_aip import create_procurement_aip_service
+        skills = {s["id"] for s in create_procurement_aip_service().list_skills()}
+        self.assertIn("procurement.assess_combination", skills)
