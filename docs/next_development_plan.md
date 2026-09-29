@@ -289,7 +289,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 2. ~~速率 ETA~~ 已完成代码与缺数分支（见 `current_status_and_fix_plan.md` §3.25）；真实工单当前无实际报工速率时明确返回 `DATA_MISSING`，积累数据后自动计算；
 3. **请求级身份会话治理**：接入浏览器用户的 ERPNext/OIDC 或 OpenMES 会话，避免服务端集成账号代表所有审批请求（当前仅完成服务端身份解析和角色门禁）；
 4. **NCR 写入真实验收**：在真实角色、令牌和审批对象绑定完善后，对 disposition/close 做最小范围回读验收（代码门禁、对象绑定和幂等已完成）；
-5. **Wutong 外部注册发现**：跨实例能力发现验证；Mock WebSocket 隔离和静态 ACS/运行注册表同步已完成。
+5. **Wutong 外部注册发现**：只读 ACPs discovery 查询通道已完成（见 `current_status_and_fix_plan.md` §3.27）；待部署提供 Registry 注册与鉴权契约后，继续做跨实例注册和 AIP 调用闭环。Mock WebSocket 隔离和静态 ACS/运行注册表同步已完成。
 
 ## 每次开发后必须记录
 

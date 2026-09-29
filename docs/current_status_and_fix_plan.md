@@ -993,4 +993,16 @@ ERP 物料需求
 4. `generate_acs.py` 现在生成与真实 AIP 运行表面一致的 ACS；四个静态 ACS 已重新生成，仅含当前真实技能（报价 4、采购 4、跟单 5、质量 3）。
 
 **验证**：身份、NCR 生命周期、ACS 同步定向回归 **14 passed**；前端构建和后端 `compileall` 通过。尚未对真实 NCR 执行写入，WebSocket 拒绝路径未写入业务数据。
+
+### 3.27 Wutong/ACPs 外部发现只读通道（2026-09-30）
+
+**已完成**：
+
+1. 根据仓库内 vendored ACPs Discovery 契约确认并实现 `WUTONG_DISCOVERY_URL` 客户端：`POST /discover` 请求 `type/query/limit/filter`，严格读取 `result.agents`、`result.acsMap`、`result.routes` 和可选 `aliveMap`；远端 `error`、格式缺失和 HTTP/网络错误均转为明确集成错误，不回退本地静态目录冒充外部发现。
+2. 新增只读 API `POST /api/real-orders/discovery/search` 与配置状态 `GET /api/runtime/discovery`。未配置 discovery URL 时返回 HTTP 503 `discovery_not_configured`；当前没有实现注册/写入远端 Registry，避免在未确认 Wutong 鉴权契约时误写外部系统。
+3. `IntegrationSettings.public_status()` 增加 Wutong discovery/registry/tenant 配置状态，不返回 URL 中的凭据；`.env.example` 标注 discovery 为可选只读接入。
+
+**验证**：Wutong 客户端成功响应、租户请求头、远端错误和无 `acsMap` 数据缺口测试通过；后端全量 **106 passed**、`compileall` 和前端构建通过。当前运行环境 `WUTONG_DISCOVERY_URL` 为空，因此真实 API 验证为 HTTP 503 配置缺口，没有外部网络写入。
+
+**边界与下一步**：跨实例调用仍需在获得 Wutong Registry 注册和鉴权契约后接入；当前 discovery 结果只读返回给业务侧，不改变协调者本地真实技能目录。
 ```

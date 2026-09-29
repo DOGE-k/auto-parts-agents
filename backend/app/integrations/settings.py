@@ -24,6 +24,12 @@ class IntegrationSettings:
     # 角色映射是 JSON 字符串，密钥可以是外部用户名或 "*"。
     real_identity_provider: str = "auto"
     real_identity_role_map: str = ""
+    # Optional ACPs/Wutong discovery endpoints. Discovery is read-only here;
+    # registration remains disabled until the deployment supplies its auth
+    # contract and tenant policy.
+    wutong_registry_url: str = ""
+    wutong_discovery_url: str = ""
+    wutong_tenant: str = ""
 
     @classmethod
     def from_environment(cls) -> "IntegrationSettings":
@@ -40,6 +46,9 @@ class IntegrationSettings:
             openmes_erp_api_key=os.getenv("OPENMES_ERP_API_KEY", "").strip(),
             real_identity_provider=os.getenv("REAL_IDENTITY_PROVIDER", "auto").strip().lower() or "auto",
             real_identity_role_map=os.getenv("REAL_IDENTITY_ROLE_MAP", "").strip(),
+            wutong_registry_url=os.getenv("WUTONG_REGISTRY_URL", "").strip(),
+            wutong_discovery_url=os.getenv("WUTONG_DISCOVERY_URL", "").strip(),
+            wutong_tenant=os.getenv("WUTONG_TENANT", "").strip(),
         )
 
     def public_status(self) -> dict[str, dict[str, bool | str]]:
@@ -59,5 +68,10 @@ class IntegrationSettings:
             "identity": {
                 "provider": self.real_identity_provider,
                 "role_map_configured": bool(self.real_identity_role_map),
+            },
+            "wutong": {
+                "registry_configured": bool(self.wutong_registry_url),
+                "discovery_configured": bool(self.wutong_discovery_url),
+                "tenant_configured": bool(self.wutong_tenant),
             },
         }

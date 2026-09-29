@@ -105,6 +105,58 @@ def runtime_surface() -> dict:
     return public_surface()
 
 
+@app.get("/api/runtime/discovery", tags=["system"])
+def runtime_discovery() -> dict:
+    """Expose external discovery configuration without revealing credentials."""
+    settings = IntegrationSettings.from_environment()
+    return {
+        "provider": "wutong",
+        "configured": bool(settings.wutong_discovery_url),
+        "registry_configured": bool(settings.wutong_registry_url),
+        "tenant_configured": bool(settings.wutong_tenant),
+        "read_only": True,
+        "contract": "ACPs ADP /discover",
+    }
+
+
+@app.post("/api/real-orders/discovery/search", tags=["real-orders"])
+async def real_order_discovery_search(body: dict) -> dict:
+    """Query an optional Wutong/ACPs discovery service (read-only)."""
+    settings = IntegrationSettings.from_environment()
+    if not settings.wutong_discovery_url:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "discovery_not_configured",
+                "message": "Wutong discovery 未配置 WUTONG_DISCOVERY_URL；未使用本地静态目录冒充外部发现",
+            },
+        )
+    from app.integrations.wutong import WutongDiscoveryClient
+
+    query = str((body or {}).get("query", ""))
+    discovery_type = str((body or {}).get("type", "explicit"))
+    try:
+        limit = int((body or {}).get("limit", 5))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="limit 必须是整数") from exc
+    filter_obj = (body or {}).get("filter")
+    client = WutongDiscoveryClient(
+        settings.wutong_discovery_url,
+        tenant=settings.wutong_tenant,
+    )
+    try:
+        return await client.discover(
+            query,
+            limit=limit,
+            discovery_type=discovery_type,
+            filter_obj=filter_obj if isinstance(filter_obj, dict) else None,
+        )
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    finally:
+        await client.aclose()
+
+
 def _integration_status_error(exc: IntegrationError) -> HTTPException:
     status_code = exc.status_code if exc.status_code in {401, 403, 404, 409, 422} else 502
     if exc.code == "not_configured":
