@@ -4,6 +4,12 @@ import RealBusinessPage from "./RealBusinessPage";
 
 type PageKey = "real-business" | "scenarios" | "dashboard" | "agents" | "plans" | "approvals" | "audit" | "mes-completions";
 type Snapshot = Record<string, any>;
+type RuntimeSurface = {
+  mock_demo_enabled: boolean;
+  real_business_enabled: boolean;
+  aip_mock_skills_enabled: boolean;
+  mock_api_prefixes: string[];
+};
 
 const navigation: { key: PageKey; label: string; icon: string; mock?: boolean }[] = [
   { key: "real-business", label: "真实业务", icon: "◆" },
@@ -30,6 +36,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+  const [runtimeSurface, setRuntimeSurface] = useState<RuntimeSurface | null>(null);
+  const mockDemoEnabled = runtimeSurface?.mock_demo_enabled ?? true;
+  const visibleNavigation = mockDemoEnabled ? navigation : navigation.filter((item) => !item.mock);
 
   const refreshProjects = useCallback(async () => {
     const data = await api<Project[]>("/projects");
@@ -53,12 +62,14 @@ function App() {
 
   const refreshAll = useCallback(async () => {
     try {
-      await refreshProjects();
-      if (projectId) await refreshProject(projectId);
+      if (runtimeSurface?.mock_demo_enabled) {
+        await refreshProjects();
+        if (projectId) await refreshProject(projectId);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "连接本地服务失败");
     }
-  }, [projectId, refreshProject, refreshProjects]);
+  }, [projectId, refreshProject, refreshProjects, runtimeSurface]);
 
   const refreshCompletions = useCallback(async () => {
     setCompletionsLoading(true);
@@ -77,25 +88,44 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void refreshProjects().catch((e) => setError(e instanceof Error ? e.message : "连接本地服务失败"));
-    void api("/health").then(() => setError("")).catch((e) => setError(e instanceof Error ? e.message : "连接本地服务失败"));
-  }, []);
+    void Promise.all([api<RuntimeSurface>("/runtime/surface"), api("/health")])
+      .then(([surface]) => {
+        setRuntimeSurface(surface);
+        if (surface.mock_demo_enabled) {
+          void refreshProjects().catch((e) => setError(e instanceof Error ? e.message : "连接本地服务失败"));
+        }
+        setError("");
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "连接本地服务失败"));
+  }, [refreshProjects]);
 
   useEffect(() => {
+    if (runtimeSurface && !runtimeSurface.mock_demo_enabled && page !== "real-business" && page !== "mes-completions") {
+      setPage("real-business");
+    }
+  }, [page, runtimeSurface]);
+
+  useEffect(() => {
+    if (!runtimeSurface?.mock_demo_enabled) {
+      setProjectId("");
+      setSnapshot(null);
+      setEvents([]);
+      return;
+    }
     if (!projectId) {
       setSnapshot(null);
       setEvents([]);
       return;
     }
     void refreshProject(projectId).catch((e) => setError(e instanceof Error ? e.message : "加载项目失败"));
-  }, [projectId, refreshProject]);
+  }, [projectId, refreshProject, runtimeSurface]);
 
   useEffect(() => {
     if (page === "mes-completions") void refreshCompletions();
   }, [page, refreshCompletions]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!runtimeSurface?.mock_demo_enabled || !projectId) return;
     const stream = new WebSocket(`ws://127.0.0.1:8001/api/projects/${projectId}/stream`);
     stream.onmessage = (message) => {
       try {
@@ -107,7 +137,7 @@ function App() {
       } catch { /* Ignore heartbeat frames. */ }
     };
     return () => stream.close();
-  }, [projectId, refreshProject]);
+  }, [projectId, refreshProject, runtimeSurface]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -179,7 +209,7 @@ function App() {
         </div>
         <div className="sidebar-caption">工作空间</div>
         <nav className="nav-list">
-          {navigation.map((item) => (
+          {visibleNavigation.map((item) => (
             <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
               <span className="nav-icon">{item.icon}</span>{item.label}
               {item.mock && <span className="nav-mock-badge">Mock</span>}
@@ -209,7 +239,7 @@ function App() {
               <i />
               {page === "real-business" ? "ERPNext + OpenMES 真实数据" : "Mock + OpenMES 只读"}
             </div>
-            {projects.length > 0 && page !== "real-business" && page !== "mes-completions" && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+            {mockDemoEnabled && projects.length > 0 && page !== "real-business" && page !== "mes-completions" && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.project_id} value={item.project_id}>{item.project_id} · {item.scenario === "normal_order" ? "正常订单" : item.scenario === "material_shortage" ? "缺料协作" : item.scenario === "quality_hold" ? "质量冻结" : "订单加急"}</option>)}
             </select>}
             <button className="icon-button" title="刷新" onClick={() => void refreshAll()}>↻</button>

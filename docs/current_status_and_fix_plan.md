@@ -891,7 +891,7 @@ ERP 物料需求
 **遗留与下一步**：
 
 - 当前真实部署使用 ERPNext 集成账号 `Administrator` 作为上游认证主体；接入企业 SSO/OIDC 后，将 `REAL_IDENTITY_PROVIDER` 替换为对应 provider 或扩展同一解析接口即可，审批接口无需改动。
-- NCR `close/disposition` 与纠正措施校验已接入（见 §3.23）；订单级质量放行仍为 `NOT_SUPPORTED`，随后处理 Mock 后端隔离、速率 ETA、Wutong 外部发现。
+- NCR `close/disposition` 与纠正措施校验已接入（见 §3.23）；订单级质量放行仍为 `NOT_SUPPORTED`，随后处理速率 ETA、Wutong 外部发现。
 
 ### 3.23 NCR disposition / close 与纠正措施校验（2026-09-30）
 
@@ -909,6 +909,22 @@ ERP 物料需求
 - 真实 OpenMES 质量包返回 NCR 能力 `AVAILABLE_WITH_APPROVAL`，`unsupported_capabilities` 仅剩订单级质量放行。
 - 新增客户端/服务层生命周期测试 **5 passed**；阶段相关定向回归 **18 passed**；全量回归、compileall 和前端构建在提交前复验。
 - 本阶段没有对真实 NCR 执行 disposition 或 close 写入；所有真实验证均为只读，写入仍必须经过真实用户角色 + 服务端令牌 + 两步审批。
+
+### 3.24 Mock 后端与真实业务表面隔离（2026-09-30）
+
+**实现内容**：
+
+1. 新增 `MOCK_DEMO_ENABLED` 运行时开关。未显式配置时，`APP_ADAPTER_MODE=real` 自动只暴露真实业务表面；设置为 `true` 才允许合成场景与真实链共存。
+2. 真实表面中间件拦截旧 Mock 路由（`/api/projects`、`/api/scenarios`、`/api/approvals`、`/api/agents`、`/api/plans`、`/api/audit`、`/api/replay`、旧 `/api/quotation`），返回 404 `mock_surface_disabled`，不会把 synthetic_demo_only 数据误当业务数据。
+3. AIP 服务新增技能收缩能力；真实表面只暴露协调者 `REAL_SKILL_TOOLS` 中的真实技能，Mock AIP 技能不再从真实 RPC 路由可见。开发/演示表面仍保留原 Mock 技能。
+4. 新增 `GET /api/runtime/surface`；前端按返回能力隐藏 Mock 导航，真实页面和 MES 完工读取入口保持可用。
+
+**验证**：
+
+- 9000 重启后 `GET /api/runtime/surface` 返回 HTTP 200：`mock_demo_enabled=false`、`aip_mock_skills_enabled=false`；访问 `GET /api/projects` 返回 HTTP 404 `mock_surface_disabled`。
+- `GET /aip/quotation/health` 只列出 4 个真实报价技能，未暴露 `quotation.calculate_cost/create_draft` 等 Mock 技能。
+- 定向隔离测试 **3 passed**；相关协调者/ACS 回归 **16 passed**；全量后端 **99 passed**；前端构建通过。
+- 真实 ERPNext/OpenMES 数据链没有写入；本阶段仅改变路由暴露和页面导航。
 
 ## 8. 当前结论
 
@@ -940,10 +956,10 @@ ERP 物料需求
 加急场景诚实给出"物料不是瓶颈、ETA 缺排程数据"；讨论稿例子二/例子四落地
 执行闭环（阶段七）验收通过：方案卡片批准→审批门禁→PO 草稿回读（PUR-ORD-2026-00009/00010）；
 状态联动复验通过（协调者查到方案状态/审批号/PO 草稿号）
-阶段八（质量异常协同 + 审批一致性）✅ 已完成（§3.17/§3.18/§3.20）：编号→数字 id 桥接、报价状态一致性、审批/草稿幂等保护、方案覆盖一致性、真实 DeepSeek 问答和双审批 ERP 写入均已完成（83 passed）；
-阶段八改动已提交：`8ef554c`；ACS 同步与身份治理随后分别提交，当前工作树仅保留本地运行日志/验收输入文件。
+阶段八（质量异常协同 + 审批一致性）✅ 已完成（§3.17/§3.18/§3.20/§3.22/§3.23/§3.24）：编号→数字 id 桥接、报价状态一致性、审批/草稿幂等保护、真实身份角色门禁、NCR 处置校验、Mock/真实表面隔离、真实 DeepSeek 问答和双审批 ERP 写入均已完成（99 passed）；
+阶段八及后续收尾提交：`8ef554c`、`fcf0d0b`、`e8d09e4`、`f92a78a`，Mock 隔离提交随后完成。
 工程可维护性已修正：核心 `backend/app/services` 已重新纳入 Git 可见范围
 测试与安全：pytest 独立测试库（90 passed）、失败验证矩阵补齐、无硬编码凭据；身份来源与角色门禁已接入，ACS 已与真实 AIP 注册表同步。
 仍余（生产可用验收前）：检验数据补录决策、订单级质量放行、
-旧 Mock 场景后端隔离、速率 ETA、Wutong 外部发现、企业 SSO/OIDC 身份源接入
+速率 ETA、Wutong 外部发现、企业 SSO/OIDC 身份源接入
 ```

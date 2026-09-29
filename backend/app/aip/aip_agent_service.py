@@ -79,6 +79,13 @@ class AipAgentService(CommandHandlers):
             for sid in self._skill_handlers
         ]
 
+    def restrict_skills(self, allowed_ids: set[str]) -> None:
+        """在真实运行表面移除 Mock 技能，防止 AIP 路由越过业务边界。"""
+        for skill_id in list(self._skill_handlers):
+            if skill_id not in allowed_ids:
+                self._skill_handlers.pop(skill_id, None)
+                self._skill_names.pop(skill_id, None)
+
     async def _handle_start(
         self, command: TaskCommand, task: Optional[TaskResult]
     ) -> TaskResult:

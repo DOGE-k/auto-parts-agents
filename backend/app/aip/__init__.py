@@ -50,6 +50,22 @@ def init_aip_agents(app: FastAPI) -> None:
     _tracking_service = create_tracking_aip_service()
     _quality_document_service = create_quality_document_aip_service()
 
+    # 真实表面只公开协调者能力目录中的真实技能；Mock 技能仍可在开发
+    # 表面（MOCK_DEMO_ENABLED=true 或非 real 适配器）使用。
+    from app.runtime.surface import mock_demo_enabled
+    if not mock_demo_enabled():
+        from app.services.coordinator import REAL_SKILL_TOOLS
+        allowed = {
+            "quotation": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "quotation"},
+            "procurement": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "procurement"},
+            "tracking": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "tracking"},
+            "quality_document": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "quality-document"},
+        }
+        _quotation_service.restrict_skills(allowed["quotation"])
+        _procurement_service.restrict_skills(allowed["procurement"])
+        _tracking_service.restrict_skills(allowed["tracking"])
+        _quality_document_service.restrict_skills(allowed["quality_document"])
+
     # 注册到 FastAPI
     register_aip_agent_router(
         app, _quotation_service, "/aip/quotation/rpc"

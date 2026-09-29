@@ -13,6 +13,7 @@ load_dotenv(PROJECT_ROOT / ".env", override=False)
 load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -69,6 +70,24 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def isolate_mock_api(request, call_next):
+    """真实表面拒绝旧 Mock 场景 API，避免误把演示数据当业务数据。"""
+    from app.runtime.surface import mock_demo_enabled, public_surface
+
+    if not mock_demo_enabled():
+        path = request.url.path
+        if any(path == prefix or path.startswith(prefix + "/") for prefix in public_surface()["mock_api_prefixes"]):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "code": "mock_surface_disabled",
+                    "message": "Mock 演示 API 已隔离；请设置 MOCK_DEMO_ENABLED=true 或使用真实业务入口",
+                },
+            )
+    return await call_next(request)
+
+
 def _row_dict(row) -> dict:
     return {column.name: getattr(row, column.name) for column in row.__table__.columns}
 
@@ -77,6 +96,13 @@ def _row_dict(row) -> dict:
 def health(session: Session = Depends(get_session)) -> dict[str, str]:
     session.execute(text("SELECT 1"))
     return {"status": "ok", "mode": "local-runtime", "database": "connected"}
+
+
+@app.get("/api/runtime/surface", tags=["system"])
+def runtime_surface() -> dict:
+    """公开当前 API 表面，前端据此隐藏被隔离的 Mock 导航。"""
+    from app.runtime.surface import public_surface
+    return public_surface()
 
 
 def _integration_status_error(exc: IntegrationError) -> HTTPException:
