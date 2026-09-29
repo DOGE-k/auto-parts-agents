@@ -181,6 +181,15 @@ class OpenMESAdapter:
                         "work_center": step.get("workstation", ""),
                         "start_time": step.get("started_at", ""),
                         "end_time": step.get("finished_at", ""),
+                        # These are execution facts, not planned schedule values.
+                        # Keep them explicit so ETA cannot accidentally use a
+                        # planned start as an observed production rate sample.
+                        "actual_start_at": step.get("started_at", ""),
+                        "actual_end_at": step.get("finished_at", ""),
+                        "actual_elapsed_minutes": step.get("actual_elapsed_minutes"),
+                        "actual_run_minutes": step.get("actual_run_minutes"),
+                        "run_time_per_unit_minutes": step.get("run_time_per_unit_minutes"),
+                        "passed_qty": str(step.get("passed_qty", step.get("completed_qty", 0))),
                         "authority": self.authority,
                         "data_source": "openmes_api",
                     }
@@ -198,8 +207,18 @@ class OpenMESAdapter:
                     "rejected_qty": "0",
                     "status": status,
                     "work_center": line.get("name", ""),
-                    "start_time": data.get("planned_start_at", ""),
-                    "end_time": data.get("planned_end_at", ""),
+                    # The overall row has no observed timing when the order has
+                    # not started. Planned dates are kept separately and are
+                    # never used as rate observations.
+                    "start_time": data.get("actual_start_at", ""),
+                    "end_time": data.get("completed_at", ""),
+                    "actual_start_at": data.get("actual_start_at", ""),
+                    "actual_end_at": data.get("completed_at", ""),
+                    "planned_start_at": data.get("planned_start_at", ""),
+                    "planned_end_at": data.get("planned_end_at", ""),
+                    "actual_elapsed_minutes": data.get("actual_elapsed_minutes"),
+                    "actual_run_minutes": data.get("actual_run_minutes"),
+                    "passed_qty": str(produced),
                     "due_date": data.get("due_date", ""),
                     "authority": self.authority,
                     "data_source": "openmes_api",
@@ -327,7 +346,25 @@ class OpenMESAdapter:
                 "batch_id": str(r.get("id", "")),
                 "lot_number": r.get("lot_number", ""),
                 "target_qty": str(r.get("target_qty", "")),
+                "produced_qty": str(r.get("produced_qty", "")),
                 "status": r.get("status", ""),
+                "started_at": r.get("started_at", ""),
+                "completed_at": r.get("completed_at", ""),
+                "steps": [
+                    {
+                        "step_id": str(step.get("id", "")),
+                        "step_number": step.get("step_number"),
+                        "name": step.get("name", ""),
+                        "status": step.get("status", ""),
+                        "passed_qty": str(step.get("passed_qty", "")),
+                        "started_at": step.get("started_at", ""),
+                        "completed_at": step.get("completed_at", ""),
+                        "actual_elapsed_minutes": step.get("actual_elapsed_minutes"),
+                        "actual_run_minutes": step.get("actual_run_minutes"),
+                    }
+                    for step in (r.get("steps") or [])
+                    if isinstance(step, dict)
+                ],
                 "authority": self.authority,
                 "data_source": "openmes_api",
             }

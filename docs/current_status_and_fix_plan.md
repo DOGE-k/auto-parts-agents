@@ -18,6 +18,8 @@
 
 没有实际运行结果的内容，只能写成“计划”或“待验证”，不能写成“已完成”。
 
+> 本文后续追加的阶段记录优先于早期快照；早期章节保留历史验收上下文。
+
 ## 1. 用户的最终要求
 
 用户所说的“demo”是本地可运行版本，但业务数据必须来自本地已经部署的 ERP 和 MES。
@@ -962,4 +964,22 @@ ERP 物料需求
 测试与安全：pytest 独立测试库（90 passed）、失败验证矩阵补齐、无硬编码凭据；身份来源与角色门禁已接入，ACS 已与真实 AIP 注册表同步。
 仍余（生产可用验收前）：检验数据补录决策、订单级质量放行、
 速率 ETA、Wutong 外部发现、企业 SSO/OIDC 身份源接入
+
+### 3.25 速率 ETA：真实执行速率或明确缺数（2026-09-30）
+
+**已完成**：
+
+1. OpenMES 适配器保留 `process_snapshot.steps` 和批次工序中的实际执行字段：`completed_qty/passed_qty`、`started_at/completed_at`、`actual_elapsed_minutes/actual_run_minutes`；计划开始/结束时间单独保留，不能被当作实际耗时。
+2. `track_order` 新增观测速率 ETA：使用最后一个有效工序样本的实际产量 ÷ 实际耗时，计算剩余产量和剩余小时；输出 `eta_status=RATE_BASED`、`eta_basis=observed_production_rate`、`observed_rate` 和来源字段。顺序工序可能重复报告同一数量，因此不跨工序累加。
+3. 没有同时具备实际产量与实际耗时/开始时间时，输出 `eta=null`、`eta_status=DATA_MISSING` 和明确 `eta_data_gaps`；`due_date` 仅作为交期字段和风险依据，禁止作为 ETA 占位。已完成工单仅在真实状态为终态时标记 `COMPLETED`。
+4. 跟单页面显示 ETA 状态、速率依据或缺失原因，避免把交期日期误显示成生产预测。
+
+**验证**：
+
+- `GET /api/real-orders/mes/track/2`：HTTP 200，真实 OpenMES 工单 `WO-2026-001`，`completed_qty=0`；返回 `eta=null`、`eta_status=DATA_MISSING`，明确说明没有实际速率记录，未使用 `due_date=2026-10-15` 冒充 ETA。
+- 9000 后端已重启并加载新代码；`/aip/tracking/health` 真实技能注册正常，Mock 表面仍关闭。
+- 速率 ETA 定向测试 3 passed；后端全量 **102 passed**；`compileall` 和前端 `npm run build` 通过。
+- 本阶段没有写入 ERPNext/OpenMES；真实复验为只读。
+
+**边界与遗留**：当前生产工单没有历史报工速率，因此真实页面只能给出 `DATA_MISSING`。积累含实际耗时和实际产量的 OpenMES 工序/批次记录后，下一次查询会自动切换到速率 ETA；在此之前不提供固定天数预测。身份请求级会话、NCR 写入验收、WebSocket Mock 隔离和 Wutong 发现仍是后续任务。
 ```

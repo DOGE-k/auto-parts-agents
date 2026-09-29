@@ -522,6 +522,10 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
             "work_order_id": work_order_id,
             "status": "NOT_FOUND",
             "eta": None,
+            "eta_status": "DATA_MISSING",
+            "eta_basis": "work_order_not_found",
+            "observed_rate": None,
+            "eta_data_gaps": [{"field": "work_order", "detail": "工单不存在，无法读取实际生产速率"}],
             "risks": [{"level": "high", "message": "工单不存在"}],
             "progress": [],
             "authority": "OpenMES",
@@ -550,10 +554,28 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
             "message": f"存在 {len(open_quality_issues)} 个未关闭质量问题",
         })
 
-    # 5. ETA 估算
-    eta = None
-    if due_date:
-        eta = due_date
+    # 5. ETA 估算。只允许使用真实执行记录推导速率；due_date 是客户交期，
+    # 不是生产 ETA，不能在没有速率时冒充预测结果。
+    batches: list[dict[str, Any]] = []
+    batch_error = ""
+    try:
+        batches = await mes.get_work_order_batches(work_order_id)
+    except Exception as exc:
+        batch_error = str(exc)
+        logger.warning("读取 OpenMES 批次速率数据失败 (wo=%s): %s", work_order_id, exc)
+    eta_result = _estimate_eta_from_observed_rate(
+        planned=planned,
+        completed=completed,
+        progress=progress,
+        batches=batches,
+        status=str(wo.get("status", "")),
+        now=_utc_now(),
+    )
+    if batch_error and eta_result["eta_status"] == "DATA_MISSING":
+        eta_result["data_gaps"].append({
+            "field": "batches",
+            "detail": f"OpenMES 批次执行记录读取失败：{batch_error}",
+        })
 
     return {
         "work_order_id": work_order_id,
@@ -563,7 +585,11 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
         "completed_qty": str(completed),
         "completion_rate": round(completion_rate, 2),
         "due_date": due_date,
-        "eta": eta,
+        "eta": eta_result["eta"],
+        "eta_status": eta_result["eta_status"],
+        "eta_basis": eta_result["eta_basis"],
+        "observed_rate": eta_result["observed_rate"],
+        "eta_data_gaps": eta_result["data_gaps"],
         "risks": risks,
         "progress": progress,
         "quality_issues": quality_records,
@@ -571,6 +597,149 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
         "authority": "OpenMES",
         "data_source": "openmes_api",
         "calculated_at": _utc_now().isoformat(),
+    }
+
+
+def _parse_observed_time(value: Any) -> datetime | None:
+    """Parse an OpenMES timestamp while rejecting empty/planned-only values."""
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _positive_decimal(value: Any) -> Decimal | None:
+    try:
+        number = Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _rate_sample(row: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+    """Build one observed rate sample from an operation/batch execution row."""
+    qty = next(
+        (candidate for key in ("completed_qty", "passed_qty", "produced_qty")
+         if (candidate := _positive_decimal(row.get(key))) is not None),
+        None,
+    )
+    if qty is None:
+        return None
+
+    elapsed_minutes = next(
+        (candidate for key in ("actual_elapsed_minutes", "actual_run_minutes")
+         if (candidate := _positive_decimal(row.get(key))) is not None),
+        None,
+    )
+    started = _parse_observed_time(row.get("actual_start_at") or row.get("started_at"))
+    ended = _parse_observed_time(row.get("actual_end_at") or row.get("completed_at"))
+    if elapsed_minutes is None and started is not None:
+        end = ended or now
+        seconds = (end - started).total_seconds()
+        if seconds > 0:
+            elapsed_minutes = Decimal(str(seconds / 60))
+    if elapsed_minutes is None or elapsed_minutes <= 0:
+        return None
+
+    rate = qty / elapsed_minutes * Decimal("60")
+    if rate <= 0:
+        return None
+    return {
+        "quantity": str(qty),
+        "elapsed_minutes": round(float(elapsed_minutes), 2),
+        "units_per_hour": round(float(rate), 4),
+        "started_at": started.isoformat() if started else "",
+        "completed_at": ended.isoformat() if ended else "",
+        "source": row.get("operation_id") or row.get("step_id") or row.get("batch_id") or "",
+    }
+
+
+def _estimate_eta_from_observed_rate(
+    *,
+    planned: Decimal,
+    completed: Decimal,
+    progress: list[dict[str, Any]],
+    batches: list[dict[str, Any]],
+    status: str,
+    now: datetime,
+) -> dict[str, Any]:
+    """Estimate completion from observed MES execution rate only.
+
+    The latest valid operation sample is used because sequential operations may
+    report the same quantity more than once. A due date or planned start is
+    deliberately excluded from this calculation.
+    """
+    missing = []
+    if planned <= 0:
+        missing.append({"field": "planned_qty", "detail": "工单缺少 planned_qty，无法计算剩余产量"})
+    if completed < 0:
+        missing.append({"field": "produced_qty", "detail": "工单 produced_qty 无效"})
+    if planned > 0 and completed >= planned and status.upper() in {"DONE", "COMPLETED", "CLOSED"}:
+        return {
+            "eta": None,
+            "eta_status": "COMPLETED",
+            "eta_basis": "observed_completion",
+            "observed_rate": None,
+            "data_gaps": [],
+        }
+
+    rows: list[dict[str, Any]] = list(progress)
+    # Batch steps are a fallback when the work-order snapshot has no execution
+    # timing. They are flattened without summing quantities across steps.
+    for batch in batches:
+        for step in batch.get("steps") or []:
+            if isinstance(step, dict):
+                rows.append({**step, "batch_id": batch.get("batch_id", "")})
+        if not batch.get("steps"):
+            rows.append(batch)
+
+    samples = [sample for row in rows if isinstance(row, dict) and (sample := _rate_sample(row, now))]
+    if not samples:
+        missing.append({
+            "field": "observed_production_rate",
+            "detail": "OpenMES 没有同时包含实际产量和实际耗时/开始时间的执行记录，禁止用 due_date 或固定天数推算 ETA",
+        })
+        return {
+            "eta": None,
+            "eta_status": "DATA_MISSING",
+            "eta_basis": "missing_observed_rate",
+            "observed_rate": None,
+            "data_gaps": missing,
+        }
+
+    sample = samples[-1]
+    # Recompute from the unrounded sample values; the displayed rate is rounded
+    # for readability and must not shift the ETA by seconds.
+    rate = Decimal(str(sample["quantity"])) / Decimal(str(sample["elapsed_minutes"])) * Decimal("60")
+    remaining = max(Decimal("0"), planned - completed)
+    if remaining <= 0:
+        return {
+            "eta": sample.get("completed_at") or now.isoformat(),
+            "eta_status": "RATE_BASED",
+            "eta_basis": "observed_production_rate",
+            "observed_rate": sample,
+            "data_gaps": [],
+        }
+    hours = remaining / rate
+    eta = now + timedelta(seconds=float(hours) * 3600)
+    return {
+        "eta": eta.isoformat(),
+        "eta_status": "RATE_BASED",
+        "eta_basis": "observed_production_rate",
+        "observed_rate": {
+            **sample,
+            "remaining_qty": str(remaining),
+            "estimated_remaining_hours": round(float(hours), 2),
+        },
+        "data_gaps": [],
     }
 
 

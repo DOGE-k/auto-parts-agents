@@ -75,6 +75,10 @@ type TrackingInfo = {
   completion_rate: number;
   due_date: string;
   eta: string | null;
+  eta_status?: "RATE_BASED" | "DATA_MISSING" | "COMPLETED" | string;
+  eta_basis?: string;
+  observed_rate?: { units_per_hour?: number; remaining_qty?: string; estimated_remaining_hours?: number; source?: string } | null;
+  eta_data_gaps?: { field: string; detail: string }[];
   risks: Record<string, any>[];
   line_name: string;
   authority: string;
@@ -1518,6 +1522,17 @@ export default function RealBusinessPage() {
                   完成率: {tracking.completion_rate}% ({tracking.completed_qty} /{" "}
                   {tracking.quantity})
                 </p>
+                <div className="tracking-row">
+                  <span>生产 ETA</span>
+                  <strong>{tracking.eta ?? "数据不足，未预测"}</strong>
+                </div>
+                <small className="muted-text">
+                  {tracking.eta_status === "RATE_BASED"
+                    ? `依据 OpenMES 实际速率 ${tracking.observed_rate?.units_per_hour ?? "—"} 件/小时`
+                    : tracking.eta_status === "COMPLETED"
+                      ? "工单已完成"
+                      : "缺少实际产量与耗时记录，未使用交期或固定天数代替 ETA"}
+                </small>
                 {tracking.risks.length > 0 && (
                   <div className="risk-list">
                     <small>风险预警</small>
