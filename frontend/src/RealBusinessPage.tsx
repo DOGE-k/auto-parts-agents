@@ -5,6 +5,7 @@ import type {
   AgentRunDetail,
   AgentRunEvidenceItem,
   AssistantAnswer,
+  ProposalSupplierOption,
 } from "./api";
 
 // ========== 类型定义 ==========
@@ -209,6 +210,44 @@ type ProcurementApproval = {
 };
 
 // ========== 页面组件 ==========
+// 轻量 Markdown 渲染（协调者回答）：先转义 HTML，再恢复标题/加粗/表格结构。
+// 内容来源是本系统协调者与真实工具结果，无用户富文本输入面。
+function formatAssistantAnswer(text: string): string {
+  const esc = text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = esc.split("\n");
+  const out: string[] = [];
+  let tableRows: string[][] = [];
+  const bold = (s: string) => s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+  const flushTable = () => {
+    if (tableRows.length === 0) return;
+    // 第二行是分隔行（---），跳过
+    const body = tableRows.filter((cells, i) => !(i === 1 && cells.every((c) => /^:?-{2,}:?$/.test(c.trim()))));
+    const rows = body.map((cells) => `<tr>${cells.map((c) => `<td>${bold(c.trim())}</td>`).join("")}</tr>`).join("");
+    out.push(`<table class="md-table">${rows}</table>`);
+    tableRows = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      tableRows.push(trimmed.slice(1, -1).split("|"));
+      continue;
+    }
+    flushTable();
+    if (/^#{1,4}\s/.test(trimmed)) {
+      out.push(`<div class="md-heading">${bold(trimmed.replace(/^#{1,4}\s/, ""))}</div>`);
+    } else if (trimmed === "") {
+      out.push('<div class="md-gap"></div>');
+    } else {
+      out.push(`<div class="md-line">${bold(trimmed)}</div>`);
+    }
+  }
+  flushTable();
+  return out.join("");
+}
+
 export default function RealBusinessPage() {
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -599,7 +638,62 @@ export default function RealBusinessPage() {
         </div>
         {assistantAnswer && (
           <div className="assistant-result">
-            <div className="assistant-answer">{assistantAnswer.answer}</div>
+            <div
+              className="assistant-answer md-body"
+              dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(assistantAnswer.answer) }}
+            />
+            {assistantAnswer.proposal_options && (
+              <div className="proposal-block">
+                <small>可执行方案（真实工具结果汇集；最终由人工确认，执行请走 8 步审批流程）</small>
+                {assistantAnswer.proposal_options.shortage && (
+                  <div className="proposal-shortage">
+                    缺料 {assistantAnswer.proposal_options.shortage.shortage_count} 项：
+                    {assistantAnswer.proposal_options.shortage.shortage_items
+                      .map((s) => `${s.item_id}(缺 ${s.net_requirement ?? "?"})`)
+                      .join("、")}
+                  </div>
+                )}
+                <div className="proposal-cards">
+                  {(assistantAnswer.proposal_options.supplier_options ?? []).map((opt: ProposalSupplierOption) => {
+                    const cost = (assistantAnswer.proposal_options?.cost_assessments ?? []).find((c) => c.option_id === opt.option_id);
+                    return (
+                      <div key={opt.option_id} className={`proposal-card ${opt.is_recommended ? "recommended" : ""}`}>
+                        <div className="proposal-card-head">
+                          <strong>{opt.supplier_name}</strong>
+                          {opt.is_recommended && <span className="badge green">推荐</span>}
+                          <span className="proposal-coverage">{opt.coverage} 项覆盖</span>
+                        </div>
+                        <div className="proposal-card-row"><span>采购总价</span><strong>{opt.total_cost ? `${opt.total_cost} ${opt.currency}` : "价格数据不完整"}</strong></div>
+                        <div className="proposal-card-row"><span>交期(天)</span><strong>{opt.lead_time_days ?? "缺数据"}</strong></div>
+                        {cost && (
+                          <>
+                            <div className="proposal-card-row">
+                              <span>成本影响</span>
+                              <strong className={cost.material_cost_delta.startsWith("-") ? "text-green" : "text-red"}>
+                                {cost.material_cost_delta.startsWith("-") ? "" : "+"}{cost.material_cost_delta} {cost.currency}
+                              </strong>
+                            </div>
+                            <div className="proposal-card-row"><span>单件加价</span><strong>{cost.per_unit_surcharge ? `${cost.per_unit_surcharge} ${cost.currency}` : "—"}</strong></div>
+                            <div className="proposal-card-row"><span>材料毛利</span><strong>{cost.material_margin_before} → {cost.material_margin_after}</strong></div>
+                          </>
+                        )}
+                        <div className="proposal-card-note">{opt.recommendation_reason}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {(assistantAnswer.proposal_options.delivery_assessments ?? []).map((d, idx) => (
+                  <div key={idx} className={`proposal-delivery ${d.verdict === "arrival_after_due" ? "late" : "ok"}`}>
+                    交期影响：{d.conclusion}（到货 {d.material_ready_date} vs 交期 {d.due_date}）
+                  </div>
+                ))}
+                {(assistantAnswer.proposal_options.data_missing ?? []).map((m, idx) => (
+                  <div key={idx} className="proposal-missing">
+                    数据缺失（{m.source_skill}）：{m.missing_fields.map((f) => f.detail).join("；")} → {m.need}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="assistant-chain">
               <small>
                 调用链（{assistantAnswer.tool_count} 次智能体调用 · {assistantAnswer.rounds} 轮推理 · 记录 {assistantAnswer.coordination_run_id}）

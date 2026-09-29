@@ -58,6 +58,29 @@ def create_quotation_aip_service(aic: str = "local-quotation-001") -> AipAgentSe
         handler=real_get,
     )
 
+    async def real_find_by_erp_order(inputs: dict) -> dict:
+        """按 ERP 销售订单号反查关联报价（问答链：工单/订单 → 报价 → 采购方案）。"""
+        return await real_order.find_quotation_by_erp_order(str(inputs["erp_order_id"]))
+
+    service.register_skill(
+        skill_id="quotation.find_real_by_erp_order",
+        skill_name="按 ERP 订单号查找报价",
+        handler=real_find_by_erp_order,
+    )
+
+    async def real_assess_cost(inputs: dict) -> dict:
+        """真实成本影响评估：缺料换供应商方案对订单收入/毛利的影响（材料口径）。"""
+        return await real_order.assess_cost_impact(
+            plan_id=str(inputs["plan_id"]),
+            option_id=str(inputs["option_id"]),
+        )
+
+    service.register_skill(
+        skill_id="quotation.assess_cost_impact",
+        skill_name="成本影响评估（缺料方案）",
+        handler=real_assess_cost,
+    )
+
     # ===== Mock 场景演示技能（合成数据，不用于真实业务结果） =====
 
     # 注册技能：成本计算

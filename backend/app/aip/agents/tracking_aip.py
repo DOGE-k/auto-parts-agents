@@ -59,6 +59,19 @@ def create_tracking_aip_service(aic: str = "local-tracking-001") -> AipAgentServ
         handler=real_ship_gate,
     )
 
+    async def real_delivery_impact(inputs: dict) -> dict:
+        """真实交期影响评估：物料到货时间（由采购方案 lead_time 推算）vs 工单交期。"""
+        return await real_order.assess_delivery_impact(
+            work_order_id=str(inputs["work_order_id"]),
+            material_ready_date=str(inputs["material_ready_date"]),
+        )
+
+    service.register_skill(
+        skill_id="tracking.assess_delivery_impact",
+        skill_name="交期影响评估（物料到货 vs 工单交期）",
+        handler=real_delivery_impact,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 交期预估

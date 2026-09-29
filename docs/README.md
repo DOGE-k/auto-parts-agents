@@ -15,3 +15,4 @@
 - `project_summary.md`
 
 归档说明见 [obsolete/README.md](obsolete/README.md)。
+origin: https://github.com/AIP-PUB/ACPs-community.git (v2.2.0, .git 已移除转为 vendored 文件)

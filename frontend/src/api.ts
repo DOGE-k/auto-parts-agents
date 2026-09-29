@@ -164,6 +164,71 @@ export type AssistantAnswer = {
   coordination_run_id: string;
   authority: string;
   context: Record<string, unknown>;
+  proposal_options?: ProposalOptions | null;
+};
+
+// 方案化协同（阶段六）：真实工具结果原样汇集，前端渲染方案对比卡片
+export type ProposalShortageItem = {
+  item_id: string;
+  item_name?: string;
+  net_requirement?: string;
+  unit_price?: string;
+  price_status?: string;
+  suppliers?: string[];
+};
+
+export type ProposalSupplierOption = {
+  option_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  lead_time_days: number | null;
+  covers_all_shortage_items: boolean;
+  coverage: string;
+  total_cost: string;
+  total_cost_complete: boolean;
+  currency: string;
+  is_recommended: boolean;
+  recommendation_reason: string;
+};
+
+export type ProposalCostAssessment = {
+  option_id: string;
+  supplier_name: string;
+  covers_all_shortage_items?: boolean;
+  revenue: string;
+  currency: string;
+  material_cost_baseline: string;
+  material_cost_with_option: string;
+  material_cost_delta: string;
+  per_unit_surcharge: string;
+  material_margin_before: string;
+  material_margin_after: string;
+  calculation_basis: string;
+};
+
+export type ProposalDeliveryAssessment = {
+  work_order_id: string;
+  work_order_no: string;
+  due_date: string;
+  material_ready_date: string;
+  buffer_days: number;
+  verdict: string;
+  conclusion: string;
+};
+
+export type ProposalOptions = {
+  plan_id?: string;
+  quotation_id?: string;
+  shortage?: {
+    finished_item: string;
+    shortage_count: number;
+    shortage_items: ProposalShortageItem[];
+  };
+  supplier_options?: ProposalSupplierOption[];
+  recommendation?: string;
+  cost_assessments?: ProposalCostAssessment[];
+  delivery_assessments?: ProposalDeliveryAssessment[];
+  data_missing?: { source_skill: string; missing_fields: { field: string; detail: string }[]; need: string }[];
 };
 
 export async function askAssistant(
