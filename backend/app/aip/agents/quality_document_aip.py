@@ -46,6 +46,18 @@ def create_quality_document_aip_service(aic: str = "local-quality-doc-001") -> A
         handler=real_assess_impact,
     )
 
+    async def real_check_issue_closure(inputs: dict) -> dict:
+        """只读校验 NCR disposition、纠正措施与关闭前置条件。"""
+        return await real_order.assess_quality_issue_closure(
+            str(inputs["work_order_id"]), str(inputs["issue_id"])
+        )
+
+    service.register_skill(
+        skill_id="quality.check_issue_closure",
+        skill_name="NCR 关闭前置校验",
+        handler=real_check_issue_closure,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 资料清单生成

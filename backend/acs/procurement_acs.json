@@ -1,7 +1,7 @@
 {
   "aic": "TBD-PROCUREMENT-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:07:47.921323+00:00",
+  "lastModifiedTime": "2026-09-29T17:31:38.008234+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件采购智能体",
   "description": "负责物料需求计算、供应商方案对比和采购订单草稿生成。只提供采购建议和方案对比，供应商定标和PO发布需人工审批。",

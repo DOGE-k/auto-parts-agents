@@ -891,7 +891,24 @@ ERP 物料需求
 **遗留与下一步**：
 
 - 当前真实部署使用 ERPNext 集成账号 `Administrator` 作为上游认证主体；接入企业 SSO/OIDC 后，将 `REAL_IDENTITY_PROVIDER` 替换为对应 provider 或扩展同一解析接口即可，审批接口无需改动。
-- NCR `close/disposition` 与纠正措施校验仍未接入，继续保持 `NOT_SUPPORTED`；随后处理 Mock 后端隔离、速率 ETA、Wutong 外部发现。
+- NCR `close/disposition` 与纠正措施校验已接入（见 §3.23）；订单级质量放行仍为 `NOT_SUPPORTED`，随后处理 Mock 后端隔离、速率 ETA、Wutong 外部发现。
+
+### 3.23 NCR disposition / close 与纠正措施校验（2026-09-30）
+
+**实现内容**：
+
+1. 根据仓库内 OpenMES 源码核对并接入真实契约：`PUT /api/v1/issues/{id}/disposition`、`GET /api/v1/issues/{id}/actions`、`POST /api/v1/issues/{id}/close`；请求字段来自 `SetDispositionRequest`，纠正措施状态来自 `IssueActionService` 的 `open → in_progress → done → verified` 生命周期。
+2. OpenMES 客户端与真实适配器新增 disposition 写回和纠正措施读取；Mock 适配器明确拒绝这些真实写操作，避免 Mock 冒充真实结果。
+3. 新增三段式人工审批门禁：disposition 请求/批准/写回，close 请求/批准/写回；写回前校验问题属于工单、根因和遏制措施非空、审批编号/真实身份匹配，close 额外要求问题已 `RESOLVED`、disposition 已登记、所有纠正措施均为 `VERIFIED`。
+4. 每次真实写回都重新读取质量包并比较 disposition、根因、遏制措施或 `CLOSED` 状态；不一致返回 `WRITE_UNVERIFIED`，不宣称成功。
+5. 协调者新增只读技能 `quality.check_issue_closure`；质量资料包将 NCR 能力标记为 `AVAILABLE_WITH_APPROVAL`，只有订单级质量放行仍为 `NOT_SUPPORTED`。
+
+**验证**：
+
+- 真实工单 `work_order_id=2`、问题 `issue_id=1` 执行只读 `GET /api/real-orders/quality/issues/1/closure-check?work_order_id=2`：HTTP 200，真实状态 `RESOLVED`，`disposition=pending`，关闭校验明确 `closure_ready=false`，纠正措施读取成功且无数据伪造。
+- 真实 OpenMES 质量包返回 NCR 能力 `AVAILABLE_WITH_APPROVAL`，`unsupported_capabilities` 仅剩订单级质量放行。
+- 新增客户端/服务层生命周期测试 **5 passed**；阶段相关定向回归 **18 passed**；全量回归、compileall 和前端构建在提交前复验。
+- 本阶段没有对真实 NCR 执行 disposition 或 close 写入；所有真实验证均为只读，写入仍必须经过真实用户角色 + 服务端令牌 + 两步审批。
 
 ## 8. 当前结论
 
@@ -927,6 +944,6 @@ ERP 物料需求
 阶段八改动已提交：`8ef554c`；ACS 同步与身份治理随后分别提交，当前工作树仅保留本地运行日志/验收输入文件。
 工程可维护性已修正：核心 `backend/app/services` 已重新纳入 Git 可见范围
 测试与安全：pytest 独立测试库（90 passed）、失败验证矩阵补齐、无硬编码凭据；身份来源与角色门禁已接入，ACS 已与真实 AIP 注册表同步。
-仍余（生产可用验收前）：检验数据补录决策、NCR close/disposition 闭环、
+仍余（生产可用验收前）：检验数据补录决策、订单级质量放行、
 旧 Mock 场景后端隔离、速率 ETA、Wutong 外部发现、企业 SSO/OIDC 身份源接入
 ```

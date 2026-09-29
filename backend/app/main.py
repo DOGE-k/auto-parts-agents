@@ -731,6 +731,32 @@ class RealOrderQualityIssueResolveRequest(BaseModel):
     approved_by: str | None = None
 
 
+class RealOrderQualityDispositionRequest(BaseModel):
+    work_order_id: str
+    requested_by: str | None = None
+    disposition: str
+    non_conforming_qty: float | None = None
+    root_cause: str
+    containment_action: str
+    nc_source: str | None = None
+
+
+class RealOrderQualityDispositionWriteRequest(BaseModel):
+    work_order_id: str
+    approval_id: str
+    approved_by: str | None = None
+
+
+class RealOrderQualityCloseRequest(BaseModel):
+    work_order_id: str
+    requested_by: str | None = None
+
+
+class RealOrderQualityCloseWriteRequest(BaseModel):
+    approval_id: str
+    approved_by: str | None = None
+
+
 @app.post("/api/real-orders/quality/issues/{issue_id}/resolve", tags=["real-orders"])
 async def real_order_resolve_quality_issue(
     issue_id: str,
@@ -752,6 +778,118 @@ async def real_order_resolve_quality_issue(
         raise HTTPException(status_code=400, detail=result["error"])
     if not result.get("success") and result.get("written"):
         raise HTTPException(status_code=502, detail=result)
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/disposition-request", tags=["real-orders"])
+async def real_order_request_quality_issue_disposition(
+    issue_id: str,
+    body: RealOrderQualityDispositionRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    """校验并登记 NCR 处置审批，不直接写 OpenMES。"""
+    from app.services.real_order import request_quality_issue_disposition
+    requested_by = _actor_for_request(body.requested_by, identity, "quality_resolution_request")
+    result = request_quality_issue_disposition(
+        issue_id,
+        body.work_order_id,
+        requested_by,
+        disposition=body.disposition,
+        non_conforming_qty=body.non_conforming_qty,
+        root_cause=body.root_cause,
+        containment_action=body.containment_action,
+        nc_source=body.nc_source,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "创建审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/quality/disposition-approvals/{approval_id}/approve", tags=["real-orders"])
+async def real_order_approve_quality_issue_disposition(
+    approval_id: str,
+    body: RealOrderQualityIssueApproveRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    from app.services.real_order import approve_quality_issue_disposition
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_approval")
+    result = approve_quality_issue_disposition(approval_id, approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/disposition", tags=["real-orders"])
+async def real_order_set_quality_issue_disposition(
+    issue_id: str,
+    body: RealOrderQualityDispositionWriteRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    from app.services.real_order import set_quality_issue_disposition
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_disposition_write")
+    result = await set_quality_issue_disposition(issue_id, body.approval_id, approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "NCR 处置写回失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.get("/api/real-orders/quality/issues/{issue_id}/closure-check", tags=["real-orders"])
+async def real_order_quality_issue_closure_check(issue_id: str, work_order_id: str) -> dict:
+    from app.services.real_order import assess_quality_issue_closure
+    return await assess_quality_issue_closure(work_order_id, issue_id)
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/close-request", tags=["real-orders"])
+async def real_order_request_quality_issue_close(
+    issue_id: str,
+    body: RealOrderQualityCloseRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    from app.services.real_order import request_quality_issue_close
+    requested_by = _actor_for_request(body.requested_by, identity, "quality_resolution_request")
+    result = request_quality_issue_close(issue_id, body.work_order_id, requested_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "创建审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/quality/close-approvals/{approval_id}/approve", tags=["real-orders"])
+async def real_order_approve_quality_issue_close(
+    approval_id: str,
+    body: RealOrderQualityIssueApproveRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    from app.services.real_order import approve_quality_issue_close
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_approval")
+    result = approve_quality_issue_close(approval_id, approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/close", tags=["real-orders"])
+async def real_order_close_quality_issue(
+    issue_id: str,
+    body: RealOrderQualityCloseWriteRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    from app.services.real_order import close_quality_issue_with_approval
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_close_write")
+    result = await close_quality_issue_with_approval(issue_id, body.approval_id, approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "NCR 关闭失败"))
     result["authenticated_identity"] = identity.as_dict()
     return result
 

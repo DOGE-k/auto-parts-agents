@@ -181,6 +181,12 @@ class MockMESAdapter:
     async def close_quality_issue(self, issue_id: str) -> dict[str, Any]:
         raise RuntimeError("MockMES 不执行质量问题写回")
 
+    async def set_quality_issue_disposition(self, issue_id: str, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("MockMES 不执行质量处置写回")
+
+    async def get_quality_issue_actions(self, issue_id: str) -> list[dict[str, Any]]:
+        raise RuntimeError("MockMES 不提供纠正措施闭环")
+
     async def get_production_documents(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
         """获取生产文档。"""
         results = []

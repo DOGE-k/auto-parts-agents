@@ -340,6 +340,28 @@ class OpenMESAdapter:
     async def close_quality_issue(self, issue_id: str) -> dict[str, Any]:
         return await self._client.close_issue(issue_id)
 
+    async def set_quality_issue_disposition(self, issue_id: str, **kwargs: Any) -> dict[str, Any]:
+        return await self._client.set_issue_disposition(issue_id, **kwargs)
+
+    async def get_quality_issue_actions(self, issue_id: str) -> list[dict[str, Any]]:
+        rows = await self._client.list_issue_actions(issue_id)
+        return [
+            {
+                "action_id": str(row.get("id", "")),
+                "type": row.get("type", ""),
+                "title": row.get("title", ""),
+                "description": row.get("description") or "",
+                "status": row.get("status", ""),
+                "assigned_to_id": row.get("assigned_to_id"),
+                "due_date": row.get("due_date") or "",
+                "completed_at": row.get("completed_at") or "",
+                "verified_at": row.get("verified_at") or "",
+                "authority": self.authority,
+                "data_source": "openmes_api",
+            }
+            for row in rows
+        ]
+
     async def get_production_documents(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
         """获取生产文档（SOP、Control Plan 等）。
 

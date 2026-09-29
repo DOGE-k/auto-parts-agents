@@ -318,6 +318,59 @@ class OpenMESClient:
             raise ValueError("OpenMES 质量问题关闭接口返回格式不符合其 API 文档")
         return result
 
+    async def set_issue_disposition(
+        self,
+        issue_id: str | int,
+        *,
+        disposition: str,
+        non_conforming_qty: str | int | float | None = None,
+        root_cause: str | None = None,
+        containment_action: str | None = None,
+        nc_source: str | None = None,
+    ) -> dict[str, Any]:
+        """Record the documented non-conformance disposition."""
+        self._require_user_token()
+        value = str(issue_id).strip()
+        allowed = {"scrap", "rework", "return_to_supplier", "use_as_is"}
+        if not value or disposition not in allowed:
+            raise ValueError("OpenMES 处置写回必须提供有效 issue_id 和 disposition")
+        payload: dict[str, Any] = {"disposition": disposition}
+        if non_conforming_qty is not None:
+            payload["non_conforming_qty"] = non_conforming_qty
+        if root_cause is not None:
+            payload["root_cause"] = root_cause
+        if containment_action is not None:
+            payload["containment_action"] = containment_action
+        if nc_source is not None:
+            payload["nc_source"] = nc_source
+        result = await self._http.request_json(
+            "PUT",
+            f"api/v1/issues/{quote(value, safe='')}/disposition",
+            json_body=payload,
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict):
+            raise ValueError("OpenMES 质量处置接口返回格式不符合其 API 文档")
+        return result
+
+    async def list_issue_actions(self, issue_id: str | int) -> list[dict[str, Any]]:
+        """List corrective/preventive/containment actions for an issue."""
+        self._require_user_token()
+        value = str(issue_id).strip()
+        if not value:
+            raise ValueError("查询 OpenMES 纠正措施必须提供 issue_id")
+        result = await self._http.request_json(
+            "GET",
+            f"api/v1/issues/{quote(value, safe='')}/actions",
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return data["data"]
+        if not isinstance(data, list):
+            raise ValueError("OpenMES 纠正措施接口返回格式不符合其 API 文档")
+        return data
+
     async def import_erp_work_orders(
         self, orders: list[dict[str, Any]], strategy: str = "update_or_create"
     ) -> dict[str, Any]:

@@ -125,6 +125,24 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "agent_type": "quality",
+        "aip_agent": "quality-document",
+        "skill_id": "quality.check_issue_closure",
+        "description": (
+            "只读校验指定 NCR 是否满足关闭前置条件：问题已 RESOLVED、已登记 disposition、"
+            "根因和遏制措施齐全、所有纠正/预防/遏制措施均为 VERIFIED。"
+            "用户问质量问题能否关闭或纠正措施是否完成时使用；本工具不执行写回。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "work_order_id": {"type": "string", "description": "MES 工单数字 id"},
+                "issue_id": {"type": "string", "description": "OpenMES 质量问题/NCR id"},
+            },
+            "required": ["work_order_id", "issue_id"],
+        },
+    },
+    {
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.check_real_ship_gate",

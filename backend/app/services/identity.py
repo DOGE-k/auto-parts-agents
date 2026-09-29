@@ -26,6 +26,8 @@ ROLE_REQUIREMENTS = {
     "quality_resolution_request": "quality_manager",
     "quality_resolution_approval": "quality_manager",
     "quality_resolution_write": "quality_manager",
+    "quality_disposition_write": "quality_manager",
+    "quality_close_write": "quality_manager",
 }
 
 
