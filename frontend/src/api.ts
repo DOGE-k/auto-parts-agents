@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9001/api";
 
 export type Project = {
   project_id: string;
@@ -49,6 +49,8 @@ export type Event = {
   evidence_ids: string[];
 };
 
+export type ProductionCompletion = Record<string, any>;
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -56,7 +58,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.detail ?? `请求失败 (${response.status})`);
+  if (!response.ok) {
+    const detail = data?.detail;
+    // detail 可能是字符串，也可能是 {code, message} 结构化错误
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message ?? `请求失败 (${response.status})`;
+    throw new Error(message);
+  }
   return data as T;
 }
 
@@ -82,6 +92,9 @@ export const eventNames: Record<string, string> = {
   QUALITY_RELEASED: "质量已放行（MockMES 权威事件）",
   DOCUMENT_PACKAGE_APPROVED: "资料包已批准",
   DELIVERY_RISK: "发现交付风险",
+  ETA_RECALCULATED: "ETA 已重算",
+  EXPEDITE_REQUESTED: "收到加急请求",
+  EXPEDITE_OPTIONS_READY: "加急方案已就绪",
   SHIPMENT_APPROVAL_REQUIRED: "发运等待审批",
   SHIPMENT_RELEASED: "发运已批准",
   DELIVERED: "已签收",
@@ -93,3 +106,72 @@ export const agentNames: Record<string, string> = {
   tracking: "跟单智能体",
   quality_document: "质量文档智能体",
 };
+
+// 真实 Agent 运行记录（real_agent_runs 表，服务重启后仍在）
+export type AgentRunSummary = {
+  run_id: string;
+  agent_type: string;
+  operation: string;
+  result_status: string;
+  result_summary: string;
+  input: { args: unknown[]; kwargs: Record<string, unknown> };
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type AgentRunEvidenceItem = {
+  source?: string;
+  record_type?: string;
+  record_id?: string;
+  summary?: string;
+};
+
+export type AgentRunDetail = AgentRunSummary & {
+  result: Record<string, any> | null;
+  error: { type: string; message: string } | null;
+};
+
+export const agentRunTypeNames: Record<string, string> = {
+  coordinator: "协调智能体",
+  quotation: "报价 Agent",
+  procurement: "采购 Agent",
+  tracking: "跟单 Agent",
+  quality: "质量文档 Agent",
+  shipping: "发运门禁",
+  approval: "人工审批",
+  erp_write: "ERP 草稿写入",
+  linkage: "ERP↔MES 关联",
+};
+
+// 协调智能体（动态协同问答）
+export type AssistantCallStep = {
+  seq: number;
+  caller: string;
+  callee: string;
+  skill_id: string;
+  arguments: Record<string, unknown>;
+  result_summary: string;
+  status: string;
+  elapsed_ms: number;
+};
+
+export type AssistantAnswer = {
+  question: string;
+  answer: string;
+  call_chain: AssistantCallStep[];
+  rounds: number;
+  tool_count: number;
+  coordination_run_id: string;
+  authority: string;
+  context: Record<string, unknown>;
+};
+
+export async function askAssistant(
+  question: string,
+  context: Record<string, unknown> = {},
+): Promise<AssistantAnswer> {
+  return api<AssistantAnswer>("/real-orders/assistant/ask", {
+    method: "POST",
+    body: JSON.stringify({ question, context }),
+  });
+}

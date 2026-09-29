@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,14 +32,25 @@ from app.persistence.models import (
 from app.adapters.erp.erpnext import ERPNextClient
 from app.adapters.mes.openmes import OpenMESClient
 from app.integrations.deepseek import DeepSeekClient
+from app.services.llm_quotation import (
+    extract_rfq,
+    extract_rfq_deterministic,
+    compute_complexity_factor,
+    compute_quantity_discount,
+)
 from app.integrations.errors import IntegrationError
 from app.integrations.settings import IntegrationSettings
 from app.runtime.scenarios import decide_approval, get_snapshot, reset_project, run_scenario
+from app.aip import init_aip_agents
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_database()
+    init_aip_agents(_app)
+    # 初始化真实订单审批系统
+    from app.services.real_order import init_approval_system
+    init_approval_system()
     yield
 
 
@@ -49,10 +62,10 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Idempotency-Key"],
+    allow_headers=["Content-Type", "Idempotency-Key", "X-Real-Write-Token"],
 )
 
 
@@ -73,10 +86,25 @@ def _integration_status_error(exc: IntegrationError) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)})
 
 
+def require_real_write_access(
+    x_real_write_token: str | None = Header(default=None, alias="X-Real-Write-Token"),
+) -> bool:
+    """Protect external ERP/MES writes with an explicitly configured local token."""
+    expected = os.getenv("REAL_WRITE_API_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="真实系统写入未启用：未配置 REAL_WRITE_API_TOKEN")
+    if not x_real_write_token or not hmac.compare_digest(x_real_write_token, expected):
+        raise HTTPException(status_code=403, detail="真实系统写入令牌无效")
+    return True
+
+
 @app.get("/api/integrations/status", tags=["integrations"])
 def integration_status() -> dict:
     """Report which providers are configured without revealing credentials."""
-    return IntegrationSettings.from_environment().public_status()
+    from app.adapters.factory import get_adapter_status
+    status = IntegrationSettings.from_environment().public_status()
+    status["adapters"] = get_adapter_status()
+    return status
 
 
 @app.post("/api/integrations/deepseek/check", tags=["integrations"])
@@ -98,6 +126,37 @@ async def check_deepseek() -> dict:
     except IntegrationError as exc:
         raise _integration_status_error(exc) from exc
     return {"connected": True, "model": result.get("model", settings.deepseek_model)}
+
+
+@app.post("/api/quotation/analyze-rfq", tags=["quotation"])
+async def analyze_rfq(body: dict) -> dict:
+    """分析 RFQ 描述，提取结构化信息。配置 DeepSeek 时使用 LLM，否则回退到确定性规则。"""
+    description = body.get("description", "")
+    use_llm = body.get("use_llm", True)
+
+    settings = IntegrationSettings.from_environment()
+    llm_client = None
+    if use_llm and settings.deepseek_api_key:
+        llm_client = DeepSeekClient(
+            settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+        )
+
+    try:
+        result = await extract_rfq(description, llm_client)
+    finally:
+        if llm_client:
+            await llm_client.aclose()
+
+    # 附加报价分析因子
+    complexity_factor = compute_complexity_factor(result.get("complexity", "medium"))
+    quantity_factor = compute_quantity_discount(result.get("quantity"))
+    result["complexity_factor"] = complexity_factor
+    result["quantity_discount_factor"] = quantity_factor
+    result["price_adjustment_factor"] = round(complexity_factor * quantity_factor, 4)
+
+    return result
 
 
 @app.post("/api/integrations/erpnext/check", tags=["integrations"])
@@ -197,6 +256,26 @@ async def openmes_work_order(work_order_id: str) -> dict:
         raise _integration_status_error(exc) from exc
 
 
+@app.get("/api/integrations/openmes/production-completions", tags=["integrations"])
+async def openmes_production_completions(
+    since: str | None = None,
+    cursor: str | None = None,
+) -> dict:
+    """Read OpenMES production completions with the scoped ERP API key."""
+    settings = IntegrationSettings.from_environment()
+    try:
+        client = OpenMESClient(
+            settings.openmes_base_url,
+            erp_api_key=settings.openmes_erp_api_key or None,
+        )
+        try:
+            return await client.list_erp_production_completions(since=since, cursor=cursor)
+        finally:
+            await client.aclose()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+
+
 @app.get("/api/projects", tags=["projects"])
 def list_projects(session: Session = Depends(get_session)) -> list[dict]:
     rows = session.scalars(select(ProjectRow).order_by(ProjectRow.created_at.desc())).all()
@@ -213,6 +292,94 @@ def list_projects(session: Session = Depends(get_session)) -> list[dict]:
         }
         for row in rows
     ]
+
+
+# ========== 统一 ERP 数据接口（适配器工厂自动切换 Mock ↔ 真实） ==========
+
+@app.get("/api/erp/customers/{customer_id}", tags=["erp"])
+async def erp_get_customer(customer_id: str) -> dict:
+    """获取客户信息。自动使用 ERPNext 或 Mock 适配器。"""
+    from app.adapters.factory import get_erp_adapter
+    adapter = get_erp_adapter()
+    return await adapter.get_customer(customer_id)
+
+
+@app.get("/api/erp/items/{item_code}", tags=["erp"])
+async def erp_get_item(item_code: str, version: str | None = None) -> dict:
+    """获取物料主数据。自动使用 ERPNext 或 Mock 适配器。"""
+    from app.adapters.factory import get_erp_adapter
+    adapter = get_erp_adapter()
+    return await adapter.get_item(item_code, version)
+
+
+@app.get("/api/erp/items/{item_code}/prices", tags=["erp"])
+async def erp_get_prices(item_code: str, as_of: str = "") -> list[dict]:
+    """获取物料价格列表。自动使用 ERPNext 或 Mock 适配器。"""
+    from app.adapters.factory import get_erp_adapter
+    from datetime import date
+    adapter = get_erp_adapter()
+    return await adapter.get_prices(item_code, as_of or str(date.today()))
+
+
+@app.get("/api/erp/items/{item_code}/bom", tags=["erp"])
+async def erp_get_bom(item_code: str, version: str | None = None) -> dict:
+    """获取物料清单。自动使用 ERPNext 或 Mock 适配器。"""
+    from app.adapters.factory import get_erp_adapter
+    adapter = get_erp_adapter()
+    return await adapter.get_bom(item_code, version)
+
+
+@app.get("/api/erp/inventory", tags=["erp"])
+async def erp_get_inventory(item_codes: str) -> list[dict]:
+    """获取库存（多个物料用逗号分隔）。自动使用 ERPNext 或 Mock 适配器。"""
+    from app.adapters.factory import get_erp_adapter
+    adapter = get_erp_adapter()
+    items = [x.strip() for x in item_codes.split(",") if x.strip()]
+    return await adapter.get_inventory(items)
+
+
+# ========== 统一 MES 数据接口（适配器工厂自动切换 Mock ↔ 真实） ==========
+
+@app.get("/api/mes/work-orders", tags=["mes"])
+async def mes_get_work_orders(status: str | None = None, search: str | None = None, limit: int = 50) -> list[dict]:
+    """获取工单列表。自动使用 OpenMES 或 Mock 适配器。"""
+    from app.adapters.factory import get_mes_adapter
+    adapter = get_mes_adapter()
+    scope: dict[str, Any] = {"limit": limit}
+    if status:
+        scope["status"] = status
+    if search:
+        scope["search"] = search
+    return await adapter.get_work_orders(scope)
+
+
+@app.get("/api/mes/work-orders/{work_order_id}/progress", tags=["mes"])
+async def mes_get_operation_progress(work_order_id: str) -> list[dict]:
+    """获取工序进度。自动使用 OpenMES 或 Mock 适配器。"""
+    from app.adapters.factory import get_mes_adapter
+    adapter = get_mes_adapter()
+    return await adapter.get_operation_progress(work_order_id)
+
+
+@app.get("/api/mes/quality-records", tags=["mes"])
+async def mes_get_quality_records(work_order_id: str | None = None, batch_no: str | None = None) -> list[dict]:
+    """获取质量记录。自动使用 OpenMES 或 Mock 适配器。"""
+    from app.adapters.factory import get_mes_adapter
+    adapter = get_mes_adapter()
+    scope: dict[str, Any] = {}
+    if work_order_id:
+        scope["work_order_id"] = work_order_id
+    if batch_no:
+        scope["batch_no"] = batch_no
+    return await adapter.get_quality_records(scope)
+
+
+@app.get("/api/mes/production-documents", tags=["mes"])
+async def mes_get_production_documents(work_order_id: str) -> list[dict]:
+    """获取生产文档（SOP、Control Plan 等）。自动使用 OpenMES 或 Mock 适配器。"""
+    from app.adapters.factory import get_mes_adapter
+    adapter = get_mes_adapter()
+    return await adapter.get_production_documents({"work_order_id": work_order_id})
 
 
 @app.get("/api/projects/{project_id}/snapshot", tags=["projects"])
@@ -413,3 +580,446 @@ async def project_stream(websocket: WebSocket, project_id: str) -> None:
             await asyncio.sleep(1)
     except WebSocketDisconnect:
         return
+
+
+# ============================================================================
+# 真实订单业务链接口（基于真实 ERPNext / OpenMES 数据）
+# 与 /api/scenarios/{name}/run 的 Mock 场景完全分离
+# ============================================================================
+
+from pydantic import BaseModel
+
+
+class RealOrderQuotationRequest(BaseModel):
+    customer_id: str
+    item_code: str
+    quantity: int
+    delivery_date: str | None = None
+
+
+class RealOrderApproveRequest(BaseModel):
+    approved: bool
+    approved_by: str
+    notes: str | None = None
+
+
+class RealOrderErpDraftRequest(BaseModel):
+    draft_type: str  # "quotation" or "sales_order"
+    approved_by: str
+    approval_id: str
+
+
+@app.post("/api/real-orders/quotation/analyze", tags=["real-orders"])
+async def real_order_analyze_quotation(body: RealOrderQuotationRequest) -> dict:
+    """报价 Agent：读取真实 ERP 数据，生成报价方案（含来源证据）。"""
+    from app.services.real_order import analyze_quotation
+    result = await analyze_quotation(
+        customer_id=body.customer_id,
+        item_code=body.item_code,
+        quantity=body.quantity,
+        delivery_date=body.delivery_date,
+    )
+    return result
+
+
+@app.get("/api/real-orders/mes/track/{work_order_id}", tags=["real-orders"])
+async def real_order_track(work_order_id: str) -> dict:
+    """跟单 Agent：读取真实 MES 工单数据，计算 ETA 和风险。"""
+    from app.services.real_order import track_order
+    result = await track_order(work_order_id)
+    return result
+
+
+@app.get("/api/real-orders/quality/package/{work_order_id}", tags=["real-orders"])
+async def real_order_quality_package(work_order_id: str) -> dict:
+    """质量文档 Agent：读取真实质量记录，生成质量资料包和门禁判断。"""
+    from app.services.real_order import quality_package
+    result = await quality_package(work_order_id)
+    return result
+
+
+class RealOrderQualityIssueResolutionRequest(BaseModel):
+    requested_by: str
+    notes: str | None = None
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/resolution-request", tags=["real-orders"])
+async def real_order_request_quality_issue_resolution(
+    issue_id: str,
+    body: RealOrderQualityIssueResolutionRequest,
+    _write_access: bool = Depends(require_real_write_access),
+) -> dict:
+    """建立质量问题处理审批记录，不写入 OpenMES。"""
+    from app.services.real_order import request_quality_issue_resolution
+    result = request_quality_issue_resolution(issue_id, body.requested_by, body.notes)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "创建审批失败"))
+    return result
+
+
+class RealOrderQualityIssueApproveRequest(BaseModel):
+    approved_by: str
+
+
+@app.post("/api/real-orders/quality/resolution-approvals/{approval_id}/approve", tags=["real-orders"])
+async def real_order_approve_quality_issue_resolution(
+    approval_id: str,
+    body: RealOrderQualityIssueApproveRequest,
+    _write_access: bool = Depends(require_real_write_access),
+) -> dict:
+    """批准质量问题处理请求；此步骤也不写入 OpenMES。"""
+    from app.services.real_order import approve_quality_issue_resolution
+    result = approve_quality_issue_resolution(approval_id, body.approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    return result
+
+
+class RealOrderQualityIssueResolveRequest(BaseModel):
+    work_order_id: str
+    resolution_notes: str
+    approval_id: str
+    approved_by: str
+
+
+@app.post("/api/real-orders/quality/issues/{issue_id}/resolve", tags=["real-orders"])
+async def real_order_resolve_quality_issue(
+    issue_id: str,
+    body: RealOrderQualityIssueResolveRequest,
+    _write_access: bool = Depends(require_real_write_access),
+) -> dict:
+    """使用已持久化且已批准的审批记录写入 OpenMES，并回读验证。"""
+    from app.services.real_order import resolve_quality_issue
+    result = await resolve_quality_issue(
+        work_order_id=body.work_order_id,
+        issue_id=issue_id,
+        resolution_notes=body.resolution_notes,
+        approval_id=body.approval_id,
+        approved_by=body.approved_by,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    if not result.get("success") and result.get("written"):
+        raise HTTPException(status_code=502, detail=result)
+    return result
+
+
+@app.get("/api/real-orders/ship-gate/{work_order_id}", tags=["real-orders"])
+async def real_order_ship_gate(
+    work_order_id: str,
+    quotation_approved: bool = False,
+) -> dict:
+    """发运门禁：综合质量状态和审批状态，判断是否允许发运。"""
+    from app.services.real_order import ship_gate_check
+    result = await ship_gate_check(
+        work_order_id=work_order_id,
+        quotation_approved=quotation_approved,
+    )
+    return result
+
+
+@app.get("/api/real-orders/erp/customers/search", tags=["real-orders"])
+async def real_order_search_customers(keyword: str = "", limit: int = 20) -> list[dict]:
+    """搜索 ERP 客户列表（用于前端选择器）。"""
+    from app.adapters.erp.erpnext import ERPNextClient
+    from app.integrations.settings import IntegrationSettings
+    settings = IntegrationSettings.from_environment()
+    client = ERPNextClient(
+        settings.erpnext_base_url,
+        settings.erpnext_api_key,
+        settings.erpnext_api_secret,
+    )
+    try:
+        rows = await client.list_documents(
+            "Customer",
+            fields=["name", "customer_name", "customer_group", "territory"],
+            filters=[["customer_name", "like", f"%{keyword}%"]] if keyword else [],
+            limit=min(limit, 50),
+        )
+        return [
+            {
+                "customer_id": r.get("name", ""),
+                "customer_name": r.get("customer_name", ""),
+                "customer_group": r.get("customer_group", ""),
+                "territory": r.get("territory", ""),
+                "authority": "ERPNext",
+            }
+            for r in rows
+        ]
+    finally:
+        await client.aclose()
+
+
+# ==================== 采购 Agent 端点 ====================
+
+class RealOrderProcurementAnalyzeRequest(BaseModel):
+    quotation_id: str
+
+
+class RealOrderProcurementApproveRequest(BaseModel):
+    option_id: str
+    approved: bool
+    approved_by: str
+    notes: str | None = None
+
+
+class RealOrderPoDraftFromPlanRequest(BaseModel):
+    plan_id: str
+    approval_id: str
+    approved_by: str
+
+
+@app.get("/api/real-orders/erp/suppliers/search", tags=["real-orders"])
+async def real_order_search_suppliers(keyword: str = "", limit: int = 20) -> list[dict]:
+    """搜索 ERP 供应商列表。"""
+    from app.adapters.factory import get_erp_adapter
+    erp = get_erp_adapter()
+    return await erp.search_suppliers(keyword, min(limit, 50))
+
+
+@app.post("/api/real-orders/procurement/analyze", tags=["real-orders"])
+async def real_order_analyze_procurement(body: RealOrderProcurementAnalyzeRequest) -> dict:
+    """采购 Agent：计算物料需求并生成多供应商采购方案。"""
+    from app.services.real_order import analyze_procurement
+    result = await analyze_procurement(quotation_id=body.quotation_id)
+    if not result.get("plan_id") and result.get("success") is False:
+        raise HTTPException(status_code=400, detail=result.get("error", "采购分析失败"))
+    return result
+
+
+@app.get("/api/real-orders/procurement/plans", tags=["real-orders"])
+async def real_order_list_procurement_plans() -> list[dict]:
+    """列出所有采购方案。"""
+    from app.services.real_order import list_procurement_plans
+    return list_procurement_plans()
+
+
+@app.get("/api/real-orders/procurement/plans/{plan_id}", tags=["real-orders"])
+async def real_order_get_procurement_plan(plan_id: str) -> dict:
+    """获取单个采购方案详情。"""
+    from app.services.real_order import get_procurement_plan
+    plan = get_procurement_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"采购方案 {plan_id} 不存在")
+    return plan
+
+
+@app.post("/api/real-orders/procurement/plans/{plan_id}/approve", tags=["real-orders"])
+async def real_order_approve_procurement_plan(
+    plan_id: str,
+    body: RealOrderProcurementApproveRequest,
+) -> dict:
+    """审批采购方案（选择供应商方案 + 批准/驳回）。"""
+    from app.services.real_order import approve_procurement_plan
+    result = await approve_procurement_plan(
+        plan_id=plan_id,
+        option_id=body.option_id,
+        approved=body.approved,
+        approved_by=body.approved_by,
+        notes=body.notes,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    return result
+
+
+@app.post("/api/real-orders/erp/draft/po-from-plan", tags=["real-orders"])
+async def real_order_create_po_from_plan(body: RealOrderPoDraftFromPlanRequest) -> dict:
+    """根据已审批采购方案创建 ERP 采购订单草稿（创建+回读确认）。"""
+    from app.services.real_order import create_erp_purchase_order_from_plan
+    result = await create_erp_purchase_order_from_plan(
+        plan_id=body.plan_id,
+        approval_id=body.approval_id,
+        approved_by=body.approved_by,
+    )
+    if not result.get("success"):
+        error_msg = result.get("error") or result.get("draft", {}).get("error") or "创建失败"
+        raise HTTPException(status_code=400, detail=error_msg)
+    return result
+
+
+class RealOrderQuotationApproveRequest(BaseModel):
+    approved: bool
+    approved_by: str
+    notes: str | None = None
+
+
+class RealOrderErpDraftFromQuotationRequest(BaseModel):
+    quotation_id: str
+    approval_id: str
+    approved_by: str
+
+
+@app.get("/api/real-orders/quotations", tags=["real-orders"])
+async def real_order_list_quotations() -> list[dict]:
+    """列出所有报价分析记录。"""
+    from app.services.real_order import list_quotations
+    return list_quotations()
+
+
+@app.get("/api/real-orders/quotations/{quotation_id}", tags=["real-orders"])
+async def real_order_get_quotation(quotation_id: str) -> dict:
+    """获取单个报价详情。"""
+    from app.services.real_order import get_quotation
+    q = get_quotation(quotation_id)
+    if not q:
+        raise HTTPException(status_code=404, detail="报价不存在")
+    return q
+
+
+@app.post("/api/real-orders/quotations/{quotation_id}/approve", tags=["real-orders"])
+async def real_order_approve_quotation(
+    quotation_id: str,
+    body: RealOrderQuotationApproveRequest,
+) -> dict:
+    """审批报价（通过/驳回）。审批通过后可用于创建 ERP 草稿。"""
+    from app.services.real_order import approve_quotation
+    result = await approve_quotation(
+        quotation_id=quotation_id,
+        approved=body.approved,
+        approved_by=body.approved_by,
+        notes=body.notes,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    return result
+
+
+@app.get("/api/real-orders/approvals", tags=["real-orders"])
+async def real_order_list_approvals() -> list[dict]:
+    """列出所有审批记录。"""
+    from app.services.real_order import list_approvals
+    return list_approvals()
+
+
+@app.post("/api/real-orders/erp/draft/from-quotation", tags=["real-orders"])
+async def real_order_create_so_from_quotation(body: RealOrderErpDraftFromQuotationRequest) -> dict:
+    """根据已审批报价创建 ERP 销售订单草稿（创建+回读确认）。"""
+    from app.services.real_order import create_erp_sales_order_from_quotation
+    result = await create_erp_sales_order_from_quotation(
+        quotation_id=body.quotation_id,
+        approval_id=body.approval_id,
+        approved_by=body.approved_by,
+    )
+    if not result.get("success"):
+        error_msg = result.get("error") or result.get("draft", {}).get("error") or "创建失败"
+        raise HTTPException(status_code=400, detail=error_msg)
+    return result
+
+
+@app.get("/api/real-orders/erp/items/search", tags=["real-orders"])
+async def real_order_search_items(keyword: str = "", limit: int = 20) -> list[dict]:
+    """搜索 ERP 物料列表（用于前端选择器）。"""
+    from app.adapters.erp.erpnext import ERPNextClient
+    from app.integrations.settings import IntegrationSettings
+    settings = IntegrationSettings.from_environment()
+    client = ERPNextClient(
+        settings.erpnext_base_url,
+        settings.erpnext_api_key,
+        settings.erpnext_api_secret,
+    )
+    try:
+        rows = await client.list_documents(
+            "Item",
+            fields=["name", "item_code", "item_name", "item_group", "stock_uom", "is_stock_item"],
+            filters=[["item_name", "like", f"%{keyword}%"]] if keyword else [],
+            limit=min(limit, 50),
+        )
+        return [
+            {
+                "item_id": r.get("name", ""),
+                "item_code": r.get("item_code", ""),
+                "item_name": r.get("item_name", ""),
+                "item_group": r.get("item_group", ""),
+                "stock_uom": r.get("stock_uom", ""),
+                "is_stock_item": r.get("is_stock_item", 0),
+                "authority": "ERPNext",
+            }
+            for r in rows
+        ]
+    finally:
+        await client.aclose()
+
+
+# ============================================================================
+# 真实 ERP 订单 ↔ 真实 MES 工单关联（只读）
+# 正式关联仅按 OpenMES work_orders.customer_order_no == ERP 销售订单号精确匹配，
+# 找不到时明确返回"未建立关联"，不用其他工单代替，不回退 Mock。
+# ============================================================================
+
+@app.get("/api/real-orders/agent-runs", tags=["real-orders"])
+async def real_order_agent_runs(agent_type: str = "", limit: int = 50) -> list[dict]:
+    """查询 Agent 运行记录（输入/状态摘要；完整结果按 run_id 查询）。"""
+    from app.services.real_order import list_agent_runs
+    return list_agent_runs(agent_type=agent_type, limit=min(limit, 200))
+
+
+@app.get("/api/real-orders/agent-runs/{run_id}", tags=["real-orders"])
+async def real_order_agent_run_detail(run_id: str) -> dict:
+    """查询单次 Agent 运行的完整记录（含决策依据与所用 ERP/MES 证据）。"""
+    from app.services.real_order import get_agent_run
+    result = get_agent_run(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"运行记录不存在: {run_id}")
+    return result
+
+
+@app.post("/api/real-orders/assistant/ask", tags=["real-orders"])
+async def real_order_assistant_ask(body: dict) -> dict:
+    """协调智能体：自然语言业务问题 → 动态调用四个真实智能体（AIP）→ 汇总回答。
+
+    只读通道：协调者仅能调用查询类技能，不执行任何 ERP/MES 写操作。
+    DeepSeek 未配置时返回 503，不伪造回答。
+    """
+    question = str((body or {}).get("question", "")).strip()
+    context = (body or {}).get("context") or {}
+    if not question:
+        raise HTTPException(status_code=422, detail="question 不能为空")
+
+    from app.integrations.errors import IntegrationNotConfigured
+    from app.services.coordinator import build_coordinator
+
+    try:
+        coordinator = build_coordinator()
+    except IntegrationNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "llm_not_configured",
+                "message": f"协调智能体不可用：{exc}。不使用固定话术伪造回答。",
+            },
+        )
+    try:
+        return await coordinator.ask(question, context)
+    except IntegrationError as exc:
+        raise _integration_status_error(exc)
+    finally:
+        await coordinator.aclose()
+
+
+@app.get("/api/real-orders/erp/sales-orders", tags=["real-orders"])
+async def real_order_list_sales_orders(limit: int = 50) -> dict:
+    """列出真实 ERP 销售订单（供用户选择）。连接失败时明确报错。"""
+    from app.integrations.errors import IntegrationError
+    from app.services.order_linkage import list_real_sales_orders
+    try:
+        return await list_real_sales_orders(limit=min(limit, 100))
+    except IntegrationError as e:
+        raise HTTPException(status_code=502, detail=f"ERP 连接失败: {e}") from e
+
+
+@app.get("/api/real-orders/erp/sales-orders/{order_id}/mes-link", tags=["real-orders"])
+async def real_order_mes_link(order_id: str) -> dict:
+    """查询真实 ERP 销售订单与真实 MES 工单的正式关联（只读，含证据）。"""
+    from app.integrations.errors import IntegrationError
+    from app.services.order_linkage import get_order_mes_link
+    try:
+        result = await get_order_mes_link(order_id)
+    except IntegrationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ERP/MES 连接失败，无法判断订单关联: {e}",
+        ) from e
+    if result.get("status") == "ERP_ORDER_NOT_FOUND":
+        raise HTTPException(status_code=404, detail=result.get("message", "ERP 订单不存在"))
+    return result

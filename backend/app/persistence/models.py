@@ -192,3 +192,61 @@ class IdempotencyRow(Base):
     operation: Mapped[str] = mapped_column(String(120))
     response_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+# ============================================================================
+# 真实业务链状态（报价 / 采购方案 / 审批记录）—— 持久化，重启不丢失
+# 与上面 Mock 场景系统的表分开；完整业务快照以 JSON 存储。
+# ============================================================================
+
+class RealQuotationRow(Base):
+    __tablename__ = "real_quotations"
+
+    quotation_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    adapter_mode: Mapped[str] = mapped_column(String(20))
+    customer_id: Mapped[str] = mapped_column(String(120), default="")
+    item_code: Mapped[str] = mapped_column(String(120), default="")
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    data_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RealProcurementPlanRow(Base):
+    __tablename__ = "real_procurement_plans"
+
+    plan_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    quotation_id: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    adapter_mode: Mapped[str] = mapped_column(String(20))
+    data_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RealApprovalRow(Base):
+    __tablename__ = "real_approvals"
+
+    approval_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_by: Mapped[str] = mapped_column(String(120))
+    reference_type: Mapped[str] = mapped_column(String(40), index=True)
+    reference_id: Mapped[str] = mapped_column(String(100), index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RealAgentRunRow(Base):
+    """Agent 运行记录：每次真实 Agent 调用的输入/依据/结果/错误，可追溯。"""
+
+    __tablename__ = "real_agent_runs"
+
+    run_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    agent_type: Mapped[str] = mapped_column(String(40), index=True)
+    operation: Mapped[str] = mapped_column(String(80), index=True)
+    result_status: Mapped[str] = mapped_column(String(20), index=True, default="ok")
+    result_summary: Mapped[str] = mapped_column(Text, default="")
+    input_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

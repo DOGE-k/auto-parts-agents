@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -10,8 +11,8 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.adapters.erp.mock import MockERP
-from app.adapters.mes.mock import MockMES
+from app.adapters.erp.mock import get_mock_erp
+from app.adapters.mes.mock import get_mock_mes
 from app.agents import AGENTS
 from app.domain.models import (
     AgentType,
@@ -41,14 +42,30 @@ from app.tools.demo_rules import RULE_VERSION
 from app.tools.registry import tool_registry
 
 
+# ========== AIP 协议协作开关 ==========
+# 设置环境变量 USE_AIP_COLLABORATION=1 可启用 AIP 协议进行智能体间协作
+# 禁用时使用本地直接调用（默认，性能更好）
+_USE_AIP = os.environ.get("USE_AIP_COLLABORATION", "").lower() in ("1", "true", "yes", "on")
+
+if _USE_AIP:
+    from app.aip.aip_tool_adapter import get_aip_tool_adapter
+    tool_invoker = get_aip_tool_adapter()
+    _collaboration_protocol = "AIP-v02.02"
+else:
+    tool_invoker = tool_registry
+    _collaboration_protocol = "local-direct"
+
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = {
     "normal_order": REPO_ROOT / "scenarios" / "normal_order" / "fixture.json",
     "material_shortage": REPO_ROOT / "scenarios" / "material_shortage" / "fixture.json",
+    "quality_hold": REPO_ROOT / "scenarios" / "quality_hold" / "fixture.json",
+    "expedite": REPO_ROOT / "scenarios" / "expedite" / "fixture.json",
 }
 SCENARIO_SEED = 20260923
-MOCK_ERP = MockERP()
-MOCK_MES = MockMES()
+MOCK_ERP = get_mock_erp()
+MOCK_MES = get_mock_mes()
 
 
 def _load_fixture(name: str) -> dict[str, Any]:
@@ -377,9 +394,9 @@ def _run_normal_order(
     session: Session, project: ProjectRow, fixture: dict[str, Any], seed: int
 ) -> dict[str, Any]:
     quote_inputs = {"currency": fixture["project"]["currency"], **fixture["project"], **fixture["quotation"]}
-    quote = tool_registry.invoke(AgentType.QUOTATION, "quotation.calculate_cost", quote_inputs)
-    eta = tool_registry.invoke(AgentType.TRACKING, "tracking.calculate_eta", fixture["delivery"])
-    quote_draft = tool_registry.invoke(
+    quote = tool_invoker.invoke(AgentType.QUOTATION, "quotation.calculate_cost", quote_inputs)
+    eta = tool_invoker.invoke(AgentType.TRACKING, "tracking.calculate_eta", fixture["delivery"])
+    quote_draft = tool_invoker.invoke(
         AgentType.QUOTATION,
         "quotation.create_draft",
         {"quote": quote, "eta": eta, "fixture_id": fixture["fixture_id"], "status": "DRAFT"},
@@ -472,12 +489,12 @@ def _run_shortage(
     session: Session, project: ProjectRow, fixture: dict[str, Any], seed: int
 ) -> dict[str, Any]:
     material = fixture["material_demand"]
-    net = tool_registry.invoke(AgentType.PROCUREMENT, "procurement.calculate_net_requirement", material)
+    net = tool_invoker.invoke(AgentType.PROCUREMENT, "procurement.calculate_net_requirement", material)
     required_date = date_from_string(material["required_date"])
     option_results: list[dict[str, Any]] = []
     shortage = Decimal(net["net_requirement"])
     cost_assessment_id = f"CA-{project.project_id}"
-    cost_assessment = tool_registry.invoke(
+    cost_assessment = tool_invoker.invoke(
         AgentType.QUOTATION,
         "quotation.create_cost_assessment",
         {
@@ -492,7 +509,7 @@ def _run_shortage(
     )
     deltas = {item["option_id"]: item for item in cost_assessment["option_deltas"]}
     for option in fixture["supplier_options"]:
-        eta = tool_registry.invoke(
+        eta = tool_invoker.invoke(
             AgentType.TRACKING,
             "tracking.calculate_eta",
             {
@@ -563,7 +580,7 @@ def _run_shortage(
     _set_case(tracking, OperationalState.EXECUTING)
     _set_case(procurement, OperationalState.VALIDATING, "ANALYZING")
     _set_case(procurement, OperationalState.EXECUTING)
-    comparison = tool_registry.invoke(
+    comparison = tool_invoker.invoke(
         AgentType.PROCUREMENT,
         "procurement.compare_supply_plans",
         {"net_requirement": net, "options": option_results, "required_date": material["required_date"]},
@@ -711,6 +728,647 @@ def _run_shortage(
     return {"project_id": project.project_id, "approval_id": approval.approval_id}
 
 
+def _run_quality_hold(
+    session: Session, project: ProjectRow, fixture: dict[str, Any], seed: int
+) -> dict[str, Any]:
+    """
+    质量冻结场景。
+
+    协作流程：
+    1. 报价 + ETA 计算（前置状态：订单已发布，生产进行中）
+    2. MockMES 触发 QUALITY_HOLD 权威事件
+    3. 质量文档智能体创建 NCR、收集证据、评估完整性
+    4. 跟单智能体检测交付风险
+    5. 等待质量放行（需人工审批 NCR 处置方案）
+    """
+    prod = fixture["production"]
+    qd = fixture["quality_document"]
+
+    # 前置：报价 + ETA
+    quote_inputs = {"currency": fixture["project"]["currency"], **fixture["project"], **fixture["quotation"]}
+    quote = tool_invoker.invoke(AgentType.QUOTATION, "quotation.calculate_cost", quote_inputs)
+    eta = tool_invoker.invoke(AgentType.TRACKING, "tracking.calculate_eta", fixture["delivery"])
+
+    # 质量文档：构建清单 + 收集证据 + 检查完整性
+    checklist = tool_invoker.invoke(
+        AgentType.QUALITY_DOCUMENT,
+        "quality.build_checklist",
+        {"template": qd["checklist_template"], "product_id": project.product_id},
+    )
+    evidence = tool_invoker.invoke(
+        AgentType.QUALITY_DOCUMENT,
+        "quality.collect_evidence",
+        {"checklist": checklist, "available_documents": qd["available_documents"]},
+    )
+    completeness = tool_invoker.invoke(
+        AgentType.QUALITY_DOCUMENT,
+        "quality.check_completeness",
+        {"required": qd["required_documents"], "evidence": [item["doc_type"] for item in qd["available_documents"]]},
+    )
+
+    # 创建各智能体 Case
+    quote_case = _new_case(
+        session,
+        project.project_id,
+        AgentType.QUOTATION,
+        "ACCEPTED",
+        "报价已接受，订单执行中。",
+    )
+    _set_case(quote_case, OperationalState.VALIDATING, "ACCEPTED")
+    _set_case(quote_case, OperationalState.EXECUTING)
+    _set_case(quote_case, OperationalState.DONE)
+
+    tracking = _new_case(
+        session,
+        project.project_id,
+        AgentType.TRACKING,
+        "MONITORING",
+        "监视生产进度和质量事件，识别交付风险。",
+    )
+    quality_doc = _new_case(
+        session,
+        project.project_id,
+        AgentType.QUALITY_DOCUMENT,
+        "CHECKLIST_OPEN",
+        "质量冻结后收集证据、创建 NCR、评估资料完整性。",
+    )
+    procurement = _new_case(
+        session,
+        project.project_id,
+        AgentType.PROCUREMENT,
+        "COMPLETED",
+        "物料已齐套，采购任务完成。",
+    )
+    _set_case(procurement, OperationalState.VALIDATING, "COMPLETED")
+    _set_case(procurement, OperationalState.EXECUTING)
+    _set_case(procurement, OperationalState.DONE)
+
+    _set_case(tracking, OperationalState.VALIDATING, "MONITORING")
+    _set_case(tracking, OperationalState.EXECUTING)
+    _set_case(quality_doc, OperationalState.VALIDATING, "CHECKLIST_OPEN")
+    _set_case(quality_doc, OperationalState.EXECUTING)
+
+    # 风险检测
+    risk_detection = tool_invoker.invoke(
+        AgentType.TRACKING,
+        "tracking.detect_risk",
+        {
+            "work_order_id": prod["work_order_id"],
+            "quality_hold": True,
+            "rejected_qty": prod["rejected_quantity"],
+            "current_completed": prod["completed_before_hold"],
+            "total_quantity": prod["total_quantity"],
+        },
+    )
+
+    # 创建计划
+    quality_plan = _create_plan(
+        session,
+        project,
+        quality_doc,
+        "quality.collect_evidence",
+        {"checklist": checklist, "evidence": evidence, "completeness": completeness},
+        assumptions=["质量记录、生产文档均来自标注为合成数据的 MockMES。"],
+        evidence_ids=["ev-mock-mes-quality", "ev-mock-mes-doc-sop", "ev-mock-mes-doc-ct"],
+        requires_approval=False,
+    )
+    _create_tool_call(session, project, checklist, "quality.build_checklist", quality_plan.plan_id)
+    _create_tool_call(session, project, evidence, "quality.collect_evidence", quality_plan.plan_id)
+    _create_tool_call(session, project, completeness, "quality.check_completeness", quality_plan.plan_id)
+
+    for evidence_id, system, source_type in (
+        ("ev-mock-mes-quality", "MockMES", "Quality Record"),
+        ("ev-mock-mes-doc-sop", "MockMES", "SOP"),
+        ("ev-mock-mes-doc-ct", "MockMES", "Control Plan"),
+        ("ev-mock-mes-ncr", "MockMES", "NCR"),
+    ):
+        _add_evidence(session, project, evidence_id, system, source_type)
+
+    # 事件序列：RFQ → 报价 → 报价审批 → 销售订单发布 → 物料需求 → 质量冻结
+    rfq = _append_event(
+        session,
+        project,
+        BusinessEventType.RFQ_CREATED,
+        object_type="rfq",
+        object_id=f"RFQ-{project.project_id}",
+        payload={
+            "quantity": fixture["project"]["order_quantity"],
+            "product_id": project.product_id,
+            "customer_id": project.customer_id,
+        },
+    )
+    quote_event = _append_event(
+        session,
+        project,
+        BusinessEventType.QUOTE_DRAFT_READY,
+        object_type="quotation",
+        object_id=f"QUOTE-{project.project_id}",
+        payload=quote,
+        source_agent=AgentType.QUOTATION,
+        evidence_ids=["ev-mock-erp-bom", "ev-mock-erp-item-price"],
+        causation_id=rfq.event_id,
+    )
+    approved_event = _append_event(
+        session,
+        project,
+        BusinessEventType.QUOTE_APPROVED,
+        object_type="quotation",
+        object_id=f"QUOTE-{project.project_id}",
+        payload={"quote_id": f"QUOTE-{project.project_id}", "status": "APPROVED"},
+        causation_id=quote_event.event_id,
+    )
+    released = _append_event(
+        session,
+        project,
+        BusinessEventType.SALES_ORDER_RELEASED,
+        object_type="sales_order",
+        object_id=f"SO-{project.project_id}",
+        payload=MOCK_ERP.sales_order_release(
+            f"SO-{project.project_id}", fixture["project"]["order_quantity"]
+        ),
+        evidence_ids=["ev-mock-erp-demand"],
+        causation_id=approved_event.event_id,
+    )
+    demand_event = _append_event(
+        session,
+        project,
+        BusinessEventType.MATERIAL_DEMAND_CREATED,
+        object_type="material_demand",
+        object_id=f"DEM-{project.project_id}-001",
+        payload={
+            "demand_id": f"DEM-{project.project_id}-001",
+            "material_id": "DEMO-AL-102",
+            "required_quantity": str(fixture["project"]["order_quantity"] * 2),
+            "required_date": fixture["delivery"]["material_available_date"],
+            "status": "FULFILLED",
+        },
+        causation_id=released.event_id,
+    )
+
+    # 核心：质量冻结事件（来自 MockMES 的权威事件）
+    hold_event = _append_event(
+        session,
+        project,
+        BusinessEventType.QUALITY_HOLD,
+        object_type="work_order",
+        object_id=prod["work_order_id"],
+        payload={
+            "work_order_id": prod["work_order_id"],
+            "operation": prod["current_operation"],
+            "issue_type": prod["quality_issue"]["issue_type"],
+            "severity": prod["quality_issue"]["severity"],
+            "description": prod["quality_issue"]["description"],
+            "affected_quantity": prod["quality_issue"]["affected_quantity"],
+            "rejected_quantity": prod["rejected_quantity"],
+            "completed_before_hold": prod["completed_before_hold"],
+        },
+        evidence_ids=["ev-mock-mes-quality"],
+        causation_id=demand_event.event_id,
+    )
+
+    # NCR 创建（质量文档智能体发起）
+    ncr_event = _append_event(
+        session,
+        project,
+        BusinessEventType.NCR_CREATED,
+        object_type="ncr",
+        object_id=f"NCR-{project.project_id}-001",
+        payload={
+            "ncr_id": f"NCR-{project.project_id}-001",
+            "ncr_type": qd["ncr_template"]["ncr_type"],
+            "severity": qd["ncr_template"]["severity"],
+            "source_event": hold_event.event_id,
+            "source_quality_record": "IPQC-2026-1002",
+            "disposition_options": qd["ncr_template"]["disposition_options"],
+            "description": f"工序 {prod['current_operation']} 发现 {prod['quality_issue']['issue_type']}",
+        },
+        source_agent=AgentType.QUALITY_DOCUMENT,
+        evidence_ids=["ev-mock-mes-ncr"],
+        causation_id=hold_event.event_id,
+    )
+
+    # 交付风险事件（跟单智能体检测）
+    risk_event = _append_event(
+        session,
+        project,
+        BusinessEventType.DELIVERY_RISK,
+        object_type="work_order",
+        object_id=prod["work_order_id"],
+        payload={
+            "risk_level": risk_detection.get("risk_level", "medium"),
+            "risk_factors": [
+                f"质量冻结：{prod['quality_issue']['description']}",
+                f"受影响数量：{prod['quality_issue']['affected_quantity']}",
+                f"当前完成：{prod['completed_before_hold']}/{prod['total_quantity']}",
+            ],
+            "original_eta": eta.get("eta_date", "N/A"),
+            "impact_assessment": risk_detection.get("impact", "交付可能延迟 2-3 天"),
+        },
+        source_agent=AgentType.TRACKING,
+        target_agent=AgentType.QUALITY_DOCUMENT,
+        evidence_ids=["ev-mock-mes-quality"],
+        causation_id=hold_event.event_id,
+    )
+
+    # Agent 任务记录
+    _add_agent_task(
+        session, project, tracking, "tracking.detect_risk", "leader",
+        {"event_id": hold_event.event_id, "risk_type": "quality_hold"}
+    )
+    _add_agent_task(
+        session, project, quality_doc, "quality.collect_evidence", "partner",
+        {"event_id": hold_event.event_id, "ncr_id": f"NCR-{project.project_id}-001"},
+        depth=1,
+    )
+
+    # 更新快照
+    _snapshot_update(
+        project,
+        quote=quote,
+        eta=eta,
+        quality_hold={
+            "work_order_id": prod["work_order_id"],
+            "operation": prod["current_operation"],
+            "issue_type": prod["quality_issue"]["issue_type"],
+            "severity": prod["quality_issue"]["severity"],
+            "affected_quantity": prod["quality_issue"]["affected_quantity"],
+            "ncr_id": f"NCR-{project.project_id}-001",
+        },
+        quality_checklist=checklist,
+        quality_evidence=evidence,
+        quality_completeness=completeness,
+        delivery_risk=True,
+        gates={
+            "quality_released": False,
+            "document_package_approved": False,
+        },
+        collaboration_rounds=[
+            {"round": 1, "leader": "tracking", "partner": "quality_document", "capability": "quality_document.collect_evidence"},
+            {"round": 2, "leader": "quality_document", "partner": "tracking", "capability": "tracking.detect_risk"},
+        ],
+        milestones=[
+            {"name": "销售订单发布", "status": "已完成"},
+            {"name": "物料齐套", "status": "已完成"},
+            {"name": "质量冻结", "status": "进行中"},
+            {"name": "NCR 处置", "status": "等待审批"},
+        ],
+        demo_notice="质量冻结场景：生产过程中发现尺寸偏差，触发质量冻结和 NCR，需人工审批处置方案后才能放行。",
+    )
+
+    _set_case(tracking, OperationalState.WAITING_EVENT, "RISK_DETECTED")
+    _set_case(quality_doc, OperationalState.AWAITING_APPROVAL, "INCOMPLETE")
+
+    # 创建审批：NCR 处置方案选择
+    ncr_approval = _create_next_approval(
+        session,
+        project,
+        quality_doc,
+        "ncr_disposition",
+        f"NCR-{project.project_id}-001",
+        {"ncr_type": qd["ncr_template"]["ncr_type"], "severity": qd["ncr_template"]["severity"]},
+        assumptions=["NCR 处置方案由人工批准后，MockMES 才会产生 QUALITY_RELEASED 权威事件。"],
+        evidence_ids=["ev-mock-mes-quality", "ev-mock-mes-ncr"],
+        action_payload={
+            "available_option_ids": qd["ncr_template"]["disposition_options"],
+            "plan_id": quality_plan.plan_id,
+        },
+    )
+
+    return {"project_id": project.project_id, "approval_id": ncr_approval.approval_id}
+
+
+def _run_expedite(
+    session: Session, project: ProjectRow, fixture: dict[str, Any], seed: int
+) -> dict[str, Any]:
+    """
+    加急场景。
+
+    协作流程：
+    1. 客户提出加急需求
+    2. 跟单智能体评估加急可行性 + 重算 ETA
+    3. 采购智能体评估物料加急方案
+    4. 报价智能体评估加急成本
+    5. 人工选择加急方案
+    """
+    delivery = fixture["delivery"]
+    procure = fixture["procurement"]
+
+    # 报价（含加急溢价）
+    quote_inputs = {"currency": fixture["project"]["currency"], **fixture["project"], **fixture["quotation"]}
+    quote = tool_invoker.invoke(AgentType.QUOTATION, "quotation.calculate_cost", quote_inputs)
+
+    # 原 ETA
+    original_eta = tool_invoker.invoke(
+        AgentType.TRACKING,
+        "tracking.calculate_eta",
+        {
+            "material_available_date": delivery["original_eta_date"],
+            "capacity_completion_date": delivery["original_eta_date"],
+            "quality_wait_days": 2,
+            "buffer_days": 3,
+        },
+    )
+
+    # 加急 ETA 方案计算
+    expedite_options_with_eta = []
+    for opt in delivery["expedite_options"]:
+        exp_eta = tool_invoker.invoke(
+            AgentType.TRACKING,
+            "tracking.calculate_eta",
+            {
+                "material_available_date": delivery["material_available_date"],
+                "capacity_completion_date": opt["new_eta_date"],
+                "quality_wait_days": 1,
+                "buffer_days": 2,
+            },
+        )
+        expedite_options_with_eta.append({
+            **opt,
+            "eta": exp_eta,
+            "meets_requested_date": opt["meets_requested_date"],
+        })
+
+    # 加急成本评估
+    cost_assessment_id = f"CA-EXP-{project.project_id}"
+    cost_assessment_options = [
+        {
+            "option_id": opt["option_id"],
+            "supplier_id": f"expedite-{opt['option_id']}",
+            "unit_price": str(
+                float(quote.get("suggested_unit_price", 78))
+                + opt["additional_cost"] / fixture["project"]["order_quantity"]
+            ),
+        }
+        for opt in delivery["expedite_options"]
+    ]
+    cost_assessment = tool_invoker.invoke(
+        AgentType.QUOTATION,
+        "quotation.create_cost_assessment",
+        {
+            "cost_assessment_id": cost_assessment_id,
+            "parent_order_id": f"SO-{project.project_id}",
+            "accepted_quote_id": f"QUOTE-{project.project_id}",
+            "accepted_quote_status": "DRAFT",
+            "baseline_unit_price": str(quote.get("suggested_unit_price", 78)),
+            "shortage_quantity": "0",
+            "options": cost_assessment_options,
+        },
+    )
+
+    # 创建 Case
+    quotation_case = _new_case(
+        session,
+        project.project_id,
+        AgentType.QUOTATION,
+        "RFQ_RECEIVED",
+        "处理加急询价，评估加急成本和报价。",
+    )
+    tracking = _new_case(
+        session,
+        project.project_id,
+        AgentType.TRACKING,
+        "ORDER_NOT_RELEASED",
+        "评估加急可行性，重算 ETA，识别风险。",
+    )
+    procurement = _new_case(
+        session,
+        project.project_id,
+        AgentType.PROCUREMENT,
+        "DEMAND_RECEIVED",
+        "评估物料加急可行性和供应商方案。",
+    )
+    quality_doc = _new_case(
+        session,
+        project.project_id,
+        AgentType.QUALITY_DOCUMENT,
+        "CHECKLIST_OPEN",
+        "准备加急订单的质量文档清单。",
+    )
+
+    _set_case(quotation_case, OperationalState.VALIDATING, "CALCULATING")
+    _set_case(quotation_case, OperationalState.EXECUTING)
+    _set_case(tracking, OperationalState.VALIDATING, "ETA_RECALCULATING")
+    _set_case(tracking, OperationalState.EXECUTING)
+    _set_case(procurement, OperationalState.VALIDATING, "ANALYZING")
+    _set_case(procurement, OperationalState.EXECUTING)
+    _set_case(quality_doc, OperationalState.VALIDATING, "CHECKLIST_OPEN")
+    _set_case(quality_doc, OperationalState.EXECUTING)
+
+    # 供应方案比较
+    comparison = tool_invoker.invoke(
+        AgentType.PROCUREMENT,
+        "procurement.compare_supply_plans",
+        {
+            "net_requirement": {"net_requirement": str(fixture["project"]["order_quantity"] * 2)},
+            "options": expedite_options_with_eta,
+            "required_date": delivery["requested_delivery_date"],
+        },
+    )
+
+    # 创建计划
+    quote_plan = _create_plan(
+        session,
+        project,
+        quotation_case,
+        "quotation.calculate_cost",
+        quote,
+        assumptions=["加急报价含加急溢价，基于合成数据演示。"],
+        evidence_ids=["ev-mock-erp-item-price", "ev-mock-mes-capacity"],
+        requires_approval=False,
+    )
+    _create_tool_call(session, project, quote, "quotation.calculate_cost", quote_plan.plan_id)
+    _create_tool_call(session, project, cost_assessment, "quotation.create_cost_assessment", quote_plan.plan_id)
+
+    selection_plan = _create_plan(
+        session,
+        project,
+        tracking,
+        "tracking.calculate_eta",
+        {"options": expedite_options_with_eta, "comparison": comparison},
+        assumptions=["加急 ETA 和风险评估基于合成产能数据。"],
+        evidence_ids=["ev-mock-mes-capacity", "ev-mock-erp-item-price"],
+        requires_approval=True,
+    )
+    _create_tool_call(session, project, original_eta, "tracking.calculate_eta", selection_plan.plan_id)
+    for opt in expedite_options_with_eta:
+        _create_tool_call(session, project, opt["eta"], "tracking.calculate_eta", selection_plan.plan_id)
+    _create_tool_call(session, project, comparison, "procurement.compare_supply_plans", selection_plan.plan_id)
+
+    for evidence_id, system, source_type in (
+        ("ev-mock-erp-item-price", "MockERP", "Item Price"),
+        ("ev-mock-mes-capacity", "MockMES", "Capacity"),
+        ("ev-mock-erp-demand", "MockERP", "Material Demand"),
+    ):
+        _add_evidence(session, project, evidence_id, system, source_type)
+
+    # 事件序列：RFQ → 加急请求 → 报价草稿 → ETA 重算 → 加急方案就绪 → 成本评估
+    rfq = _append_event(
+        session,
+        project,
+        BusinessEventType.RFQ_CREATED,
+        object_type="rfq",
+        object_id=f"RFQ-{project.project_id}",
+        payload={
+            "quantity": fixture["project"]["order_quantity"],
+            "product_id": project.product_id,
+            "requested_delivery_date": delivery["requested_delivery_date"],
+            "is_expedite": True,
+        },
+    )
+    expedite_req = _append_event(
+        session,
+        project,
+        BusinessEventType.EXPEDITE_REQUESTED,
+        object_type="expedite_request",
+        object_id=f"EXP-REQ-{project.project_id}",
+        payload={
+            "requested_delivery_date": delivery["requested_delivery_date"],
+            "original_eta_date": delivery["original_eta_date"],
+            "reason": fixture.get("expedite_reason", "客户要求提前交付"),
+        },
+        source_agent=AgentType.TRACKING,
+        causation_id=rfq.event_id,
+    )
+    draft = _append_event(
+        session,
+        project,
+        BusinessEventType.QUOTE_DRAFT_READY,
+        object_type="quotation",
+        object_id=f"QUOTE-{project.project_id}",
+        payload={
+            **quote,
+            "expedite": True,
+            "expedite_premium": fixture["quotation"].get("expedite_premium", 0),
+        },
+        source_agent=AgentType.QUOTATION,
+        evidence_ids=quote_plan.evidence_json,
+        causation_id=expedite_req.event_id,
+    )
+    eta_event = _append_event(
+        session,
+        project,
+        BusinessEventType.ETA_RECALCULATED,
+        object_type="eta",
+        object_id=f"ETA-EXP-{project.project_id}",
+        payload={
+            "original_eta": delivery["original_eta_date"],
+            "requested_delivery_date": delivery["requested_delivery_date"],
+            "options_count": len(expedite_options_with_eta),
+        },
+        source_agent=AgentType.TRACKING,
+        causation_id=expedite_req.event_id,
+    )
+    options_event = _append_event(
+        session,
+        project,
+        BusinessEventType.EXPEDITE_OPTIONS_READY,
+        object_type="expedite_plan_set",
+        object_id=f"EXP-SET-{project.project_id}",
+        payload={
+            "requested_delivery_date": delivery["requested_delivery_date"],
+            "original_eta": delivery["original_eta_date"],
+            "options": expedite_options_with_eta,
+        },
+        source_agent=AgentType.TRACKING,
+        target_agent=AgentType.QUOTATION,
+        evidence_ids=selection_plan.evidence_json,
+        causation_id=eta_event.event_id,
+    )
+    cost_event = _append_event(
+        session,
+        project,
+        BusinessEventType.COST_ASSESSMENT_READY,
+        object_type="cost_assessment",
+        object_id=cost_assessment_id,
+        payload={
+            "cost_assessment_id": cost_assessment_id,
+            "parent_order_id": f"SO-{project.project_id}",
+            "options": expedite_options_with_eta,
+            "quote_status": "DRAFT",
+        },
+        source_agent=AgentType.QUOTATION,
+        target_agent=AgentType.TRACKING,
+        evidence_ids=selection_plan.evidence_json,
+        causation_id=options_event.event_id,
+    )
+
+    # Agent 任务
+    _add_agent_task(
+        session, project, tracking, "tracking.calculate_eta", "leader",
+        {"event_id": rfq.event_id, "is_expedite": True}
+    )
+    _add_agent_task(
+        session, project, quotation_case, "quotation.create_cost_assessment", "partner",
+        {"cost_assessment_id": cost_assessment_id, "expedite": True},
+        depth=1,
+    )
+    _add_agent_task(
+        session, project, procurement, "procurement.compare_supply_plans", "partner",
+        {"event_id": options_event.event_id, "expedite": True},
+        depth=2,
+    )
+
+    # 快照更新
+    _snapshot_update(
+        project,
+        quote=quote,
+        eta=original_eta,
+        expedite_requested=True,
+        requested_delivery_date=delivery["requested_delivery_date"],
+        original_eta_date=delivery["original_eta_date"],
+        supply_options=expedite_options_with_eta,
+        cost_assessment={
+            "cost_assessment_id": cost_assessment_id,
+            "parent_order_id": f"SO-{project.project_id}",
+            "quote_id": f"QUOTE-{project.project_id}",
+            "quote_status": "DRAFT",
+            "status": "READY",
+        },
+        delivery_risk=False,
+        gates={
+            "quality_released": False,
+            "document_package_approved": False,
+        },
+        collaboration_rounds=[
+            {"round": 1, "leader": "tracking", "partner": "quotation", "capability": "quotation.calculate_cost"},
+            {"round": 2, "leader": "tracking", "partner": "procurement", "capability": "procurement.compare_supply_plans"},
+            {"round": 3, "leader": "procurement", "partner": "quotation", "capability": "quotation.create_cost_assessment"},
+        ],
+        milestones=[
+            {"name": "加急询价", "status": "已收到"},
+            {"name": "加急方案", "status": "已就绪"},
+            {"name": "方案选择", "status": "等待人工选择"},
+        ],
+        demo_notice="加急场景：客户要求提前交付，跟单智能体重算 ETA，采购评估物料加急，报价评估成本，需人工选择加急方案。",
+    )
+
+    _set_case(tracking, OperationalState.AWAITING_APPROVAL, "WAITING_APPROVAL")
+    _set_case(quotation_case, OperationalState.WAITING_EVENT, "DRAFT_READY")
+    _set_case(procurement, OperationalState.WAITING_EVENT, "PLAN_READY")
+    _set_case(quality_doc, OperationalState.WAITING_EVENT, "CHECKLIST_OPEN")
+
+    # 创建审批：加急方案选择
+    expedite_approval = _create_next_approval(
+        session,
+        project,
+        tracking,
+        "expedite_option_selection",
+        f"EXP-SET-{project.project_id}",
+        {
+            "requested_delivery_date": delivery["requested_delivery_date"],
+            "original_eta": delivery["original_eta_date"],
+        },
+        assumptions=["加急方案由人工选择后，才进入销售订单发布审批。"],
+        evidence_ids=["ev-mock-mes-capacity", "ev-mock-erp-item-price"],
+        action_payload={
+            "available_option_ids": [item["option_id"] for item in delivery["expedite_options"]],
+            "plan_id": selection_plan.plan_id,
+        },
+    )
+
+    return {"project_id": project.project_id, "approval_id": expedite_approval.approval_id}
+
+
 def date_from_string(value: str):
     from datetime import date
 
@@ -738,8 +1396,12 @@ def run_scenario(
     project = _base_project(session, scenario, fixture, seed, idempotency_key, forced_project_id)
     if scenario == "normal_order":
         result = _run_normal_order(session, project, fixture, seed)
-    else:
+    elif scenario == "material_shortage":
         result = _run_shortage(session, project, fixture, seed)
+    elif scenario == "quality_hold":
+        result = _run_quality_hold(session, project, fixture, seed)
+    else:
+        result = _run_expedite(session, project, fixture, seed)
     run_id = f"RUN-{project.project_id}"
     session.add(
         ReplayRunRow(
@@ -751,7 +1413,7 @@ def run_scenario(
             result="waiting_approval",
         )
     )
-    result = {**result, "scenario": scenario, "run_id": run_id, "seed": seed, "data_source": "synthetic_demo_only"}
+    result = {**result, "scenario": scenario, "run_id": run_id, "seed": seed, "data_source": "synthetic_demo_only", "collaboration_protocol": _collaboration_protocol}
     if not forced_project_id:
         session.add(IdempotencyRow(idempotency_key=idempotency_key, operation=f"scenario:{scenario}", response_json=result))
     _record_audit(
@@ -870,7 +1532,7 @@ def _start_normal_parallel_work(
         evidence_ids=["ev-mock-erp-demand"],
         causation_id=demand.event_id,
     )
-    net = tool_registry.invoke(AgentType.PROCUREMENT, "procurement.calculate_net_requirement", material)
+    net = tool_invoker.invoke(AgentType.PROCUREMENT, "procurement.calculate_net_requirement", material)
     procurement = _new_case(
         session,
         project.project_id,
@@ -931,7 +1593,7 @@ def _start_normal_parallel_work(
         if fixture["delivery"]["mock_document_evidence_complete"]
         else ["inspection_report"],
     }
-    completeness = tool_registry.invoke(AgentType.QUALITY_DOCUMENT, "quality.check_completeness", doc_inputs)
+    completeness = tool_invoker.invoke(AgentType.QUALITY_DOCUMENT, "quality.check_completeness", doc_inputs)
     _add_agent_task(session, project, quality, "quality.collect_evidence", "partner", doc_inputs)
     _add_agent_task(session, project, quality, "quality.check_completeness", "leader", doc_inputs)
     if not completeness["complete"]:
@@ -939,7 +1601,7 @@ def _start_normal_parallel_work(
         _set_case(case, OperationalState.WAITING_EVENT, "MONITORING")
         _snapshot_update(project, document_completeness=completeness, gates={"quality_released": True, "document_package_approved": False})
         return
-    package_draft = tool_registry.invoke(
+    package_draft = tool_invoker.invoke(
         AgentType.QUALITY_DOCUMENT,
         "quality.build_package_draft",
         {"checklist": doc_inputs, "completeness": completeness},
@@ -1009,7 +1671,7 @@ def _finish_package_approval(
         target_agent=AgentType.TRACKING,
         evidence_ids=["ev-mock-mes-quality", "ev-mock-document-package"],
     )
-    gate = tool_registry.invoke(
+    gate = tool_invoker.invoke(
         AgentType.TRACKING,
         "tracking.check_ship_gate",
         {"quality_released": True, "document_package_approved": True},
@@ -1077,7 +1739,7 @@ def _finish_shipment(
     events = session.scalars(select(BusinessEventRow).where(BusinessEventRow.project_id == project.project_id)).all()
     has_quality = any(row.event_type == BusinessEventType.QUALITY_RELEASED.value for row in events)
     has_package = any(row.event_type == BusinessEventType.DOCUMENT_PACKAGE_APPROVED.value for row in events)
-    gate = tool_registry.invoke(
+    gate = tool_invoker.invoke(
         AgentType.TRACKING,
         "tracking.check_ship_gate",
         {"quality_released": has_quality, "document_package_approved": has_package},
@@ -1142,7 +1804,7 @@ def _approve_supplier_selection(
         evidence_ids=["ev-mock-erp-supplier-quotes"],
     )
     po_id = f"PO-DRAFT-{project.project_id}"
-    po_details = tool_registry.invoke(
+    po_details = tool_invoker.invoke(
         AgentType.PROCUREMENT,
         "procurement.create_po_draft",
         MOCK_ERP.purchase_order_draft(po_id, selected),

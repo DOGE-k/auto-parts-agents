@@ -84,6 +84,9 @@ class JsonHttpClient:
             try:
                 payload = response.json()
                 candidate = payload.get("message") or payload.get("exception") or payload.get("detail")
+                # OpenAI 兼容错误体 {"error": {"message": ...}}（DeepSeek 等）
+                if not candidate and isinstance(payload.get("error"), dict):
+                    candidate = payload["error"].get("message")
                 if isinstance(candidate, str) and candidate.strip():
                     detail = candidate.strip()[:300]
             except (ValueError, AttributeError):
@@ -103,3 +106,52 @@ class JsonHttpClient:
             raise IntegrationError(
                 "远端返回的内容不是有效 JSON", code="invalid_json", retryable=False
             ) from exc
+
+    async def request_multipart(
+        self,
+        method: str,
+        path: str,
+        *,
+        data: Mapping[str, str] | None = None,
+        files: Mapping[str, tuple[str, bytes, str]] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Any:
+        """Send a bounded multipart request without following redirects."""
+        if not path or path.startswith("//") or ".." in path.split("/"):
+            raise ValueError("API 路径必须是固定的站内相对路径")
+        request_headers = {**self._default_headers, **dict(headers or {})}
+        try:
+            response = await self._client.request(
+                method,
+                path.lstrip("/"),
+                data=data,
+                files=files,
+                headers=request_headers,
+            )
+        except httpx.TimeoutException as exc:
+            raise IntegrationError("连接超时", code="timeout", retryable=True) from exc
+        except httpx.NetworkError as exc:
+            raise IntegrationError("网络连接失败", code="network_error", retryable=True) from exc
+        except httpx.HTTPError as exc:
+            raise IntegrationError("HTTP 请求失败", code="http_error", retryable=False) from exc
+        if response.status_code >= 400:
+            detail = "远端服务拒绝请求"
+            try:
+                payload = response.json()
+                candidate = payload.get("message") or payload.get("exception") or payload.get("detail")
+                if isinstance(candidate, str) and candidate.strip():
+                    detail = candidate.strip()[:300]
+            except (ValueError, AttributeError):
+                pass
+            raise IntegrationError(
+                detail,
+                code="remote_http_error",
+                retryable=response.status_code in {408, 425, 429} or response.status_code >= 500,
+                status_code=response.status_code,
+            )
+        if response.status_code == 204 or not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise IntegrationError("远端返回的内容不是有效 JSON", code="invalid_json", retryable=False) from exc

@@ -1,0 +1,77 @@
+{
+  "fixture_id": "quality-hold-demo-v1",
+  "data_source": "synthetic_demo_only",
+  "scenario": "quality_hold",
+  "notice": "质量冻结场景：生产过程中发现质量问题触发冻结，所有数据均为演示用合成数据。",
+  "project": {
+    "customer_id": "DEMO-CUSTOMER-001",
+    "product_id": "DEMO-BRACKET-001",
+    "product_name": "演示支架组件",
+    "order_quantity": 120,
+    "currency": "CNY",
+    "required_delivery_date": "2026-10-28"
+  },
+  "quotation": {
+    "bom": [
+      {"material_id": "DEMO-AL-102", "qty_per_product": "2", "unit_price": "12.50"},
+      {"material_id": "DEMO-BOLT-008", "qty_per_product": "4", "unit_price": "2.00"}
+    ],
+    "cost_components": {
+      "processing": "16.00",
+      "outsourcing": "0.00",
+      "inspection": "2.00",
+      "packaging": "1.00",
+      "logistics": "2.00"
+    },
+    "risk_buffer_rate": "0.05",
+    "target_gross_margin": "0.20",
+    "minimum_gross_margin": "0.15"
+  },
+  "delivery": {
+    "material_available_date": "2026-10-10",
+    "capacity_completion_date": "2026-10-20",
+    "quality_wait_days": 2,
+    "buffer_days": 3,
+    "mock_mes_quality_released": false,
+    "mock_document_evidence_complete": false
+  },
+  "production": {
+    "work_order_id": "WO-DEMO-001",
+    "production_order_id": "PO-DEMO-001",
+    "total_quantity": 120,
+    "completed_before_hold": 80,
+    "rejected_quantity": 3,
+    "current_operation": "Machining",
+    "quality_issue": {
+      "issue_type": "dimension_deviation",
+      "severity": "minor",
+      "description": "机加工工序发现尺寸偏差，超出公差范围 0.02mm",
+      "affected_quantity": 5
+    },
+    "mock_mes_quality_hold": true,
+    "mock_mes_quality_released": false
+  },
+  "quality_document": {
+    "checklist_template": "FINAL_INSPECTION",
+    "required_documents": [
+      "SOP",
+      "Control Plan",
+      "PFMEA",
+      "IQC Report",
+      "IPQC Report",
+      "FQC Report"
+    ],
+    "available_documents": [
+      { "doc_type": "SOP", "doc_id": "SOP-DEMO-001", "status": "RELEASED" },
+      { "doc_type": "Control Plan", "doc_id": "CT-DEMO-001", "status": "RELEASED" },
+      { "doc_type": "PFMEA", "doc_id": "PFMEA-DEMO-001", "status": "RELEASED" },
+      { "doc_type": "IQC Report", "doc_id": "IQC-2026-1001", "status": "PASSED" }
+    ],
+    "missing_documents": ["IPQC Report", "FQC Report"],
+    "ncr_template": {
+      "ncr_type": "PROCESS_NCR",
+      "severity": "minor",
+      "disposition_options": ["rework", "use_as_is", "scrap"]
+    }
+  }
+}

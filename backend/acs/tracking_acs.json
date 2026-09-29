@@ -1,0 +1,119 @@
+{
+  "aic": "TBD-TRACKING-AGENT-001",
+  "active": true,
+  "lastModifiedTime": "2026-09-27T17:27:21.381488+00:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件跟单智能体",
+  "description": "负责订单交期跟踪、生产进度监控、风险识别和ETA计算。只提供风险预警和进度分析，不做生产调度和质量放行决策。",
+  "version": "1.0.0",
+  "provider": {
+    "countryCode": "CN",
+    "organization": "AutoParts Intelligence",
+    "department": "AI Agent Team",
+    "url": "https://autoparts-agent.example.com",
+    "name": "Dev Team",
+    "email": "dev@autoparts-agent.example.com"
+  },
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS",
+      "description": "双向TLS认证，智能体间高安全级别通信"
+    },
+    "apiKey": {
+      "type": "apiKey",
+      "description": "API Key 认证，用于本地开发和测试",
+      "name": "X-API-Key",
+      "in": "header"
+    }
+  },
+  "endPoints": [
+    {
+      "url": "http://localhost:8001/aip/tracking/rpc",
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "apiKey": []
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "text/plain",
+    "application/json",
+    "text/markdown"
+  ],
+  "skills": [
+    {
+      "id": "tracking.calculate_eta",
+      "name": "交期预估",
+      "description": "基于生产工单进度、工序节拍、异常历史和物料到货情况，计算订单预计交付时间。",
+      "version": "1.0.0",
+      "tags": [
+        "跟单",
+        "ETA",
+        "交期"
+      ],
+      "examples": [
+        "这个订单什么时候能交",
+        "预计完工时间是多少"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.detect_risk",
+      "name": "风险识别",
+      "description": "实时监控订单执行状态，识别物料短缺、产能瓶颈、质量异常、供应商延期等风险并预警。",
+      "version": "1.0.0",
+      "tags": [
+        "跟单",
+        "风险预警",
+        "异常检测"
+      ],
+      "examples": [
+        "这个订单有什么风险",
+        "检查一下订单状态"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.check_ship_gate",
+      "name": "发运门禁检查",
+      "description": "在发运前检查所有前置条件是否满足：生产完工、质量放行、资料包完整、客户确认等。",
+      "version": "1.0.0",
+      "tags": [
+        "跟单",
+        "发运",
+        "门禁检查"
+      ],
+      "examples": [
+        "检查是否可以发运",
+        "发运条件都满足了吗"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ]
+}

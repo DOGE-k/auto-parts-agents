@@ -7,8 +7,10 @@ import httpx
 
 from app.adapters.erp.erpnext import ERPNextClient
 from app.adapters.mes.openmes import OpenMESClient
+from app.adapters.mes.openmes_adapter import OpenMESAdapter
 from app.integrations.deepseek import DeepSeekClient
-from app.integrations.errors import IntegrationNotConfigured, IntegrationPermissionDenied
+from app.integrations.errors import IntegrationError, IntegrationNotConfigured, IntegrationPermissionDenied
+from app.integrations.http import JsonHttpClient
 from app.integrations.settings import IntegrationSettings
 
 
@@ -123,6 +125,88 @@ class RealIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.aclose()
 
+    async def test_openmes_quality_resolution_uses_user_token_and_documented_payload(self) -> None:
+        seen: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={"data": {"id": 7, "status": "RESOLVED"}})
+
+        transport = httpx.MockTransport(handler)
+        transport_client = httpx.AsyncClient(base_url="https://mes.example/", transport=transport)
+        client = OpenMESClient("https://mes.example", user_token="user-token", client=transport_client)
+        try:
+            result = await client.resolve_issue(7, "TEST_已完成纠正措施")
+        finally:
+            await client.aclose()
+            await transport_client.aclose()
+
+        self.assertEqual(result["data"]["status"], "RESOLVED")
+        self.assertEqual(seen[0].method, "POST")
+        self.assertEqual(seen[0].url.path, "/api/v1/issues/7/resolve")
+        self.assertEqual(seen[0].headers["Authorization"], "Bearer user-token")
+        self.assertEqual(json.loads(seen[0].content), {"resolution_notes": "TEST_已完成纠正措施"})
+
+    async def test_openmes_engineering_document_upload_uses_multipart_and_user_token(self) -> None:
+        seen: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(201, json={"data": {"id": 99, "original_filename": "TEST_SOP.html"}})
+
+        transport = httpx.MockTransport(handler)
+        transport_client = httpx.AsyncClient(base_url="https://mes.example/", transport=transport)
+        client = OpenMESClient("https://mes.example", user_token="user-token", client=transport_client)
+        try:
+            result = await client.upload_engineering_document(
+                filename="TEST_SOP.html",
+                content=b"<html><body>TEST SOP</body></html>",
+                entity_type="product_type",
+                entity_id=2,
+                revision="TEST-R1",
+                document_type="SOP",
+            )
+        finally:
+            await client.aclose()
+            await transport_client.aclose()
+
+        self.assertEqual(result["data"]["id"], 99)
+        self.assertEqual(seen[0].method, "POST")
+        self.assertEqual(seen[0].url.path, "/api/v1/engineering-documents")
+        self.assertEqual(seen[0].headers["Authorization"], "Bearer user-token")
+        body = seen[0].content
+        self.assertIn(b"TEST_SOP.html", body)
+        self.assertIn(b"name=\"document_type\"", body)
+        self.assertIn(b"SOP", body)
+
+    async def test_openmes_frozen_documents_use_verified_detail_type(self) -> None:
+        seen: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            if request.url.path.endswith("/work-orders/6/engineering-documents"):
+                return httpx.Response(200, json={"data": [{
+                    "document_id": 1, "original_filename": "TEST_SOP.html",
+                    "revision": "TEST-R1", "package_type": "interactive_html",
+                    "lifecycle_at_release": "released",
+                }]})
+            return httpx.Response(200, json={"data": {"id": 1, "document_type": "SOP"}})
+
+        transport_client = httpx.AsyncClient(
+            base_url="https://mes.example/", transport=httpx.MockTransport(handler)
+        )
+        client = OpenMESClient("https://mes.example", user_token="user-token", client=transport_client)
+        try:
+            documents = await OpenMESAdapter(client).get_work_order_documents("6")
+        finally:
+            await client.aclose()
+            await transport_client.aclose()
+
+        self.assertEqual(documents[0]["doc_id"], "1")
+        self.assertEqual(documents[0]["doc_type"], "SOP")
+        self.assertEqual(documents[0]["lifecycle_status"], "released")
+        self.assertEqual(seen[1].url.path, "/api/v1/engineering-documents/1")
+
     async def test_missing_openmes_user_token_fails_without_fallback(self) -> None:
         client = OpenMESClient("https://mes.example")
         try:
@@ -182,3 +266,72 @@ class RealIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JsonHttpFailureMappingTests(unittest.IsolatedAsyncioTestCase):
+    """失败验证：超时/网络中断/远端错误必须映射为明确的 IntegrationError，
+    不得伪装成"查询结果为空"（next_development_plan 阶段四）。"""
+
+    def _client(self, handler) -> tuple[JsonHttpClient, httpx.AsyncClient]:
+        transport = httpx.MockTransport(handler)
+        transport_client = httpx.AsyncClient(base_url="https://erp.example/", transport=transport)
+        http = JsonHttpClient("https://erp.example", client=transport_client)
+        return http, transport_client
+
+    async def test_timeout_maps_to_retryable_integration_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout("timed out", request=request)
+
+        http, transport_client = self._client(handler)
+        try:
+            with self.assertRaises(IntegrationError) as ctx:
+                await http.request_json("GET", "api/resource/Item")
+        finally:
+            await http.aclose()
+            await transport_client.aclose()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertTrue(ctx.exception.retryable)
+
+    async def test_network_error_maps_to_retryable_integration_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused", request=request)
+
+        http, transport_client = self._client(handler)
+        try:
+            with self.assertRaises(IntegrationError) as ctx:
+                await http.request_json("GET", "api/resource/Item")
+        finally:
+            await http.aclose()
+            await transport_client.aclose()
+        self.assertEqual(ctx.exception.code, "network_error")
+        self.assertTrue(ctx.exception.retryable)
+
+    async def test_remote_500_maps_to_retryable_remote_http_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, json={"message": "boom"})
+
+        http, transport_client = self._client(handler)
+        try:
+            with self.assertRaises(IntegrationError) as ctx:
+                await http.request_json("GET", "api/resource/Item")
+        finally:
+            await http.aclose()
+            await transport_client.aclose()
+        self.assertEqual(ctx.exception.code, "remote_http_error")
+        self.assertTrue(ctx.exception.retryable)
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIn("boom", str(ctx.exception))
+
+    async def test_remote_404_is_not_retryable_and_keeps_detail(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, json={"message": "not found"})
+
+        http, transport_client = self._client(handler)
+        try:
+            with self.assertRaises(IntegrationError) as ctx:
+                await http.request_json("GET", "api/resource/Item")
+        finally:
+            await http.aclose()
+            await transport_client.aclose()
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertFalse(ctx.exception.retryable)

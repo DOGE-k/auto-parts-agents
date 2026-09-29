@@ -1,0 +1,163 @@
+{
+  "aic": "TBD-QUOTATION-AGENT-001",
+  "active": true,
+  "lastModifiedTime": "2026-09-27T17:27:21.381488+00:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件报价智能体",
+  "description": "负责汽车零部件订单的报价处理，包括询价信息抽取、成本计算、报价草稿生成和成本评估。只负责报价建议和草稿生成，不做最终定价批准。",
+  "version": "1.0.0",
+  "provider": {
+    "countryCode": "CN",
+    "organization": "AutoParts Intelligence",
+    "department": "AI Agent Team",
+    "url": "https://autoparts-agent.example.com",
+    "name": "Dev Team",
+    "email": "dev@autoparts-agent.example.com"
+  },
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS",
+      "description": "双向TLS认证，智能体间高安全级别通信"
+    },
+    "apiKey": {
+      "type": "apiKey",
+      "description": "API Key 认证，用于本地开发和测试",
+      "name": "X-API-Key",
+      "in": "header"
+    }
+  },
+  "endPoints": [
+    {
+      "url": "http://localhost:8001/aip/quotation/rpc",
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "apiKey": []
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "text/plain",
+    "application/json",
+    "text/markdown"
+  ],
+  "skills": [
+    {
+      "id": "quotation.extract_rfq",
+      "name": "询价信息抽取",
+      "description": "从客户询价单（文本/JSON）中抽取关键信息，包括客户名称、物料、数量、交期、质量要求等。配置 DeepSeek API Key 时启用 LLM 智能抽取，否则使用确定性规则回退。",
+      "version": "1.1.0",
+      "tags": [
+        "报价",
+        "信息抽取",
+        "RFQ",
+        "LLM"
+      ],
+      "examples": [
+        "提取这份询价单的关键信息",
+        "客户说要1000个齿轮，下月底交货，帮我整理成RFQ"
+      ],
+      "inputModes": [
+        "text/plain",
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.analyze_rfq",
+      "name": "RFQ 智能分析",
+      "description": "深度分析 RFQ 描述，提取结构化信息并给出报价建议（复杂度评估、数量折扣、风险提示、价格调整因子）。支持 DeepSeek LLM 增强抽取。",
+      "version": "1.0.0",
+      "tags": [
+        "报价",
+        "RFQ分析",
+        "定价建议",
+        "LLM"
+      ],
+      "examples": [
+        "分析这个询价单的报价策略",
+        "给我报价建议"
+      ],
+      "inputModes": [
+        "text/plain",
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.calculate_cost",
+      "name": "成本计算",
+      "description": "基于BOM结构、材料价格、加工工时和管理费率，计算产品的详细成本构成和报价建议。",
+      "version": "1.0.0",
+      "tags": [
+        "报价",
+        "成本计算",
+        "BOM"
+      ],
+      "examples": [
+        "计算这个产品的成本",
+        "给我一个报价方案"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.create_draft",
+      "name": "报价草稿生成",
+      "description": "根据成本计算结果和报价策略，生成正式报价单草稿，等待人工审批后生效。",
+      "version": "1.0.0",
+      "tags": [
+        "报价",
+        "草稿",
+        "报价单"
+      ],
+      "examples": [
+        "生成报价单草稿"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.create_cost_assessment",
+      "name": "成本评估报告",
+      "description": "对采购方案进行成本影响评估，包括额外采购成本、交期影响、库存成本等。",
+      "version": "1.0.0",
+      "tags": [
+        "报价",
+        "成本评估",
+        "采购影响"
+      ],
+      "examples": [
+        "评估这个采购方案的成本影响"
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ]
+}
