@@ -1005,4 +1005,16 @@ ERP 物料需求
 **验证**：Wutong 客户端成功响应、租户请求头、远端错误和无 `acsMap` 数据缺口测试通过；后端全量 **106 passed**、`compileall` 和前端构建通过。当前运行环境 `WUTONG_DISCOVERY_URL` 为空，因此真实 API 验证为 HTTP 503 配置缺口，没有外部网络写入。
 
 **边界与下一步**：跨实例调用仍需在获得 Wutong Registry 注册和鉴权契约后接入；当前 discovery 结果只读返回给业务侧，不改变协调者本地真实技能目录。
+
+### 3.28 请求级 Bearer 身份会话门禁（2026-09-30）
+
+**已完成**：
+
+1. `require_real_identity` 读取请求 `Authorization: Bearer <token>`；请求会话存在时，身份解析优先使用该令牌调用 OpenMES `GET /api/auth/me`，而不是继续使用服务端集成 token。
+2. 请求 Bearer 解析失败、格式错误或当前 provider 不支持会话时直接返回身份错误，禁止静默降级为 `Administrator` 等服务账号；CORS 同时允许 `Authorization` 请求头。
+3. 没有请求会话时保留原有服务端 ERPNext/OpenMES 身份解析，兼容当前本地部署；`REAL_IDENTITY_PROVIDER=auto|openmes` 才接受请求 Bearer，会话主体和角色仍由上游返回。
+
+**验证**：新增请求会话优先级、ERPNext provider 拒绝降级、嵌套 OpenMES 用户响应测试；后端全量 **108 passed**、`compileall` 通过。当前运行环境仍使用服务端 ERPNext `Administrator`（没有浏览器 Bearer 会话），因此没有新增真实系统写入。
+
+**边界与下一步**：前端尚未内置企业 SSO 登录页；接入 OIDC/ERPNext/OpenMES 登录后，只需把短期 Bearer 会话附加到 API 请求即可复用现有角色门禁。长期 token 不写入项目配置或审计日志。
 ```

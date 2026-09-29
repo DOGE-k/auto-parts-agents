@@ -66,7 +66,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Idempotency-Key", "X-Real-Write-Token"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Real-Write-Token"],
 )
 
 
@@ -176,7 +176,9 @@ def require_real_write_access(
     return True
 
 
-async def require_real_identity():
+async def require_real_identity(
+    authorization: str | None = Header(default=None),
+):
     """Resolve the authenticated upstream user for real business actions.
 
     ``approved_by`` in a request is treated only as a compatibility hint and
@@ -184,8 +186,17 @@ async def require_real_identity():
     """
     from app.services.identity import resolve_real_identity
 
+    bearer = ""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.casefold() != "bearer" or not value.strip():
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "invalid_authorization", "message": "Authorization 必须是 Bearer 会话"},
+            )
+        bearer = value.strip()
     try:
-        return await resolve_real_identity()
+        return await resolve_real_identity(request_bearer_token=bearer)
     except IntegrationError as exc:
         raise HTTPException(
             status_code=503,

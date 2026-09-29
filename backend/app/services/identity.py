@@ -151,8 +151,13 @@ async def _from_erpnext(settings: IntegrationSettings) -> RealIdentity:
         await client.aclose()
 
 
-async def _from_openmes(settings: IntegrationSettings) -> RealIdentity:
-    client = OpenMESClient(settings.openmes_base_url, user_token=settings.openmes_user_token)
+async def _from_openmes(
+    settings: IntegrationSettings,
+    *,
+    request_token: str | None = None,
+) -> RealIdentity:
+    token = (request_token or settings.openmes_user_token).strip()
+    client = OpenMESClient(settings.openmes_base_url, user_token=token)
     try:
         raw_payload = await client.current_user()
         # OpenMES returns the authenticated user in ``data``; accepting the
@@ -189,14 +194,37 @@ async def _from_openmes(settings: IntegrationSettings) -> RealIdentity:
         await client.aclose()
 
 
-async def resolve_real_identity(settings: IntegrationSettings | None = None) -> RealIdentity:
-    """从配置的真实身份源解析当前主体，不接受浏览器自报身份作为回退。"""
+async def resolve_real_identity(
+    settings: IntegrationSettings | None = None,
+    *,
+    request_bearer_token: str | None = None,
+) -> RealIdentity:
+    """解析当前主体；请求会话存在时优先使用其上游身份。
+
+    请求 Bearer 会话目前只对 OpenMES/OIDC 兼容身份源开放。携带会话但
+    无法解析时直接失败，绝不静默回退到服务端集成账号。
+    """
     settings = settings or IntegrationSettings.from_environment()
     provider = settings.real_identity_provider
     if provider not in {"auto", "erpnext", "openmes"}:
         raise IntegrationError(
             f"不支持的 REAL_IDENTITY_PROVIDER: {provider}", code="identity_config_invalid"
         )
+    request_token = (request_bearer_token or "").strip()
+    if request_token:
+        if settings.real_identity_provider not in {"auto", "openmes"} or not settings.openmes_base_url:
+            raise IntegrationError(
+                "请求 Bearer 会话无法映射到已配置的 OpenMES/OIDC 身份源",
+                code="identity_request_token_unsupported",
+            )
+        try:
+            return await _from_openmes(settings, request_token=request_token)
+        except Exception as exc:
+            raise IntegrationError(
+                f"请求 Bearer 会话身份解析失败：{exc}",
+                code="identity_request_token_invalid",
+            ) from exc
+
     attempts: list[Exception] = []
     candidates = ["erpnext", "openmes"] if provider == "auto" else [provider]
     for candidate in candidates:

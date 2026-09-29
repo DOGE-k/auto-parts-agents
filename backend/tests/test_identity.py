@@ -41,8 +41,10 @@ class FakeERPClient:
 
 
 class FakeMESClient:
+    last_token = ""
+
     def __init__(self, *args, **kwargs):
-        pass
+        FakeMESClient.last_token = kwargs.get("user_token", "")
 
     async def current_user(self):
         return {"username": "mes-user", "roles": ["quality_manager"]}
@@ -81,6 +83,28 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity.actor_id, "mes-user")
         self.assertIn("quality_manager", identity.roles)
         self.assertEqual(identity.provider, "openmes")
+
+    async def test_request_bearer_session_takes_precedence_over_service_token(self):
+        configured = settings(
+            real_identity_provider="auto",
+            openmes_user_token="service-account-token",
+        )
+        with patch("app.services.identity.OpenMESClient", FakeMESClient):
+            identity = await resolve_real_identity(
+                configured,
+                request_bearer_token="browser-session-token",
+            )
+
+        self.assertEqual(identity.actor_id, "mes-user")
+        self.assertEqual(FakeMESClient.last_token, "browser-session-token")
+
+    async def test_request_bearer_is_not_silently_downgraded_to_erp_service_account(self):
+        configured = settings(
+            real_identity_provider="erpnext",
+            openmes_base_url="",
+        )
+        with self.assertRaisesRegex(IntegrationError, "Bearer"):
+            await resolve_real_identity(configured, request_bearer_token="browser-session-token")
 
     async def test_openmes_nested_user_envelope_and_role_objects(self):
         class NestedMESClient(FakeMESClient):
