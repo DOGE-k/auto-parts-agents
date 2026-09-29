@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, approveQuotation as approveQuotationApi, createPoFromPlan } from "./api";
+import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, approveQuotation as approveQuotationApi, createPoFromPlan, getRealIdentity } from "./api";
 import type {
   AgentRunSummary,
   AgentRunDetail,
   AgentRunEvidenceItem,
   AssistantAnswer,
   ProposalSupplierOption,
+  RealIdentity,
 } from "./api";
 
 // ========== 类型定义 ==========
@@ -267,6 +268,7 @@ export default function RealBusinessPage() {
   const [workOrderId, setWorkOrderId] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const [identity, setIdentity] = useState<RealIdentity | null>(null);
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
   const [agentRuns, setAgentRuns] = useState<AgentRunSummary[]>([]);
@@ -304,13 +306,15 @@ export default function RealBusinessPage() {
     setProposalExec((prev) => (prev ? { ...prev, stage: "executing" } : prev));
     setError("");
     try {
+      const actor = identity?.actor_id || approver;
+      if (!actor) throw new Error("真实身份尚未解析，不能提交审批");
       let quotationApprovalId = "";
       if (quotation?.needsApproval) {
-        const qApproval = await approveQuotationApi(quotation.id, quotation.approver);
+        const qApproval = await approveQuotationApi(quotation.id, actor);
         quotationApprovalId = qApproval.approval_id;
       }
-      const approval = await approveProcurementPlan(planId, optionId, approver);
-      const draftResult = await createPoFromPlan(planId, approval.approval_id, approver);
+      const approval = await approveProcurementPlan(planId, optionId, actor);
+      const draftResult = await createPoFromPlan(planId, approval.approval_id, actor);
       setProposalExecResult({
         option_id: optionId,
         approval_id: approval.approval_id,
@@ -354,6 +358,13 @@ export default function RealBusinessPage() {
     setToast(message);
     window.setTimeout(() => setToast(""), 3000);
   };
+
+  // 审批人来自 ERPNext/OpenMES 当前登录用户；页面不再让操作者自报角色。
+  useEffect(() => {
+    void getRealIdentity()
+      .then(setIdentity)
+      .catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+  }, [identity]);
 
   // 查询 Agent 运行记录（持久化在数据库中，服务重启后仍可查）
   const loadAgentRuns = useCallback(async (agentType: string) => {
@@ -450,7 +461,7 @@ export default function RealBusinessPage() {
           method: "POST",
           body: JSON.stringify({
             approved,
-            approved_by: "sales_manager",
+            approved_by: identity?.actor_id,
             notes: approved ? "同意报价，价格合理" : "驳回，价格需重新评估",
           }),
         },
@@ -473,7 +484,7 @@ export default function RealBusinessPage() {
     } finally {
       setLoading(false);
     }
-  }, [quotation]);
+  }, [quotation, identity]);
 
   // 步骤3: 创建 ERP 草稿
   const createErpDraft = useCallback(async () => {
@@ -488,7 +499,7 @@ export default function RealBusinessPage() {
           body: JSON.stringify({
             quotation_id: quotation.quotation_id,
             approval_id: quotation.approval_id,
-            approved_by: "sales_manager",
+            approved_by: identity?.actor_id,
           }),
         },
       );
@@ -504,7 +515,7 @@ export default function RealBusinessPage() {
     } finally {
       setLoading(false);
     }
-  }, [quotation]);
+  }, [quotation, identity]);
 
   // 步骤4: 采购分析（基于报价，读取真实 BOM/库存/供应商数据）
   const analyzeProcurement = useCallback(async () => {
@@ -545,7 +556,7 @@ export default function RealBusinessPage() {
           body: JSON.stringify({
             option_id: selectedOptionId,
             approved,
-            approved_by: "purchase_manager",
+            approved_by: identity?.actor_id,
             notes: approved ? "确认供应商方案" : "驳回，重新询价",
           }),
         },
@@ -562,7 +573,7 @@ export default function RealBusinessPage() {
     } finally {
       setLoading(false);
     }
-  }, [plan, selectedOptionId]);
+  }, [plan, selectedOptionId, identity]);
 
   // 步骤6: 创建 ERP 采购订单草稿并回读
   const createPoDraft = useCallback(async () => {
@@ -575,7 +586,7 @@ export default function RealBusinessPage() {
         body: JSON.stringify({
           plan_id: plan.plan_id,
           approval_id: plan.approval_id,
-          approved_by: "purchase_manager",
+          approved_by: identity?.actor_id,
         }),
       });
       const plans = await api<ProcurementPlan[]>("/real-orders/procurement/plans");
@@ -592,7 +603,7 @@ export default function RealBusinessPage() {
     } finally {
       setLoading(false);
     }
-  }, [plan]);
+  }, [plan, identity]);
 
   // 步骤7: 跟单 + 质量 + 发运门禁
   const loadTracking = useCallback(async () => {
@@ -648,6 +659,14 @@ export default function RealBusinessPage() {
             <span className="ds-label">客户/物料/BOM/价格/库存 · 只读 + 草稿写入</span>
             <span className="source-tag mes">OpenMES</span>
             <span className="ds-label">工单/进度/质量 · 只读</span>
+          </div>
+          <div className="data-source-info">
+            <span className="source-tag erp">审批身份</span>
+            <span className="ds-label">
+              {identity
+                ? `${identity.display_name}（${identity.actor_id}，${identity.authority}，角色：${identity.roles.join("、") || "未返回"}）`
+                : "正在从 ERPNext/OpenMES 解析当前登录用户…"}
+            </span>
           </div>
         </div>
         <div className="heading-badges">
@@ -756,21 +775,21 @@ export default function RealBusinessPage() {
                                   <div className="proposal-confirm-row">
                                     {needsQuotationApproval && qid && (
                                       <input
-                                        value={proposalExec?.quotationApprover ?? ""}
-                                        onChange={(e) => setProposalExec((prev) => (prev ? { ...prev, quotationApprover: e.target.value } : prev))}
-                                        placeholder="报价审批人（如 sales_manager）"
+                                        value={identity?.actor_id ?? proposalExec?.quotationApprover ?? ""}
+                                        readOnly
+                                        placeholder="等待真实身份"
                                       />
                                     )}
                                     <input
-                                      value={proposalExec?.approver ?? ""}
-                                      onChange={(e) => setProposalExec((prev) => (prev ? { ...prev, approver: e.target.value } : prev))}
-                                      placeholder="方案审批人（如 purchase_manager）"
+                                      value={identity?.actor_id ?? proposalExec?.approver ?? ""}
+                                      readOnly
+                                      placeholder="等待真实身份"
                                     />
                                   </div>
                                   <div className="proposal-confirm-row">
                                     <button
                                       className="button primary"
-                                      disabled={!proposalExec?.approver.trim() || Boolean(needsQuotationApproval && qid && !proposalExec?.quotationApprover.trim())}
+                                      disabled={!identity}
                                       onClick={() => void executeProposal(
                                         planId,
                                         opt.option_id,
@@ -789,7 +808,7 @@ export default function RealBusinessPage() {
                             })()}
                           </div>
                         ) : (
-                          <button className="button ghost proposal-exec-btn" onClick={() => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: "purchase_manager", quotationApprover: "sales_manager" })}>
+                          <button className="button ghost proposal-exec-btn" disabled={!identity} onClick={() => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: identity?.actor_id ?? "", quotationApprover: identity?.actor_id ?? "" })}>
                             选择此方案并起草 PO（需人工确认）→
                           </button>
                         ))}

@@ -98,6 +98,49 @@ def require_real_write_access(
     return True
 
 
+async def require_real_identity():
+    """Resolve the authenticated upstream user for real business actions.
+
+    ``approved_by`` in a request is treated only as a compatibility hint and
+    is checked against this server-resolved identity by each write endpoint.
+    """
+    from app.services.identity import resolve_real_identity
+
+    try:
+        return await resolve_real_identity()
+    except IntegrationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "identity_unavailable", "message": f"真实身份解析失败：{exc}"},
+        ) from exc
+
+
+def _actor_for_request(provided: str | None, identity, capability: str) -> str:
+    """Validate an optional legacy actor field and enforce the business role."""
+    from app.services.identity import ensure_role
+
+    try:
+        ensure_role(identity, capability)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    value = (provided or "").strip()
+    if value and value != identity.actor_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "actor_mismatch",
+                "message": "请求中的审批人必须与真实身份源返回的当前用户一致",
+                "authenticated_actor": identity.actor_id,
+            },
+        )
+    return identity.actor_id
+
+
 @app.get("/api/integrations/status", tags=["integrations"])
 def integration_status() -> dict:
     """Report which providers are configured without revealing credentials."""
@@ -639,7 +682,7 @@ async def real_order_quality_package(work_order_id: str) -> dict:
 
 
 class RealOrderQualityIssueResolutionRequest(BaseModel):
-    requested_by: str
+    requested_by: str | None = None
     notes: str | None = None
 
 
@@ -648,17 +691,20 @@ async def real_order_request_quality_issue_resolution(
     issue_id: str,
     body: RealOrderQualityIssueResolutionRequest,
     _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
 ) -> dict:
     """建立质量问题处理审批记录，不写入 OpenMES。"""
     from app.services.real_order import request_quality_issue_resolution
-    result = request_quality_issue_resolution(issue_id, body.requested_by, body.notes)
+    requested_by = _actor_for_request(body.requested_by, identity, "quality_resolution_request")
+    result = request_quality_issue_resolution(issue_id, requested_by, body.notes)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "创建审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
 class RealOrderQualityIssueApproveRequest(BaseModel):
-    approved_by: str
+    approved_by: str | None = None
 
 
 @app.post("/api/real-orders/quality/resolution-approvals/{approval_id}/approve", tags=["real-orders"])
@@ -666,12 +712,15 @@ async def real_order_approve_quality_issue_resolution(
     approval_id: str,
     body: RealOrderQualityIssueApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
 ) -> dict:
     """批准质量问题处理请求；此步骤也不写入 OpenMES。"""
     from app.services.real_order import approve_quality_issue_resolution
-    result = approve_quality_issue_resolution(approval_id, body.approved_by)
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_approval")
+    result = approve_quality_issue_resolution(approval_id, approved_by)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
@@ -679,7 +728,7 @@ class RealOrderQualityIssueResolveRequest(BaseModel):
     work_order_id: str
     resolution_notes: str
     approval_id: str
-    approved_by: str
+    approved_by: str | None = None
 
 
 @app.post("/api/real-orders/quality/issues/{issue_id}/resolve", tags=["real-orders"])
@@ -687,20 +736,23 @@ async def real_order_resolve_quality_issue(
     issue_id: str,
     body: RealOrderQualityIssueResolveRequest,
     _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
 ) -> dict:
     """使用已持久化且已批准的审批记录写入 OpenMES，并回读验证。"""
     from app.services.real_order import resolve_quality_issue
+    approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_write")
     result = await resolve_quality_issue(
         work_order_id=body.work_order_id,
         issue_id=issue_id,
         resolution_notes=body.resolution_notes,
         approval_id=body.approval_id,
-        approved_by=body.approved_by,
+        approved_by=approved_by,
     )
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     if not result.get("success") and result.get("written"):
         raise HTTPException(status_code=502, detail=result)
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
@@ -759,14 +811,14 @@ class RealOrderProcurementAnalyzeRequest(BaseModel):
 class RealOrderProcurementApproveRequest(BaseModel):
     option_id: str
     approved: bool
-    approved_by: str
+    approved_by: str | None = None
     notes: str | None = None
 
 
 class RealOrderPoDraftFromPlanRequest(BaseModel):
     plan_id: str
     approval_id: str
-    approved_by: str
+    approved_by: str | None = None
 
 
 @app.get("/api/real-orders/erp/suppliers/search", tags=["real-orders"])
@@ -808,46 +860,60 @@ async def real_order_get_procurement_plan(plan_id: str) -> dict:
 async def real_order_approve_procurement_plan(
     plan_id: str,
     body: RealOrderProcurementApproveRequest,
+    identity=Depends(require_real_identity),
 ) -> dict:
     """审批采购方案（选择供应商方案 + 批准/驳回）。"""
     from app.services.real_order import approve_procurement_plan
+    approved_by = _actor_for_request(body.approved_by, identity, "procurement_approval")
     result = await approve_procurement_plan(
         plan_id=plan_id,
         option_id=body.option_id,
         approved=body.approved,
-        approved_by=body.approved_by,
+        approved_by=approved_by,
         notes=body.notes,
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
 @app.post("/api/real-orders/erp/draft/po-from-plan", tags=["real-orders"])
-async def real_order_create_po_from_plan(body: RealOrderPoDraftFromPlanRequest) -> dict:
+async def real_order_create_po_from_plan(
+    body: RealOrderPoDraftFromPlanRequest,
+    identity=Depends(require_real_identity),
+) -> dict:
     """根据已审批采购方案创建 ERP 采购订单草稿（创建+回读确认）。"""
     from app.services.real_order import create_erp_purchase_order_from_plan
+    approved_by = _actor_for_request(body.approved_by, identity, "po_draft_creation")
     result = await create_erp_purchase_order_from_plan(
         plan_id=body.plan_id,
         approval_id=body.approval_id,
-        approved_by=body.approved_by,
+        approved_by=approved_by,
     )
     if not result.get("success"):
         error_msg = result.get("error") or result.get("draft", {}).get("error") or "创建失败"
         raise HTTPException(status_code=400, detail=error_msg)
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
 class RealOrderQuotationApproveRequest(BaseModel):
     approved: bool
-    approved_by: str
+    approved_by: str | None = None
     notes: str | None = None
 
 
 class RealOrderErpDraftFromQuotationRequest(BaseModel):
     quotation_id: str
     approval_id: str
-    approved_by: str
+    approved_by: str | None = None
+
+
+@app.get("/api/real-orders/identity/me", tags=["real-orders"])
+async def real_order_identity(identity=Depends(require_real_identity)) -> dict:
+    """返回当前真实身份及业务角色，供页面显示和审批审计使用。"""
+    return identity.as_dict()
 
 
 @app.get("/api/real-orders/quotations", tags=["real-orders"])
@@ -871,17 +937,20 @@ async def real_order_get_quotation(quotation_id: str) -> dict:
 async def real_order_approve_quotation(
     quotation_id: str,
     body: RealOrderQuotationApproveRequest,
+    identity=Depends(require_real_identity),
 ) -> dict:
     """审批报价（通过/驳回）。审批通过后可用于创建 ERP 草稿。"""
     from app.services.real_order import approve_quotation
+    approved_by = _actor_for_request(body.approved_by, identity, "quotation_approval")
     result = await approve_quotation(
         quotation_id=quotation_id,
         approved=body.approved,
-        approved_by=body.approved_by,
+        approved_by=approved_by,
         notes=body.notes,
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 
@@ -893,17 +962,22 @@ async def real_order_list_approvals() -> list[dict]:
 
 
 @app.post("/api/real-orders/erp/draft/from-quotation", tags=["real-orders"])
-async def real_order_create_so_from_quotation(body: RealOrderErpDraftFromQuotationRequest) -> dict:
+async def real_order_create_so_from_quotation(
+    body: RealOrderErpDraftFromQuotationRequest,
+    identity=Depends(require_real_identity),
+) -> dict:
     """根据已审批报价创建 ERP 销售订单草稿（创建+回读确认）。"""
     from app.services.real_order import create_erp_sales_order_from_quotation
+    approved_by = _actor_for_request(body.approved_by, identity, "sales_order_draft_creation")
     result = await create_erp_sales_order_from_quotation(
         quotation_id=body.quotation_id,
         approval_id=body.approval_id,
-        approved_by=body.approved_by,
+        approved_by=approved_by,
     )
     if not result.get("success"):
         error_msg = result.get("error") or result.get("draft", {}).get("error") or "创建失败"
         raise HTTPException(status_code=400, detail=error_msg)
+    result["authenticated_identity"] = identity.as_dict()
     return result
 
 

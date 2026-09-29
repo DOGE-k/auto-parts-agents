@@ -20,6 +20,10 @@ class IntegrationSettings:
     openmes_base_url: str
     openmes_user_token: str
     openmes_erp_api_key: str
+    # 审批身份来源。默认优先读取 ERPNext 当前登录用户，再回退 OpenMES。
+    # 角色映射是 JSON 字符串，密钥可以是外部用户名或 "*"。
+    real_identity_provider: str = "auto"
+    real_identity_role_map: str = ""
 
     @classmethod
     def from_environment(cls) -> "IntegrationSettings":
@@ -34,6 +38,8 @@ class IntegrationSettings:
             openmes_base_url=os.getenv("OPENMES_BASE_URL", "").strip(),
             openmes_user_token=os.getenv("OPENMES_TOKEN", "").strip(),
             openmes_erp_api_key=os.getenv("OPENMES_ERP_API_KEY", "").strip(),
+            real_identity_provider=os.getenv("REAL_IDENTITY_PROVIDER", "auto").strip().lower() or "auto",
+            real_identity_role_map=os.getenv("REAL_IDENTITY_ROLE_MAP", "").strip(),
         )
 
     def public_status(self) -> dict[str, dict[str, bool | str]]:
@@ -49,5 +55,9 @@ class IntegrationSettings:
             "openmes": {
                 "configured": bool(self.openmes_base_url and self.openmes_user_token),
                 "erp_read_api_configured": bool(self.openmes_base_url and self.openmes_erp_api_key),
+            },
+            "identity": {
+                "provider": self.real_identity_provider,
+                "role_map_configured": bool(self.real_identity_role_map),
             },
         }

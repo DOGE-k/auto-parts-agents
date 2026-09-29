@@ -871,6 +871,28 @@ ERP 物料需求
 - 新增 `backend/tests/test_acs_sync.py`，校验每个 ACS 文件存在、技能 ID 不重复、真实技能集合与能力目录一致。
 - 验证：ACS 生成脚本通过，ACS 同步测试 **1 passed**，`compileall` 通过；本步骤只修改本地能力描述文件，不写入 ERPNext/OpenMES。
 
+### 3.22 真实审批身份与角色来源（2026-09-30）
+
+**实现内容**：
+
+1. 新增 `backend/app/services/identity.py`：从 ERPNext `frappe.auth.get_logged_user` + `User` 详情，或 OpenMES `GET /api/auth/me` 解析当前认证主体；不再把浏览器提交的 `approved_by` 当作身份凭证。
+2. 新增 `REAL_IDENTITY_PROVIDER=auto|erpnext|openmes` 与可选 `REAL_IDENTITY_ROLE_MAP` JSON 配置。ERPNext/OpenMES 返回的 `Sales Manager`、`Purchase Manager`、`Quality Manager` 等角色统一归一化为业务角色；平台管理员保留真实用户名并按管理员权限通过角色门禁。
+3. 报价审批、销售订单草稿、采购方案审批、采购订单草稿及质量处理审批接口均校验后端解析的主体与业务角色。请求体中的 `approved_by/requested_by` 仅作兼容提示，缺省时由后端填入真实主体，若与真实主体不一致返回 403 `actor_mismatch`。
+4. 新增 `GET /api/real-orders/identity/me`；真实业务页面显示当前身份/来源/角色，审批卡片移除 `sales_manager`/`purchase_manager` 自报输入，使用解析出的 `actor_id`。
+5. 审批写入返回 `authenticated_identity`，使审批记录同时可追溯外部身份源、主体和角色。
+
+**验证**：
+
+- 9000 重启后 `GET /api/real-orders/identity/me` 返回 HTTP 200：`subject=Administrator`、`authority=ERPNext`、`provider=erpnext`，角色来自真实 ERPNext `User.roles` 列表。
+- 已对既有报价 `QUO-93AAB835646A` 重放审批请求（不产生新记录），HTTP 200，返回原审批号 `APPR-2DD01946C804` 并附当前认证身份。
+- 定向身份测试 **7 passed**；后端全量 **91 passed**；`compileall` 与前端 `npm run build` 通过。
+- 本次没有新增 ERPNext/OpenMES 业务写入；报价审批重放命中既有幂等记录，未产生新审批或草稿。
+
+**遗留与下一步**：
+
+- 当前真实部署使用 ERPNext 集成账号 `Administrator` 作为上游认证主体；接入企业 SSO/OIDC 后，将 `REAL_IDENTITY_PROVIDER` 替换为对应 provider 或扩展同一解析接口即可，审批接口无需改动。
+- NCR `close/disposition` 与纠正措施校验仍未接入，继续保持 `NOT_SUPPORTED`；随后处理 Mock 后端隔离、速率 ETA、Wutong 外部发现。
+
 ## 8. 当前结论
 
 阶段 1（ERP↔MES 关联）已完成：字段确认、只读接口、关联值回填（WO-2026-001 → SAL-ORD-2026-00001）、LINKED 验证。
@@ -902,9 +924,9 @@ ERP 物料需求
 执行闭环（阶段七）验收通过：方案卡片批准→审批门禁→PO 草稿回读（PUR-ORD-2026-00009/00010）；
 状态联动复验通过（协调者查到方案状态/审批号/PO 草稿号）
 阶段八（质量异常协同 + 审批一致性）✅ 已完成（§3.17/§3.18/§3.20）：编号→数字 id 桥接、报价状态一致性、审批/草稿幂等保护、方案覆盖一致性、真实 DeepSeek 问答和双审批 ERP 写入均已完成（83 passed）；
-阶段八改动尚未提交 git
+阶段八改动已提交：`8ef554c`；ACS 同步与身份治理随后分别提交，当前工作树仅保留本地运行日志/验收输入文件。
 工程可维护性已修正：核心 `backend/app/services` 已重新纳入 Git 可见范围
-测试与安全：pytest 独立测试库（83 passed）、失败验证矩阵补齐、无硬编码凭据；git 最新提交 fdc65cd（阶段七）
-仍余（生产可用验收前）：检验数据补录决策、质量写回真实身份/角色治理、
-NCR close/disposition 闭环、旧 Mock 场景后端隔离、速率 ETA、Wutong 外部发现与 ACS 文件同步
+测试与安全：pytest 独立测试库（90 passed）、失败验证矩阵补齐、无硬编码凭据；身份来源与角色门禁已接入，ACS 已与真实 AIP 注册表同步。
+仍余（生产可用验收前）：检验数据补录决策、NCR close/disposition 闭环、
+旧 Mock 场景后端隔离、速率 ETA、Wutong 外部发现、企业 SSO/OIDC 身份源接入
 ```

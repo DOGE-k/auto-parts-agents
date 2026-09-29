@@ -243,6 +243,20 @@ export type QualityImpactResult = {
   data_gaps: { field: string; detail: string }[];
 };
 
+export type RealIdentity = {
+  subject: string;
+  actor_id: string;
+  display_name: string;
+  roles: string[];
+  authority: string;
+  provider: string;
+  authenticated: boolean;
+};
+
+export async function getRealIdentity(): Promise<RealIdentity> {
+  return api<RealIdentity>("/real-orders/identity/me");
+}
+
 export type ProposalOptions = {
   plan_id?: string;
   quotation_id?: string;
