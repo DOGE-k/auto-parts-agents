@@ -73,6 +73,58 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 同一工单按官方批次工序接口补产 1800/2000（90%）：三项门禁全 ✓，"可以发运"。API 交叉验证 `can_ship=true`。截图 `gui-test-screenshots/2026-09-29_scenarioB_ship_gate_passed.png`。该场景为 TEST_ 标记测试数据，不代表生产数据。
 
+## 阶段八：质量异常协同 + 审批一致性（2026-09-30 已完成——进度记录见 current_status_and_fix_plan.md §3.17/§3.18/§3.20）
+
+### 背景与目标
+
+两件事合并为一个阶段：
+
+**A. 审批一致性修复**（§3.16 验收发现的遗留）：问答链的报价 analyze 后未走报价审批，方案卡片却可批准方案并起草 PO——出现"报价 DRAFT vs 方案 APPROVED"的治理不一致（协调者自己都指出了）。修复：方案卡片批准时，若关联报价未审批，确认面板**同时包含两条审批线**（报价审批 + 采购方案审批，各自生成审批记录），一次人工确认、两笔留痕，不静默跳过。
+
+**B. 例子三（质量异常协同）落地**（讨论稿最后未实现的例子）：问"这个工单有质量异常吗？影响交付吗？怎么办？"→ 协调者动态链：质量包（问题/文档/门禁）→ 跟单进度 → 发运门禁 → 质量异常影响分析 → 输出：异常清单（严重度/状态/批次关联）、对交期与发运的影响、可执行的处理选项（真实能力边界内：已接入的 resolve 审批写回通道指引 + 8 步流程），数据缺口如实标注（检验记录 0 条、NCR 完整处置 NOT_SUPPORTED）。
+
+### 任务清单与当前状态（2026-09-30 收尾）
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | 新真实技能 `quality.assess_quality_impact(work_order_id)`：质量问题清单 + 批次关联（MES 客户端/适配器新方法 `list_work_order_batches`/`get_work_order_batches`，base.py 协议与 mock.py 空实现同步）+ 门禁 + 生产进度交叉 → 影响结论；数据缺口如实列出（检验 0 条/SN 无 API/NCR NOT_SUPPORTED/批次读取失败不伪造为空） | ✅ 完成 |
+| 2 | AIP 接线（quality_document_aip.py 注册 `quality.assess_quality_impact`）；协调者工具目录新增该技能；`_collect_proposal` 汇集 `quality_impacts` 与 `quotation_status` | ✅ 完成 |
+| 3 | 前端：方案卡片双审批线确认面板（`quotation_status !== "APPROVED"` 时追加报价审批行与审批人输入，`approveQuotationApi`→`approveProcurementPlan`→`createPoFromPlan`，回显两笔审批号）；质量影响问答区块（异常表/批次/结论/处理选项/数据缺口）；api.ts 类型（QualityImpactResult 等） | ✅ 完成，build 通过 |
+| 4 | （可选，**待用户批准**）seed 脚本补录 TEST_ 检验记录 | ⬜ 未做（用户未批准，跳过） |
+| 5 | 测试：质量影响、编号→ID 桥接、协调者调用链、报价状态一致性、审批/草稿幂等、方案覆盖回归；全量 **83 passed**，compileall/build 通过 | ✅ 完成 |
+| 6 | 真实验收 | ✅ DeepSeek 缺料问答、双审批、PO 草稿创建/回读、状态问答均已通过（运行记录见 §3.20） |
+| 7 | 文档 §3.18/§3.20（已更新）+ 记忆 + git 提交 | ⚠️ 文档完成；**git 未提交**（阶段八改动全部在工作区） |
+
+### 收尾记录
+
+**已完成的只读验收**：AIP `tracking.find_real_by_no` 已将 `WO-2026-001` 精确转换为数字 `work_order_id=2`；随后直接调用 `quality.assess_quality_impact` 已返回真实质量/门禁/生产数据和缺口。协调者的假 LLM 调用链测试确认编号桥接先于质量查询。
+
+**暴露的真实缺口**：用户自然语言说的是工单**编号**（WO-2026-001，实际数字 id=2），而全部 MES 查询工具只接受数字 id——缺"编号→id"桥接。
+
+**已完成的修复**：`find_work_order_by_no` 已注册 AIP、加入协调者目录与提示，并补齐真实适配器假数据测试和协调链测试；采购分析已携带独立 `quotation_status`，审批/草稿重复执行会幂等回读。
+- **已完成验收步骤**：DeepSeek 缺料问答 → 双审批 → 两笔 approval_id/PO 草稿回读 → 状态查询复核 → 全量回归；结果记录见 current_status_and_fix_plan.md §3.20。
+
+**注意事项**：
+- 前端双审批线逻辑依赖 `proposal_options.quotation_status`，由 `_collect_proposal` 从采购分析结果携带；该字段现在明确取自报价记录，和采购方案自身的 `status` 分离。
+- 验收 Q6 期望值以真实 OpenMES 当时的数据为准（质量问题状态可能变化），不硬编码断言；
+- 测试命令：`cd backend && ../.conda-env/python.exe -m pytest tests -q`（当前 83 passed）；前端 `cd frontend && npm run build`；后端重启命令见 §2。
+
+### 数据前提（需用户决策）
+
+- 检验记录 0 条：如需在质量异常分析中展示 IQC/IPQC 检验数据，需要用户批准 seed 脚本向 OpenMES 补录 TEST_ 标记检验数据（参照 seed_supplier_data 幂等模式）。**未批准前，检验维度如实显示"无数据"。**
+
+### 验收标准（本阶段）
+
+1. 质量异常问答输出的问题/门禁/批次信息全部可溯真实记录；无检验数据时如实说"无检验数据"，不编造；
+2. 卡片批准后报价与方案两侧审批状态一致（各自有 approval_id），协调者状态查询不再报不一致；
+3. 协调者不开放质量写回（resolve 指引到既有审批通道）；83 passed 不回归。
+
+### 明确不做
+
+- 不开放 NCR close/disposition（仍 NOT_SUPPORTED 如实标注）；
+- 不做供应商质量表现聚合（问题记录无供应商字段，推断关联被禁；待 MES 数据模型支持）；
+- 身份治理（approved_by 自报）另立任务。
+
 ## 阶段七：执行闭环——方案批准与草稿起草（2026-09-29 立项，已完成 ✅）
 
 > 验收记录见 current_status_and_fix_plan.md §3.16。全部任务完成：assess_combination 确定性组合
@@ -98,13 +150,13 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 1 | 新增真实技能 `procurement.assess_combination(plan_id, option_ids[])`：确定性计算分单采购组合（覆盖并集/组合成本=真实行项目求和/最长交期），供协调者与卡片引用，防止 LLM 自行拼数 | ⬜ |
-| 2 | 协调者：能力目录加 assess_combination；prompt 补"组合方案必须用该技能计算，不得自行相加" | ⬜ |
-| 3 | 前端方案卡片执行闭环：确认对话框（写入内容明示+审批人输入框）→ 顺序调用既有 `approve` 与 `po-from-plan` 端点 → 回读状态与草稿编号回显 → 已批准/已起草状态防重复提交 | ⬜ |
-| 4 | 后端辅助：`GET /api/real-orders/procurement/plans/{plan_id}` 已有（复用）；如缺则补"按 quotation 查最新 plan"查询 | ⬜ |
-| 5 | 测试：assess_combination 确定性计算与覆盖并集（假数据）；重复审批防护；全量回归 | ⬜ |
-| 6 | 真实验收：问缺料方案 → 卡片批准 → PO 草稿编号回读（ERPNext docstatus=0）→ 问协调者"SAL-ORD-2026-00023 的方案批准了吗"验证状态联动；截图与调用链留痕 | ⬜ |
-| 7 | 文档 §3.16 + 计划勾稽 + 记忆 + git 提交 | ⬜ |
+| 1 | 新增真实技能 `procurement.assess_combination(plan_id, option_ids[])`：确定性计算分单采购组合（覆盖并集/组合成本=真实行项目求和/最长交期），供协调者与卡片引用，防止 LLM 自行拼数 | ✅ |
+| 2 | 协调者：能力目录加 assess_combination；prompt 补"组合方案必须用该技能计算，不得自行相加" | ✅ |
+| 3 | 前端方案卡片执行闭环：确认对话框（写入内容明示+审批人输入框）→ 顺序调用既有 `approve` 与 `po-from-plan` 端点 → 回读状态与草稿编号回显 → 已批准/已起草状态防重复提交 | ✅ |
+| 4 | 后端辅助：`GET /api/real-orders/procurement/plans/{plan_id}` 已有（复用）；按 quotation 查最新 plan 查询已接入 | ✅ |
+| 5 | 测试：assess_combination 确定性计算与覆盖并集（假数据）；重复审批防护；全量回归 | ✅ |
+| 6 | 真实验收：问缺料方案 → 卡片批准 → PO 草稿编号回读（ERPNext docstatus=0）→ 问协调者"SAL-ORD-2026-00023 的方案批准了吗"验证状态联动；调用链留痕 | ✅ |
+| 7 | 文档 §3.16 + 计划勾稽 + 记忆 + git 提交 | ⚠️ 文档已完成，git 提交待统一收尾 |
 
 ### 验收标准
 
@@ -233,13 +285,12 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 ## 后续候选任务（优先级从高到低）
 
-1. **阶段七执行闭环**（见上节：方案卡片批准→PO 草稿→状态联动）；
-2. 例子三（质量异常联动）前置数据：批次/SN 追溯与检验记录补录（需用户批准 seed 脚本）；
-3. 质量写回接入真实用户/角色身份来源，替代共享服务端令牌与页面自报身份；
-4. NCR close/disposition 与纠正措施校验接入（当前页面如实标注 NOT_SUPPORTED）；
-5. 旧 Mock 场景后端隔离（Mock 注册表与真实链共用进程）；
-6. 速率 ETA（依赖 MES 排程/报工时序数据，当前无数据源）；
-7. Wutong 外部注册发现接入（协调智能体跨实例发现）与 ACS 能力文件同步真实技能。
+1. **阶段八质量异常协同 + 审批一致性**（见上节，讨论稿例子三落地）；
+2. 质量写回接入真实用户/角色身份来源，替代共享服务端令牌与页面自报身份；
+3. NCR close/disposition 与纠正措施校验接入（当前页面如实标注 NOT_SUPPORTED）；
+4. 旧 Mock 场景后端隔离（Mock 注册表与真实链共用进程）；
+5. 速率 ETA（依赖 MES 排程/报工时序数据，当前无数据源）；
+6. Wutong 外部注册发现接入（协调智能体跨实例发现）与 ACS 能力文件同步真实技能。
 
 ## 每次开发后必须记录
 

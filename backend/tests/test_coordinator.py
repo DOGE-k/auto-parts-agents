@@ -50,6 +50,46 @@ def _tool_call(call_id: str, skill_id: str, arguments: str) -> dict:
 
 
 class CoordinatorLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_work_order_number_bridge_precedes_quality_lookup(self):
+        llm = _FakeLLM([
+            {"choices": [{"message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [_tool_call("c1", "tracking__find_real_by_no", '{"work_order_no": "WO-2026-001"}')],
+            }}]},
+            {"choices": [{"message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [_tool_call("c2", "quality__assess_quality_impact", '{"work_order_id": "2"}')],
+            }}]},
+            {"choices": [{"message": {
+                "role": "assistant",
+                "content": "WO-2026-001 当前质量状态已完成核实。",
+            }}]},
+        ])
+        invoked: list[tuple[str, str, dict]] = []
+
+        async def fake_invoker(agent_type, skill_id, inputs):
+            invoked.append((agent_type, skill_id, inputs))
+            if skill_id == "tracking.find_real_by_no":
+                return {"found": True, "work_order_id": "2", "work_order_no": "WO-2026-001", "authority": "OpenMES"}
+            return {"status": "ok", "work_order_id": "2", "work_order_no": "WO-2026-001", "quality_gate_passed": False}
+
+        coordinator = BusinessCoordinator(llm, skill_invoker=fake_invoker)
+        try:
+            result = await coordinator.ask("WO-2026-001 有质量异常吗？")
+        finally:
+            await coordinator.aclose()
+
+        self.assertEqual(
+            [(skill, args) for _, skill, args in invoked],
+            [
+                ("tracking.find_real_by_no", {"work_order_no": "WO-2026-001"}),
+                ("quality.assess_quality_impact", {"work_order_id": "2"}),
+            ],
+        )
+        self.assertEqual(result["answer"], "WO-2026-001 当前质量状态已完成核实。")
+
     async def test_tool_loop_builds_chain_and_persists_run(self):
         llm = _FakeLLM([
             {"choices": [{"message": {
@@ -226,6 +266,23 @@ class BuildCoordinatorTests(unittest.TestCase):
 
 class RealSkillWiringTests(unittest.IsolatedAsyncioTestCase):
     """AIP 真实技能处理器必须调用 real_order 的真实函数（薄封装）。"""
+
+    async def test_tracking_find_by_no_calls_real_order(self):
+        from app.aip.agents.tracking_aip import create_tracking_aip_service
+
+        service = create_tracking_aip_service()
+        captured = {}
+
+        async def fake_find(work_order_no: str):
+            captured["work_order_no"] = work_order_no
+            return {"found": True, "work_order_id": "2", "work_order_no": work_order_no}
+
+        with patch("app.services.real_order.find_work_order_by_no", side_effect=fake_find):
+            handler = service._skill_handlers["tracking.find_real_by_no"]
+            result = await handler({"work_order_no": "WO-2026-001"})
+
+        self.assertEqual(captured["work_order_no"], "WO-2026-001")
+        self.assertEqual(result["work_order_id"], "2")
 
     async def test_tracking_real_track_calls_real_order(self):
         from app.aip.agents.tracking_aip import create_tracking_aip_service

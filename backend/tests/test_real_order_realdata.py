@@ -155,7 +155,7 @@ class ProcurementRealDataTests(unittest.IsolatedAsyncioTestCase):
     def _quotation(self, item_id="DEMO-PROD", qty=2000):
         q = {
             "quotation_id": "QUO-TEST", "item": {"item_id": item_id}, "quantity": qty,
-            "unit_price": "76.5", "currency": "CNY",
+            "unit_price": "76.5", "currency": "CNY", "status": "DRAFT",
         }
         real_order.save_quotation(q)
         return q
@@ -266,6 +266,7 @@ class ProcurementRealDataTests(unittest.IsolatedAsyncioTestCase):
             plan = await real_order.analyze_procurement("QUO-TEST")
 
         self.assertEqual(plan["status"], "NO_SHORTAGE")
+        self.assertEqual(plan["quotation_status"], "DRAFT")
         self.assertEqual(plan["recommendation_rule"], "not_applicable_no_shortage")
         self.assertEqual(plan["supplier_options"], [])
         self.assertIsInstance(plan["data_limitations"], list)

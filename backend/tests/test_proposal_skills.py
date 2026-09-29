@@ -80,6 +80,77 @@ def _option(option_id: str, total_cost: str, complete: bool = True) -> dict:
     }
 
 
+class FindWorkOrderByNoTests(unittest.IsolatedAsyncioTestCase):
+    """工单可见编号到数字 ID 的桥接必须精确匹配且不猜 ID。"""
+
+    async def test_exact_number_returns_numeric_id(self):
+        class _FakeMES:
+            async def get_work_orders_strict(self, scope):
+                return [
+                    {"work_order_id": "2", "work_order_no": "WO-2026-001", "status": "ACCEPTED", "authority": "OpenMES"},
+                    {"work_order_id": "3", "work_order_no": "WO-2026-002", "status": "BLOCKED", "authority": "OpenMES"},
+                ]
+
+        with patch.object(real_order, "get_mes_adapter", return_value=_FakeMES()):
+            result = await real_order.find_work_order_by_no(" WO-2026-001 ")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["work_order_id"], "2")
+        self.assertEqual(result["work_order_no"], "WO-2026-001")
+
+    async def test_unknown_number_returns_suggestions_without_id_guess(self):
+        class _FakeMES:
+            async def get_work_orders_strict(self, scope):
+                return [{"work_order_id": "2", "work_order_no": "WO-2026-001", "customer_order_no": "SAL-1"}]
+
+        with patch.object(real_order, "get_mes_adapter", return_value=_FakeMES()):
+            result = await real_order.find_work_order_by_no("WO-2099-999")
+
+        self.assertFalse(result["found"])
+        self.assertEqual(result["work_order_no"], "WO-2099-999")
+        self.assertEqual(result["existing_work_orders"][0]["work_order_no"], "WO-2026-001")
+        self.assertNotIn("work_order_id", result)
+
+
+class ApprovalIdempotencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repeated_quotation_approval_reuses_original_record(self):
+        _persist_quotation("QUO-IDEMP", "SAL-IDEMP", "850.00", 10)
+
+        first = await real_order.approve_quotation("QUO-IDEMP", True, "sales_manager")
+        second = await real_order.approve_quotation("QUO-IDEMP", True, "sales_manager")
+
+        self.assertEqual(first["approval_id"], second["approval_id"])
+        self.assertTrue(second["idempotent_replay"])
+
+    async def test_repeated_procurement_approval_and_po_draft_reuse_records(self):
+        _persist_plan(
+            "PROC-IDEMP",
+            "QUO-IDEMP-2",
+            baseline="100.00",
+            options=[_option("OPT-1", "120.00")],
+        )
+
+        first = await real_order.approve_procurement_plan("PROC-IDEMP", "OPT-1", True, "purchase_manager")
+        second = await real_order.approve_procurement_plan("PROC-IDEMP", "OPT-1", True, "purchase_manager")
+        self.assertEqual(first["approval_id"], second["approval_id"])
+        self.assertTrue(second["idempotent_replay"])
+
+        plan = real_order.get_procurement_plan("PROC-IDEMP")
+        assert plan is not None
+        plan["status"] = "PO_DRAFT_CREATED"
+        plan["po_draft_id"] = "PUR-ORD-IDEMP"
+        plan["po_draft"] = {"status": "DRAFT", "draft_id": "PUR-ORD-IDEMP", "authority": "ERPNext", "read_back_verified": True}
+        real_order.save_procurement_plan(plan)
+
+        with patch.object(real_order, "get_erp_adapter", side_effect=AssertionError("idempotent replay must not call ERP")):
+            replay = await real_order.create_erp_purchase_order_from_plan(
+                "PROC-IDEMP", first["approval_id"], "purchase_manager"
+            )
+        self.assertTrue(replay["success"])
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(replay["draft"]["draft_id"], "PUR-ORD-IDEMP")
+
+
 class AssessCostImpactTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _persist_quotation("QUO-CI", "SAL-ORD-2026-00023", "17000.00", 2000)
@@ -184,6 +255,7 @@ class ProposalCollectionTests(unittest.TestCase):
             ("procurement.analyze_real", {
                 "plan_id": "PROC-CI",
                 "quotation_id": "QUO-CI",
+                "quotation_status": "APPROVED",
                 "net_requirement": {
                     "has_shortage": True,
                     "shortage_count": 1,
@@ -217,6 +289,7 @@ class ProposalCollectionTests(unittest.TestCase):
         self.assertEqual(len(proposal["supplier_options"]), 1)
         self.assertEqual(proposal["cost_assessments"][0]["material_cost_delta"], "60.00")
         self.assertEqual(proposal["delivery_assessments"][0]["verdict"], "arrival_in_time")
+        self.assertEqual(proposal["quotation_status"], "APPROVED")
         self.assertNotIn("data_missing", proposal)
 
     def test_collects_data_missing_entries(self):
@@ -230,6 +303,124 @@ class ProposalCollectionTests(unittest.TestCase):
         proposal = BusinessCoordinator._collect_proposal(collected)
         self.assertEqual(len(proposal["data_missing"]), 1)
         self.assertEqual(proposal["data_missing"][0]["source_skill"], "quotation.assess_cost_impact")
+
+    def test_current_analysis_is_not_overwritten_by_old_plan_status_readback(self):
+        """状态回读可能命中旧方案，但方案卡片必须保留本轮分析生成的方案。"""
+        current = {
+            "plan_id": "PROC-CURRENT",
+            "quotation_id": "QUO-CI",
+            "quotation_status": "DRAFT",
+            "status": "PENDING_APPROVAL",
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 1,
+                "finished_item": "BD-2401",
+                "shortage_items": [{"item_id": "CI-RAW", "net_requirement": "1200"}],
+            },
+            "supplier_options": [_option("OPT-1", "1060.00")],
+            "recommendation": "当前方案推荐 OPT-1",
+        }
+        old_plan = {
+            "plan_id": "PROC-OLD",
+            "quotation_id": "QUO-CI",
+            "quotation_status": "APPROVED",
+            "status": "PO_DRAFT_CREATED",
+            "selected_option_id": "OPT-9",
+            "approval_id": "APPR-OLD",
+            "po_draft_id": "PUR-OLD",
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 9,
+                "finished_item": "OLD-ITEM",
+                "shortage_items": [{"item_id": "OLD-RAW", "net_requirement": "9"}],
+            },
+            "supplier_options": [_option("OPT-9", "9999.00")],
+            "recommendation": "旧方案",
+        }
+
+        proposal = BusinessCoordinator._collect_proposal([
+            ("procurement.analyze_real", current),
+            ("procurement.get_real_plan", old_plan),
+        ])
+
+        self.assertIsNotNone(proposal)
+        self.assertEqual(proposal["plan_id"], "PROC-CURRENT")
+        self.assertEqual(proposal["quotation_status"], "DRAFT")
+        self.assertEqual(proposal["shortage"]["finished_item"], "BD-2401")
+        self.assertEqual(proposal["supplier_options"][0]["option_id"], "OPT-1")
+        self.assertNotIn("plan_status", proposal)
+
+    def test_matching_plan_status_readback_only_supplements_status(self):
+        current = {
+            "plan_id": "PROC-CURRENT-STATUS",
+            "quotation_id": "QUO-CI",
+            "quotation_status": "DRAFT",
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 1,
+                "shortage_items": [{"item_id": "CI-RAW", "net_requirement": "1200"}],
+            },
+            "supplier_options": [_option("OPT-1", "1060.00")],
+        }
+        status_readback = {
+            "plan_id": "PROC-CURRENT-STATUS",
+            "quotation_status": "DRAFT",
+            "status": "PO_DRAFT_CREATED",
+            "selected_option_id": "OPT-1",
+            "approval_id": "APPR-CURRENT",
+            "po_draft_id": "PUR-CURRENT",
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 1,
+                "shortage_items": [{"item_id": "CI-RAW", "net_requirement": "1200"}],
+            },
+            "supplier_options": [_option("OPT-1", "1060.00")],
+        }
+
+        proposal = BusinessCoordinator._collect_proposal([
+            ("procurement.analyze_real", current),
+            ("procurement.get_real_plan", status_readback),
+        ])
+
+        self.assertEqual(proposal["plan_id"], "PROC-CURRENT-STATUS")
+        self.assertEqual(proposal["plan_status"], "PO_DRAFT_CREATED")
+        self.assertEqual(proposal["selected_option_id"], "OPT-1")
+        self.assertEqual(proposal["approval_id"], "APPR-CURRENT")
+        self.assertEqual(proposal["po_draft_id"], "PUR-CURRENT")
+
+    def test_assessments_from_old_plan_are_not_attached_to_current_card(self):
+        current = {
+            "plan_id": "PROC-CURRENT-ASSESS",
+            "quotation_id": "QUO-CI",
+            "quotation_status": "DRAFT",
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 1,
+                "shortage_items": [{"item_id": "CI-RAW", "net_requirement": "1200"}],
+            },
+            "supplier_options": [_option("OPT-1", "1060.00")],
+        }
+        old_cost = {
+            "status": "ok",
+            "plan_id": "PROC-OLD-ASSESS",
+            "option_id": "OPT-1",
+            "material_cost_delta": "-999.00",
+        }
+        current_cost = {
+            "status": "ok",
+            "plan_id": "PROC-CURRENT-ASSESS",
+            "option_id": "OPT-1",
+            "material_cost_delta": "60.00",
+        }
+
+        proposal = BusinessCoordinator._collect_proposal([
+            ("procurement.analyze_real", current),
+            ("quotation.assess_cost_impact", old_cost),
+            ("quotation.assess_cost_impact", current_cost),
+        ])
+
+        self.assertEqual(len(proposal["cost_assessments"]), 1)
+        self.assertEqual(proposal["cost_assessments"][0]["material_cost_delta"], "60.00")
 
     def test_new_skills_registered_on_aip_services(self):
         from app.aip.agents.quotation_aip import create_quotation_aip_service
@@ -311,3 +502,144 @@ class AssessCombinationTests(unittest.IsolatedAsyncioTestCase):
         from app.aip.agents.procurement_aip import create_procurement_aip_service
         skills = {s["id"] for s in create_procurement_aip_service().list_skills()}
         self.assertIn("procurement.assess_combination", skills)
+
+
+class AssessQualityImpactTests(unittest.IsolatedAsyncioTestCase):
+    """质量异常影响分析（阶段八，讨论稿例子三）。"""
+
+    @staticmethod
+    def _fake_quality(*, records, open_issues, gate_passed, missing=None, inspections=None):
+        async def fake_quality(work_order_id: str):
+            return {
+                "work_order_id": work_order_id,
+                "quality_records": records,
+                "open_issues_count": open_issues,
+                "missing_documents": missing or [],
+                "inspections": inspections if inspections is not None else [],
+                "quality_gate_passed": gate_passed,
+                "gate_details": {"missing_documents": missing or []},
+                "authority": "OpenMES",
+                "data_source": "openmes_api",
+            }
+        return fake_quality
+
+    @staticmethod
+    def _fake_track():
+        async def fake_track(work_order_id: str):
+            return {
+                "work_order_no": "WO-2026-001",
+                "status": "ACCEPTED",
+                "quantity": "500",
+                "completed_qty": "0",
+                "completion_rate": 0.0,
+                "due_date": "2026-10-20",
+                "risks": [],
+                "data_source": "openmes_api",
+                "authority": "OpenMES",
+            }
+        return fake_track
+
+    async def test_open_issues_block_shipping_with_conclusions(self):
+        records = [
+            {"record_id": "2", "title": "铸铁毛坯库存不足", "severity": "CRITICAL", "status": "OPEN", "record_type": "Material Shortage"},
+            {"record_id": "1", "title": "制动盘外径尺寸超差", "severity": "MEDIUM", "status": "RESOLVED", "record_type": "Measurement / Dimension Error"},
+        ]
+        with patch.object(real_order, "quality_package", side_effect=self._fake_quality(records=records, open_issues=1, gate_passed=False, missing=["SOP"])), \
+             patch.object(real_order, "track_order", side_effect=self._fake_track()):
+            result = await real_order.assess_quality_impact("2")
+
+        self.assertEqual(result["status"], "ok")
+        # 未关闭问题排在最前（严重度排序只作用于未关闭记录）
+        self.assertEqual(result["open_records"][0]["record_id"], "2")
+        # 已解决问题不计入未关闭
+        self.assertEqual(len(result["open_records"]), 1)
+        conclusions = " ".join(result["impact_conclusions"])
+        self.assertIn("1 项未关闭质量问题", conclusions)
+        self.assertIn("SOP", conclusions)
+        self.assertIn("0%", conclusions)
+        # 数据缺口如实标注（检验 0 条 + SN 无 API + NCR NOT_SUPPORTED）
+        gap_fields = [g["field"] for g in result["data_gaps"]]
+        self.assertIn("inspections", gap_fields)
+        self.assertIn("sn_traceability", gap_fields)
+        self.assertIn("ncr_full_disposition", gap_fields)
+        # 处理选项均标注需人工确认
+        self.assertTrue(all(o["requires_human_confirmation"] for o in result["handling_options"]))
+
+    async def test_clean_work_order_reports_no_block(self):
+        async def fake_track_done(work_order_id: str):
+            return {
+                "work_order_no": "WO-2026-001",
+                "status": "DONE",
+                "quantity": "500",
+                "completed_qty": "500",
+                "completion_rate": 100.0,
+                "due_date": "2026-10-20",
+                "risks": [],
+                "data_source": "openmes_api",
+                "authority": "OpenMES",
+            }
+
+        with patch.object(real_order, "quality_package", side_effect=self._fake_quality(records=[], open_issues=0, gate_passed=True)), \
+             patch.object(real_order, "track_order", side_effect=fake_track_done):
+            result = await real_order.assess_quality_impact("7")
+        self.assertTrue(result["quality_gate_passed"])
+        self.assertIn("不构成发运阻断", " ".join(result["impact_conclusions"]))
+
+    async def test_batches_loaded_via_adapter(self):
+        class _FakeMES:
+            authority = "OpenMES"
+
+            async def get_work_order_batches(self, work_order_id: str):
+                return [
+                    {"batch_id": "3", "lot_number": "TEST_LOT_PAGE_9", "target_qty": "2000", "status": "PENDING",
+                     "authority": "OpenMES", "data_source": "openmes_api"},
+                ]
+
+        with patch.object(real_order, "quality_package", side_effect=self._fake_quality(records=[], open_issues=0, gate_passed=True)), \
+             patch.object(real_order, "track_order", side_effect=self._fake_track()), \
+             patch.object(real_order, "get_mes_adapter", return_value=_FakeMES()):
+            result = await real_order.assess_quality_impact("9")
+
+        self.assertEqual(result["batches"][0]["lot_number"], "TEST_LOT_PAGE_9")
+        self.assertFalse(any(g["field"] == "batches" for g in result["data_gaps"]))
+
+    async def test_batch_failure_is_a_data_gap_not_empty(self):
+        class _FailingMES:
+            authority = "OpenMES"
+
+            async def get_work_order_batches(self, work_order_id: str):
+                raise RuntimeError("MES 连接失败")
+
+        with patch.object(real_order, "quality_package", side_effect=self._fake_quality(records=[], open_issues=0, gate_passed=True)), \
+             patch.object(real_order, "track_order", side_effect=self._fake_track()), \
+             patch.object(real_order, "get_mes_adapter", return_value=_FailingMES()):
+            result = await real_order.assess_quality_impact("9")
+
+        self.assertEqual(result["batches"], [])
+        batch_gaps = [g for g in result["data_gaps"] if g["field"] == "batches"]
+        self.assertEqual(len(batch_gaps), 1)
+        self.assertIn("MES 连接失败", batch_gaps[0]["detail"])
+
+    def test_collector_gathers_quality_impact(self):
+        collected = [
+            ("quality.assess_quality_impact", {
+                "status": "ok",
+                "work_order_id": "2",
+                "work_order_no": "WO-2026-001",
+                "quality_records": [{"record_id": "2", "title": "铸铁毛坯库存不足", "severity": "CRITICAL", "status": "OPEN"}],
+                "open_issues_count": 1,
+                "open_records": [{"record_id": "2"}],
+                "batches": [],
+                "quality_gate_passed": False,
+                "missing_documents": ["SOP"],
+                "production": {"completion_rate": 0.0, "status": "ACCEPTED", "due_date": "2026-10-20"},
+                "impact_conclusions": ["存在 1 项未关闭质量问题"],
+                "handling_options": [{"option": "解决质量问题", "how": "resolve 审批通道", "requires_human_confirmation": True}],
+                "data_gaps": [{"field": "inspections", "detail": "无检验记录"}],
+            }),
+        ]
+        proposal = BusinessCoordinator._collect_proposal(collected)
+        qi = proposal["quality_impacts"][0]
+        self.assertEqual(qi["work_order_no"], "WO-2026-001")
+        self.assertEqual(qi["open_issues_count"], 1)
+        self.assertEqual(len(qi["data_gaps"]), 1)

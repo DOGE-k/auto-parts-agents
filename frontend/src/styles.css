@@ -2356,3 +2356,24 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .proposal-exec-result { border-top: 1px solid var(--line-soft); padding-top: 8px; font-size: 11px; }
 .proposal-exec-result.ok { color: var(--teal-dark); font-weight: 600; }
 .proposal-exec-result.error { color: #c4453c; }
+
+/* ===== 质量异常影响分析（阶段八） ===== */
+.quality-impact-block {
+  padding: 10px 12px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-sm); display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+}
+.quality-impact-head { font-weight: 700; }
+.quality-impact-head.ok { color: var(--teal-dark); }
+.quality-impact-head.bad { color: #a8352d; }
+.quality-impact-batches { color: var(--muted); }
+.quality-impact-conclusions { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.quality-impact-conclusions li { margin-bottom: 3px; }
+.quality-impact-options > small { display: block; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.quality-impact-option {
+  padding: 5px 8px; margin-bottom: 4px; background: var(--surface-2);
+  border-left: 3px solid var(--teal); border-radius: 4px; font-size: 11px; color: var(--ink-2);
+}
+.quality-impact-gaps {
+  padding: 6px 8px; background: rgba(230, 168, 36, 0.08); border: 1px solid rgba(230, 168, 36, 0.35);
+  border-radius: var(--r-sm); font-size: 11px; color: var(--ink-2);
+}

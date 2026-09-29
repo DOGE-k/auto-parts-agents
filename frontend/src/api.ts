@@ -228,9 +228,25 @@ export type ProposalCombination = {
   warnings: string[];
 };
 
+export type QualityImpactResult = {
+  work_order_id: string;
+  work_order_no: string;
+  quality_records: { record_id?: string; title?: string; severity?: string; status?: string; record_type?: string; reported_at?: string }[];
+  open_issues_count: number;
+  open_records: { record_id?: string; title?: string; severity?: string; status?: string }[];
+  batches: { batch_id: string; lot_number: string; target_qty: string; status: string }[];
+  quality_gate_passed: boolean;
+  missing_documents: string[];
+  production: { completion_rate: number; status: string; due_date: string };
+  impact_conclusions: string[];
+  handling_options: { option: string; how: string; requires_human_confirmation: boolean }[];
+  data_gaps: { field: string; detail: string }[];
+};
+
 export type ProposalOptions = {
   plan_id?: string;
   quotation_id?: string;
+  quotation_status?: string;
   shortage?: {
     finished_item: string;
     shortage_count: number;
@@ -241,6 +257,7 @@ export type ProposalOptions = {
   cost_assessments?: ProposalCostAssessment[];
   delivery_assessments?: ProposalDeliveryAssessment[];
   combination_assessments?: ProposalCombination[];
+  quality_impacts?: QualityImpactResult[];
   data_missing?: { source_skill: string; missing_fields: { field: string; detail: string }[]; need: string }[];
 };
 
@@ -261,6 +278,22 @@ export async function approveProcurementPlan(
       approved: true,
       approved_by: approvedBy,
       notes: "问答方案卡片人工确认（阶段七执行闭环）",
+    }),
+  });
+}
+
+export type QuotationApprovalResult = { approval_id: string; approved_by: string; quotation_id: string };
+
+export async function approveQuotation(
+  quotationId: string,
+  approvedBy: string,
+): Promise<QuotationApprovalResult> {
+  return api<QuotationApprovalResult>(`/real-orders/quotations/${encodeURIComponent(quotationId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      approved: true,
+      approved_by: approvedBy,
+      notes: "问答方案卡片双审批线（阶段八审批一致性）",
     }),
   });
 }

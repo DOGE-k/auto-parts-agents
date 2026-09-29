@@ -171,6 +171,10 @@ class MockMESAdapter:
         """Mock 检验记录：返回空列表（Mock 场景不模拟检验功能）。"""
         return []
 
+    async def get_work_order_batches(self, work_order_id: str) -> list[dict[str, Any]]:
+        """Mock 批次：返回空列表（Mock 场景不模拟批次追溯）。"""
+        return []
+
     async def resolve_quality_issue(self, issue_id: str, resolution_notes: str) -> dict[str, Any]:
         raise RuntimeError("MockMES 不执行质量问题写回")
 

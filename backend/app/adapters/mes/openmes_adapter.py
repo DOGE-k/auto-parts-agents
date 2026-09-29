@@ -316,6 +316,24 @@ class OpenMESAdapter:
             for r in rows
         ]
 
+    async def get_work_order_batches(self, work_order_id: str) -> list[dict[str, Any]]:
+        """获取工单生产批次（批次/SN 追溯维度）。
+
+        接口真实存在；无批次时返回空列表。连接失败抛出异常。
+        """
+        rows = await self._client.list_work_order_batches(work_order_id)
+        return [
+            {
+                "batch_id": str(r.get("id", "")),
+                "lot_number": r.get("lot_number", ""),
+                "target_qty": str(r.get("target_qty", "")),
+                "status": r.get("status", ""),
+                "authority": self.authority,
+                "data_source": "openmes_api",
+            }
+            for r in rows
+        ]
+
     async def resolve_quality_issue(self, issue_id: str, resolution_notes: str) -> dict[str, Any]:
         return await self._client.resolve_issue(issue_id, resolution_notes)
 

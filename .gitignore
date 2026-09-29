@@ -17,6 +17,9 @@ frontend/vite.config.d.ts
 eab.json
 # 本地部署的第三方服务源码（各自独立 git 仓库，单独克隆获取）
 services/
+!backend/app/services/
+!backend/app/services/**
+backend/app/services/**/__pycache__/
 # 编辑器分享产物
 .trae-html-share-packages/
 # 临时运行文件

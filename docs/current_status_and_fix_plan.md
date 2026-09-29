@@ -786,6 +786,84 @@ ERP 物料需求
 
 **遗留（新增）**：问答链报价未走报价审批（方案侧已批准 vs 报价 DRAFT 不一致）——建议方案卡片批准时同步校验报价审批状态或引导先审批报价，列为下一迭代。
 
+### 3.17 阶段八进行中快照：质量异常协同 + 审批一致性（2026-09-29，⚠️ 暂停交接）
+
+> 本节按用户 2026-09-29 指令如实记录阶段八中断状态，供下一个执行者（人或 AI）接手。
+> 完整任务清单与交接说明见 docs/next_development_plan.md 阶段八；写入依据：用户"开始"（阶段八计划批准）。
+
+**已完成并验证**：
+
+1. **新真实技能 `quality.assess_quality_impact(work_order_id)`**（real_order.py，@_agent_run("quality","impact")）：质量问题清单（未关闭按严重度排序）+ 批次关联 + 质量门禁 + 生产进度交叉 → 影响结论（发运阻断/交期风险）；数据缺口如实列出（检验 0 条、SN 无 API、NCR NOT_SUPPORTED、批次读取失败记为缺口不伪造为空）；处理选项均标注需人工确认。
+2. **MES 批次读取**：客户端 `list_work_order_batches`（GET /api/v1/work-orders/{id}/batches，Bearer）、适配器 `get_work_order_batches`、base.py 协议、mock.py 空实现。
+3. **AIP 接线**：quality_document_aip 注册 `quality.assess_quality_impact`（9000 健康检查实测列出）。
+4. **协调者**：工具目录新增该技能（描述引导质量异常场景）；`_collect_proposal` 汇集 `quality_impacts` 与 `quotation_status`。
+5. **前端**：方案卡片双审批线（报价未审批→确认面板①报价审批②方案审批两行，各自审批人输入，依次 approveQuotationApi→approveProcurementPlan→createPoFromPlan，回显两笔审批号）+ 质量影响问答区块（异常表/批次/结论/处理选项/数据缺口）；api.ts 新增 QualityImpactResult/quotation_status 类型与 approveQuotation 封装；样式追加。**npm run build 通过**。
+6. **测试**：quality impact 5 例（未关闭排序、干净工单无阻断、批次经适配器、批次失败为数据缺口、汇集器采集）；全量 **74 passed**；compileall 通过。
+
+**做到一半（未完成，接手者从这里继续）**：
+
+- **Q6 真实验收中断**："WO-2026-001 这个工单有质量异常吗？会影响交付吗？该怎么处理？"已真实执行（HTTP 200）：协调者 4 步链交叉核实后如实回答"WO-2026-001 在系统中查不到"（assess_quality_impact/get_real_package 因参数非数字 id 被远端拒绝、track_real NOT_FOUND、lookup_order_link ERP_ORDER_NOT_FOUND），给出 3 条补数路径——**行为正确但暴露缺口：用户说工单编号、工具只收数字 id**。
+- **修复做了一半**：`real_order.find_work_order_by_no(work_order_no)` 函数已写完并编译通过（精确编号匹配、未命中返回 existing_work_orders 建议），但 **AIP 未注册、协调者目录未加、测试未写、后端未重启**（当前 9000 进程无该技能）。
+- **剩余验收**：重启后端 → Q6 重跑（期望 find_by_no→assess_quality_impact，回答含 WO-2026-001 真实质量状态）→ 双审批线卡片批准验收（两笔 approval_id + PO 草稿回读）→ 状态一致性复查（报价不再是 DRAFT 不一致）→ 截图 → 全量回归 → git 提交。
+
+**本阶段 ERP/MES 写入**：暂无（find_work_order_by_no 为只读；双审批线功能未做真实验收写入）。测试 74 passed；前端 build 通过；**阶段八全部改动未提交 git**。
+
+**遗留问题清单（更新，优先级从高到低）**：
+
+1. 阶段八收尾（见上：编号→id 接线 + 剩余验收）；
+2. 检验记录补录 seed（用户未批准，检验维度如实显示"无数据"）；
+3. 质量写回真实用户/角色身份治理（现为服务端令牌 + 页面自报 approved_by）；
+4. NCR close/disposition 接入（NOT_SUPPORTED 如实标注）；
+5. 旧 Mock 场景后端隔离（Mock 注册表与真实链共用进程）；
+6. 速率 ETA（依赖 MES 排程/报工时序数据，当前无数据源）；
+7. Wutong 外部注册发现 + ACS 能力文件同步真实技能。
+
+### 3.18 阶段八继续开发：工单编号桥接与审批状态一致性（2026-09-30）
+
+**已完成并验证**：
+
+1. `tracking.find_real_by_no` 已注册到 `tracking` AIP 服务；协调者能力目录和系统提示已明确要求：用户给出 `WO-...` 编号时，必须先精确换取数字 `work_order_id`，禁止把编号中的数字当数据库 ID。
+2. 新增编号桥接单元测试和协调者两步调用链测试（`find_real_by_no → assess_quality_impact`）；未命中时返回已有工单编号建议，不猜测 ID。
+3. `_collect_proposal` 不再把采购方案状态误当报价状态；采购分析结果新增 `quotation_status`，取自持久化报价记录。真实报价审批状态为 `APPROVED` 时，方案卡片不会重复要求报价审批。
+4. 报价审批、采购方案审批和 PO 草稿创建增加幂等回读：重复点击复用原 `approval_id`/草稿编号；已批准方案不能改选供应商；已存在 PO 草稿时不会再次调用 ERP 创建单据。
+5. 9001/9002 临时后端已加载新代码并完成真实只读复验：
+   - `GET /aip/tracking/health` 列出 `tracking.find_real_by_no`；
+   - AIP `tracking.find_real_by_no({work_order_no: WO-2026-001})` 返回 `work_order_id=2`、`customer_order_no=SAL-ORD-2026-00001`、`authority=OpenMES`；
+   - AIP `quality.assess_quality_impact({work_order_id: 2})` 返回 `open_issues_count=0`、`missing_documents=[SOP, Control Plan]`、生产完成率 `0%`，并列出 `inspections/sn_traceability/ncr_full_disposition` 数据缺口。
+6. 阶段八中间快照验证结果：后端 **80 passed**，`compileall` 通过，前端 `npm run build` 通过；收尾后的全量结果为 **83 passed**（见 §3.20）。
+
+**仍未完成**：
+
+- DeepSeek 驱动的 Q6 自然语言问答与 ERP/MES 数据链已在用户授权后完成，详见 §3.20 的 `RUN-COORD-24CA66BD6EC5`。
+- 双审批线到 ERPNext 的真实写入/回读已完成，报价、采购方案、审批号和 PO 草稿状态已通过协调者状态问答复核，详见 §3.20。
+- 检验记录仍为 0 条，NCR close/disposition 和真实用户角色治理仍按原计划保留。
+
+### 3.19 工程可维护性：修正核心服务代码被误忽略（2026-09-30）
+
+- 根目录 `.gitignore` 原规则 `services/` 会匹配任意层级目录，意外忽略核心 `backend/app/services`；现已改为保留第三方服务目录忽略，同时显式放行 `backend/app/services/**`，并继续忽略其 `__pycache__`。
+- `git status` 现在能够发现 `backend/app/services/{real_order,coordinator,order_linkage,llm_quotation}.py`，不会再把核心业务代码当成不可追踪文件。
+- 该修复只影响版本控制可见性，不改变业务运行逻辑；阶段八的 ERPNext 草稿写入记录见 §3.20。
+- 阶段八中间快照回归结果为后端 **80 passed**，收尾后的全量结果为 **83 passed**（见 §3.20）。
+- 9000 端口已重启并加载阶段八修复；9001/9002 临时验证进程已关闭。
+
+### 3.20 阶段八收尾：方案汇总一致性与真实双审批验收（2026-09-30）
+
+**代码修复**：
+
+1. `_collect_proposal` 优先使用本轮 `procurement.analyze_real` 生成的当前方案；`procurement.get_real_plan` 只在方案编号相同的情况下补充审批/PO 状态，历史方案不会覆盖当前 `plan_id`、缺料清单或供应商选项。
+2. 成本与组合评估若携带其他 `plan_id` 会被汇总层过滤，避免前端方案卡片混入旧方案数字；系统提示同时要求后续评估沿用分析返回的 `plan_id`。
+3. 新增 3 个回归用例，覆盖旧方案覆盖、同方案状态补充和跨方案成本评估过滤。
+
+**真实验收**：
+
+- 缺料问答运行 `RUN-COORD-24CA66BD6EC5`：报价 `QUO-93AAB835646A`、本轮分析方案 `PROC-5217CEF9507D`，方案卡片已指向当前分析方案，报价状态正确显示 `DRAFT`；调用链 13 步，成本/组合/交期数据均来自 ERPNext/OpenMES。
+- 报价双审批：`QUO-93AAB835646A` → `APPR-2DD01946C804`（`sales_manager`），状态 `APPROVED`。
+- 采购方案审批：`PROC-5217CEF9507D` + `OPT-1` → `APR-A6595BD82781`（`purchase_manager`），状态 `APPROVED`。
+- ERPNext PO 草稿：`PUR-ORD-2026-00011`，供应商上海铸锻厂，总额 `39080.00 CNY`，交期 `2026-10-14`，回读 `docstatus=0` 且 `read_back_verified=true`；方案状态更新为 `PO_DRAFT_CREATED`。
+- 状态问答运行 `RUN-COORD-3DF81B85C2FA`：协调者两步反查准确返回报价 `APPROVED`、方案 `PO_DRAFT_CREATED`、审批号和 PO 草稿号。
+
+**验证结果**：后端 **83 passed**，`compileall` 通过，前端 `npm run build` 通过。外部 DeepSeek 调用和 ERPNext 草稿写入已在用户授权后完成，不再是待验收项。
+
 ## 8. 当前结论
 
 阶段 1（ERP↔MES 关联）已完成：字段确认、只读接口、关联值回填（WO-2026-001 → SAL-ORD-2026-00001）、LINKED 验证。
@@ -805,17 +883,21 @@ ERP 物料需求
 4. **残留清理**：删除固定数据草稿端点、交期默认值改为显式拒绝
 5. **全流程验收**：ERP↔MES 关联→报价（85 元原价+17 天真实排程）→审批→SO 草稿→采购（3 缺料差异化方案）→审批→PO 草稿（真实交期）→质量门禁→发运门禁，全链路 200 且交付被真实质量状态正确阻断
 
-当前验收结论（2026-09-29 第三次更新，依据 3.13/3.14/3.15）：
+当前验收结论（2026-09-30 第五次更新，依据 3.13/3.14/3.15/3.16/3.17/3.20）：
 
 ```text
 四 Agent 真实业务链已端到端跑通；报价→采购→跟单→质量→发运门禁全链可用
 页面级双场景验收完成：场景 A（0% 进度）正确阻断、场景 B（90%+文档+审批）正确放行，均有截图证据
 动态协同（阶段五）验收通过：自然语言提问→协调智能体经 AIP 动态调用四个真实智能体→带证据回答；
 两问产生两条不同调用链（动态拓扑达成）
-方案化协同（阶段六）验收通过：缺料场景输出 ≥3 套方案对比（成本/交期/覆盖，含"部分覆盖口径假象"
-的批判性审查）；加急场景诚实给出"物料不是瓶颈、ETA 缺排程数据"；方案卡片页面渲染正常；
-讨论稿例子二/例子四落地
-测试与安全：pytest 独立测试库（64 passed）、失败验证矩阵补齐、无硬编码凭据、git 已提交（3a14196）
-仍余（生产可用验收前）：质量写回真实身份/角色治理、close/disposition 闭环、检验数据补录决策、
-旧 Mock 场景后端隔离、速率 ETA（依赖排程数据）、Wutong 外部发现与 ACS 文件同步
+方案化协同（阶段六）验收通过：缺料场景输出 ≥3 套方案对比（含"部分覆盖口径假象"批判性审查）；
+加急场景诚实给出"物料不是瓶颈、ETA 缺排程数据"；讨论稿例子二/例子四落地
+执行闭环（阶段七）验收通过：方案卡片批准→审批门禁→PO 草稿回读（PUR-ORD-2026-00009/00010）；
+状态联动复验通过（协调者查到方案状态/审批号/PO 草稿号）
+阶段八（质量异常协同 + 审批一致性）✅ 已完成（§3.17/§3.18/§3.20）：编号→数字 id 桥接、报价状态一致性、审批/草稿幂等保护、方案覆盖一致性、真实 DeepSeek 问答和双审批 ERP 写入均已完成（83 passed）；
+阶段八改动尚未提交 git
+工程可维护性已修正：核心 `backend/app/services` 已重新纳入 Git 可见范围
+测试与安全：pytest 独立测试库（83 passed）、失败验证矩阵补齐、无硬编码凭据；git 最新提交 fdc65cd（阶段七）
+仍余（生产可用验收前）：检验数据补录决策、质量写回真实身份/角色治理、
+NCR close/disposition 闭环、旧 Mock 场景后端隔离、速率 ETA、Wutong 外部发现与 ACS 文件同步
 ```

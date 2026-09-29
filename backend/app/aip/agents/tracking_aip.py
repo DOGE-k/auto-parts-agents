@@ -36,6 +36,16 @@ def create_tracking_aip_service(aic: str = "local-tracking-001") -> AipAgentServ
         handler=real_track,
     )
 
+    async def real_find_by_no(inputs: dict) -> dict:
+        """按用户可见的 MES 工单编号查找数字工单 ID。"""
+        return await real_order.find_work_order_by_no(str(inputs["work_order_no"]))
+
+    service.register_skill(
+        skill_id="tracking.find_real_by_no",
+        skill_name="按工单编号查找真实工单",
+        handler=real_find_by_no,
+    )
+
     async def real_lookup_link(inputs: dict) -> dict:
         """查询 ERP 销售订单与 MES 工单的正式关联（customer_order_no 精确匹配）。"""
         return await order_linkage.get_order_mes_link(str(inputs["erp_order_id"]))

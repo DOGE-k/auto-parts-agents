@@ -36,6 +36,16 @@ def create_quality_document_aip_service(aic: str = "local-quality-doc-001") -> A
         handler=real_quality_package,
     )
 
+    async def real_assess_impact(inputs: dict) -> dict:
+        """质量异常影响分析：问题/批次/门禁/生产进度交叉结论（讨论稿例子三）。"""
+        return await real_order.assess_quality_impact(str(inputs["work_order_id"]))
+
+    service.register_skill(
+        skill_id="quality.assess_quality_impact",
+        skill_name="质量异常影响分析",
+        handler=real_assess_impact,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 资料清单生成

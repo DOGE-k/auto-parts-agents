@@ -204,6 +204,24 @@ class OpenMESClient:
             raise ValueError("OpenMES 工程文档详情接口返回格式不符合其 API 文档")
         return data
 
+    async def list_work_order_batches(self, work_order_id: str | int) -> list[dict[str, Any]]:
+        """工单生产批次列表（批次/SN 追溯维度，Bearer）。"""
+        self._require_user_token()
+        value = str(work_order_id).strip()
+        if not value:
+            raise ValueError("OpenMES work_order_id 不能为空")
+        result = await self._http.request_json(
+            "GET",
+            f"api/v1/work-orders/{quote(value, safe='')}/batches",
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return data["data"]
+        if not isinstance(data, list):
+            raise ValueError("OpenMES 工单批次接口返回格式不符合其 API 文档")
+        return data
+
     async def upload_engineering_document(
         self,
         *,

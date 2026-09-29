@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, createPoFromPlan } from "./api";
+import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, approveQuotation as approveQuotationApi, createPoFromPlan } from "./api";
 import type {
   AgentRunSummary,
   AgentRunDetail,
@@ -279,29 +279,42 @@ export default function RealBusinessPage() {
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState<AssistantAnswer | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
-  // 方案卡片执行闭环（阶段七）：confirming → executing → done / error
+  // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
   const [proposalExec, setProposalExec] = useState<{
     option_id: string;
     stage: "confirming" | "executing";
     approver: string;
+    quotationApprover: string;
   } | null>(null);
   const [proposalExecResult, setProposalExecResult] = useState<{
     option_id: string;
     approval_id: string;
+    quotation_approval_id?: string;
     po_draft_id?: string;
     read_back_verified?: boolean;
     error?: string;
   } | null>(null);
 
-  const executeProposal = useCallback(async (planId: string, optionId: string, approver: string) => {
-    setProposalExec({ option_id: optionId, stage: "executing", approver });
+  const executeProposal = useCallback(async (
+    planId: string,
+    optionId: string,
+    approver: string,
+    quotation: { id: string; needsApproval: boolean; approver: string } | null,
+  ) => {
+    setProposalExec((prev) => (prev ? { ...prev, stage: "executing" } : prev));
     setError("");
     try {
+      let quotationApprovalId = "";
+      if (quotation?.needsApproval) {
+        const qApproval = await approveQuotationApi(quotation.id, quotation.approver);
+        quotationApprovalId = qApproval.approval_id;
+      }
       const approval = await approveProcurementPlan(planId, optionId, approver);
       const draftResult = await createPoFromPlan(planId, approval.approval_id, approver);
       setProposalExecResult({
         option_id: optionId,
         approval_id: approval.approval_id,
+        quotation_approval_id: quotationApprovalId || undefined,
         po_draft_id: draftResult.draft?.draft_id,
         read_back_verified: draftResult.draft?.read_back_verified,
       });
@@ -724,32 +737,59 @@ export default function RealBusinessPage() {
                           <div className={`proposal-exec-result ${execResult.error ? "error" : "ok"}`}>
                             {execResult.error
                               ? `执行失败：${execResult.error}`
-                              : `✓ 已批准（${execResult.approval_id}），PO 草稿 ${execResult.po_draft_id ?? "?"} ${execResult.read_back_verified ? "回读确认" : "待回读"}`}
+                              : `✓ 已批准方案（${execResult.approval_id}）${execResult.quotation_approval_id ? `，报价审批（${execResult.quotation_approval_id}）` : ""}，PO 草稿 ${execResult.po_draft_id ?? "?"} ${execResult.read_back_verified ? "回读确认" : "待回读"}`}
                           </div>
                         ) : executing ? (
                           <div className="proposal-executing">执行中：审批 → 起草 PO → 回读...</div>
                         ) : confirming ? (
                           <div className="proposal-confirm">
                             <small>将执行（草稿级写入，不提交）：</small>
-                            <code>审批方案 {planId} 选 {opt.option_id}（{opt.supplier_name}，{opt.total_cost} {opt.currency}）→ 创建采购订单草稿</code>
-                            <div className="proposal-confirm-row">
-                              <input
-                                value={proposalExec?.approver ?? ""}
-                                onChange={(e) => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: e.target.value })}
-                                placeholder="审批人（如 purchase_manager）"
-                              />
-                              <button
-                                className="button primary"
-                                disabled={!proposalExec?.approver.trim()}
-                                onClick={() => void executeProposal(planId, opt.option_id, proposalExec?.approver ?? "")}
-                              >
-                                确认批准并起草
-                              </button>
-                              <button className="button ghost" onClick={() => setProposalExec(null)}>取消</button>
-                            </div>
+                            {(() => {
+                              const needsQuotationApproval = (assistantAnswer.proposal_options?.quotation_status ?? "DRAFT") !== "APPROVED";
+                              const qid = assistantAnswer.proposal_options?.quotation_id ?? "";
+                              return (
+                                <>
+                                  {needsQuotationApproval && qid && (
+                                    <code>① 审批报价 {qid}（当前状态 {assistantAnswer.proposal_options?.quotation_status}，审批人 {proposalExec?.quotationApprover}）</code>
+                                  )}
+                                  <code>{needsQuotationApproval ? "②" : "①"} 审批方案 {planId} 选 {opt.option_id}（{opt.supplier_name}，{opt.total_cost} {opt.currency}）→ 创建采购订单草稿</code>
+                                  <div className="proposal-confirm-row">
+                                    {needsQuotationApproval && qid && (
+                                      <input
+                                        value={proposalExec?.quotationApprover ?? ""}
+                                        onChange={(e) => setProposalExec((prev) => (prev ? { ...prev, quotationApprover: e.target.value } : prev))}
+                                        placeholder="报价审批人（如 sales_manager）"
+                                      />
+                                    )}
+                                    <input
+                                      value={proposalExec?.approver ?? ""}
+                                      onChange={(e) => setProposalExec((prev) => (prev ? { ...prev, approver: e.target.value } : prev))}
+                                      placeholder="方案审批人（如 purchase_manager）"
+                                    />
+                                  </div>
+                                  <div className="proposal-confirm-row">
+                                    <button
+                                      className="button primary"
+                                      disabled={!proposalExec?.approver.trim() || Boolean(needsQuotationApproval && qid && !proposalExec?.quotationApprover.trim())}
+                                      onClick={() => void executeProposal(
+                                        planId,
+                                        opt.option_id,
+                                        proposalExec?.approver ?? "",
+                                        needsQuotationApproval && qid
+                                          ? { id: qid, needsApproval: true, approver: proposalExec?.quotationApprover ?? "" }
+                                          : null,
+                                      )}
+                                    >
+                                      确认批准并起草{needsQuotationApproval ? "（含报价审批）" : ""}
+                                    </button>
+                                    <button className="button ghost" onClick={() => setProposalExec(null)}>取消</button>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         ) : (
-                          <button className="button ghost proposal-exec-btn" onClick={() => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: "purchase_manager" })}>
+                          <button className="button ghost proposal-exec-btn" onClick={() => setProposalExec({ option_id: opt.option_id, stage: "confirming", approver: "purchase_manager", quotationApprover: "sales_manager" })}>
                             选择此方案并起草 PO（需人工确认）→
                           </button>
                         ))}
@@ -760,6 +800,48 @@ export default function RealBusinessPage() {
                 {(assistantAnswer.proposal_options.delivery_assessments ?? []).map((d, idx) => (
                   <div key={idx} className={`proposal-delivery ${d.verdict === "arrival_after_due" ? "late" : "ok"}`}>
                     交期影响：{d.conclusion}（到货 {d.material_ready_date} vs 交期 {d.due_date}）
+                  </div>
+                ))}
+                {(assistantAnswer.proposal_options.quality_impacts ?? []).map((q, idx) => (
+                  <div key={idx} className="quality-impact-block">
+                    <div className={`quality-impact-head ${q.quality_gate_passed ? "ok" : "bad"}`}>
+                      质量异常影响分析 · 工单 {q.work_order_no}
+                      （未关闭问题 {q.open_issues_count} · 质量门禁{q.quality_gate_passed ? "通过" : "未通过"}）
+                    </div>
+                    {q.quality_records.length > 0 && (
+                      <table className="md-table">
+                        <tbody>
+                          {q.quality_records.map((r, i) => (
+                            <tr key={i}>
+                              <td>{r.severity}</td>
+                              <td>{r.title}</td>
+                              <td>{r.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {q.batches.length > 0 && (
+                      <div className="quality-impact-batches">
+                        批次关联：{q.batches.map((b) => `${b.lot_number || b.batch_id}（${b.status}，目标 ${b.target_qty}）`).join("、")}
+                      </div>
+                    )}
+                    <ul className="quality-impact-conclusions">
+                      {q.impact_conclusions.map((c, i) => <li key={i}>{c}</li>)}
+                    </ul>
+                    {q.handling_options.length > 0 && (
+                      <div className="quality-impact-options">
+                        <small>可执行处理选项（均需人工确认）：</small>
+                        {q.handling_options.map((o, i) => (
+                          <div key={i} className="quality-impact-option">{o.option} — {o.how}</div>
+                        ))}
+                      </div>
+                    )}
+                    {q.data_gaps.length > 0 && (
+                      <div className="quality-impact-gaps">
+                        数据缺口（如实标注）：{q.data_gaps.map((g) => g.detail).join("；")}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {(assistantAnswer.proposal_options.data_missing ?? []).map((m, idx) => (
