@@ -874,7 +874,11 @@ async def resolve_quality_issue(
     先确认 issue 属于指定工单，再调用真实 API，最后重新读取质量包。
     """
     approval = get_approval(approval_id)
-    if not approval or approval.get("reference_type") != "quality_issue_resolution":
+    if (
+        not approval
+        or approval.get("reference_type") != "quality_issue_resolution"
+        or str(approval.get("reference_id")) != str(issue_id)
+    ):
         return {"success": False, "error": "质量问题审批记录不存在，拒绝写入"}
     if not await _approval_verifier(approval_id, approved_by):
         return {"success": False, "error": "质量问题审批未通过，拒绝写入"}
@@ -994,11 +998,17 @@ async def set_quality_issue_disposition(
     issue_id: str,
     approval_id: str,
     approved_by: str,
+    expected_work_order_id: str | None = None,
 ) -> dict[str, Any]:
     """通过审批将 NCR 处置写入 OpenMES，并严格回读验证。"""
     approval = get_approval(approval_id)
     payload = _quality_change_payload(approval or {}, "quality_issue_disposition")
-    if payload is None or str(payload.get("issue_id")) != str(issue_id):
+    if (
+        payload is None
+        or str(payload.get("issue_id")) != str(issue_id)
+        or (expected_work_order_id is not None
+            and str(payload.get("work_order_id")) != str(expected_work_order_id))
+    ):
         return {"success": False, "error": "NCR 处置审批不存在、未批准或对象不匹配"}
     if not await _approval_verifier(approval_id, approved_by):
         return {"success": False, "error": "NCR 处置审批未通过，拒绝写入"}
@@ -1006,6 +1016,24 @@ async def set_quality_issue_disposition(
     issue = _quality_issue_from_package(quality, issue_id)
     if issue is None:
         return {"success": False, "error": "质量问题不属于指定工单，拒绝写入 OpenMES"}
+    if (
+        issue.get("disposition") == payload["disposition"]
+        and issue.get("root_cause") == payload["root_cause"]
+        and issue.get("containment_action") == payload["containment_action"]
+        and (payload.get("nc_source") in (None, "") or issue.get("nc_source") == payload.get("nc_source"))
+    ):
+        return {
+            "success": True,
+            "status": "DISPOSITION_RECORDED",
+            "written": False,
+            "idempotent": True,
+            "approval": approval,
+            "read_back": issue,
+            "read_back_verified": True,
+            "quality_package": quality,
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+        }
     mes = get_mes_adapter()
     write_result = await mes.set_quality_issue_disposition(
         issue_id,
@@ -1022,6 +1050,16 @@ async def set_quality_issue_disposition(
         and read_back.get("disposition") == payload["disposition"]
         and read_back.get("root_cause") == payload["root_cause"]
         and read_back.get("containment_action") == payload["containment_action"]
+        and (
+            payload.get("non_conforming_qty") is None
+            or "non_conforming_qty" not in read_back
+            or str(read_back.get("non_conforming_qty")) == str(payload.get("non_conforming_qty"))
+        )
+        and (
+            payload.get("nc_source") in (None, "")
+            or "nc_source" not in read_back
+            or read_back.get("nc_source") == payload.get("nc_source")
+        )
     )
     return {
         "success": verified,
@@ -1101,16 +1139,40 @@ def approve_quality_issue_close(approval_id: str, approved_by: str) -> dict[str,
 
 
 @_agent_run("quality", "close_issue")
-async def close_quality_issue_with_approval(issue_id: str, approval_id: str, approved_by: str) -> dict[str, Any]:
+async def close_quality_issue_with_approval(
+    issue_id: str,
+    approval_id: str,
+    approved_by: str,
+    expected_work_order_id: str | None = None,
+) -> dict[str, Any]:
     approval = get_approval(approval_id)
     payload = _quality_change_payload(approval or {}, "quality_issue_close")
-    if payload is None or str(payload.get("issue_id")) != str(issue_id):
+    if (
+        payload is None
+        or str(payload.get("issue_id")) != str(issue_id)
+        or (expected_work_order_id is not None
+            and str(payload.get("work_order_id")) != str(expected_work_order_id))
+    ):
         return {"success": False, "error": "NCR 关闭审批不存在、未批准或对象不匹配"}
     if not await _approval_verifier(approval_id, approved_by):
         return {"success": False, "error": "NCR 关闭审批未通过，拒绝写入"}
     check = await assess_quality_issue_closure(str(payload["work_order_id"]), issue_id)
     if not check.get("closure_ready"):
         return {"success": False, "error": "NCR 关闭前置校验未通过", "closure_check": check}
+    current_issue = check.get("issue") or {}
+    if str(current_issue.get("status", "")).upper() == "CLOSED":
+        return {
+            "success": True,
+            "status": "CLOSED",
+            "written": False,
+            "idempotent": True,
+            "approval": approval,
+            "read_back": current_issue,
+            "read_back_verified": True,
+            "quality_package": await quality_package(str(payload["work_order_id"])),
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+        }
     mes = get_mes_adapter()
     write_result = await mes.close_quality_issue(issue_id)
     after = await quality_package(str(payload["work_order_id"]))

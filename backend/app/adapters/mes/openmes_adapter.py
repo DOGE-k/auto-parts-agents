@@ -95,6 +95,7 @@ class OpenMESAdapter:
             "status": item.get("status", "open"),
             "disposition": item.get("disposition", "pending"),
             "non_conforming_qty": str(item.get("non_conforming_qty") or 0),
+            "nc_source": item.get("nc_source", ""),
             "root_cause": item.get("root_cause", ""),
             "containment_action": item.get("containment_action", ""),
             "reported_at": item.get("reported_at", ""),

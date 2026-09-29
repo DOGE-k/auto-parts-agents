@@ -75,7 +75,9 @@ def _role_names(value: Any) -> set[str]:
     if isinstance(value, str) and value.strip():
         result.add(value.strip())
     elif isinstance(value, dict):
-        for key in ("role", "role_name", "name", "id"):
+        # ``id`` is deliberately excluded: OpenMES role payloads may include
+        # unrelated numeric/user identifiers alongside the role object.
+        for key in ("role", "role_name", "name"):
             if isinstance(value.get(key), str) and value[key].strip():
                 result.add(value[key].strip())
     elif isinstance(value, (list, tuple, set)):
@@ -152,7 +154,20 @@ async def _from_erpnext(settings: IntegrationSettings) -> RealIdentity:
 async def _from_openmes(settings: IntegrationSettings) -> RealIdentity:
     client = OpenMESClient(settings.openmes_base_url, user_token=settings.openmes_user_token)
     try:
-        payload = await client.current_user()
+        raw_payload = await client.current_user()
+        # OpenMES returns the authenticated user in ``data``; accepting the
+        # unwrapped shape as well keeps the parser compatible with older API
+        # deployments without treating the envelope itself as a user.
+        payload: dict[str, Any] = raw_payload
+        for _ in range(3):
+            candidate = next(
+                (payload.get(key) for key in ("data", "user", "current_user")
+                 if isinstance(payload.get(key), dict)),
+                None,
+            )
+            if not isinstance(candidate, dict):
+                break
+            payload = candidate
         subject = str(
             payload.get("username")
             or payload.get("user_name")

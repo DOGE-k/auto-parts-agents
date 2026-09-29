@@ -622,6 +622,13 @@ def replay_details(run_id: str, session: Session = Depends(get_session)) -> dict
 
 @app.websocket("/api/projects/{project_id}/stream")
 async def project_stream(websocket: WebSocket, project_id: str) -> None:
+    # HTTP middleware does not run for WebSocket handshakes. Enforce the same
+    # Mock-surface boundary here so a real deployment cannot still expose the
+    # synthetic event stream by switching protocols.
+    from app.runtime.surface import mock_demo_enabled
+    if not mock_demo_enabled():
+        await websocket.close(code=1008, reason="mock_surface_disabled")
+        return
     await websocket.accept()
     last_event_id: str | None = None
     try:
@@ -779,6 +786,7 @@ class RealOrderQualityCloseRequest(BaseModel):
 
 
 class RealOrderQualityCloseWriteRequest(BaseModel):
+    work_order_id: str
     approval_id: str
     approved_by: str | None = None
 
@@ -859,7 +867,9 @@ async def real_order_set_quality_issue_disposition(
 ) -> dict:
     from app.services.real_order import set_quality_issue_disposition
     approved_by = _actor_for_request(body.approved_by, identity, "quality_disposition_write")
-    result = await set_quality_issue_disposition(issue_id, body.approval_id, approved_by)
+    result = await set_quality_issue_disposition(
+        issue_id, body.approval_id, approved_by, expected_work_order_id=body.work_order_id
+    )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "NCR 处置写回失败"))
     result["authenticated_identity"] = identity.as_dict()
@@ -913,7 +923,9 @@ async def real_order_close_quality_issue(
 ) -> dict:
     from app.services.real_order import close_quality_issue_with_approval
     approved_by = _actor_for_request(body.approved_by, identity, "quality_close_write")
-    result = await close_quality_issue_with_approval(issue_id, body.approval_id, approved_by)
+    result = await close_quality_issue_with_approval(
+        issue_id, body.approval_id, approved_by, expected_work_order_id=body.work_order_id
+    )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "NCR 关闭失败"))
     result["authenticated_identity"] = identity.as_dict()

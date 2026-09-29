@@ -82,6 +82,28 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("quality_manager", identity.roles)
         self.assertEqual(identity.provider, "openmes")
 
+    async def test_openmes_nested_user_envelope_and_role_objects(self):
+        class NestedMESClient(FakeMESClient):
+            async def current_user(self):
+                return {
+                    "data": {"user": {"email": "nested@example.com", "roles": [
+                        {"id": "random-row-id", "name": "Quality Manager"},
+                    ]}}
+                }
+
+        configured = settings(
+            real_identity_provider="openmes",
+            erpnext_base_url="",
+            erpnext_api_key="",
+            erpnext_api_secret="",
+        )
+        with patch("app.services.identity.OpenMESClient", NestedMESClient):
+            identity = await resolve_real_identity(configured)
+
+        self.assertEqual(identity.actor_id, "nested@example.com")
+        self.assertIn("Quality Manager", identity.roles)
+        self.assertNotIn("random-row-id", identity.roles)
+
     async def test_auto_provider_falls_back_to_openmes(self):
         configured = settings(
             real_identity_provider="auto",

@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUALITY-DOC-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:31:38.008234+00:00",
+  "lastModifiedTime": "2026-09-29T17:59:35.739053+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件质量文档智能体",
   "description": "负责质量证据收集、资料清单管理、完整性校验、资料包组卷和版本追溯。只负责文档管理和证据关联，不执行检验、不做质量放行、不确认根因。",
@@ -28,7 +28,7 @@
   },
   "endPoints": [
     {
-      "url": "http://localhost:8001/aip/quality-document/rpc",
+      "url": "http://localhost:9000/aip/quality-document/rpc",
       "transport": "JSONRPC",
       "security": [
         {
@@ -52,90 +52,6 @@
     "text/markdown"
   ],
   "skills": [
-    {
-      "id": "quality_document.build_checklist",
-      "name": "资料清单生成",
-      "description": "根据产品类型、客户要求和标准规范，生成质量资料包清单，明确需要哪些文档和证据。",
-      "version": "1.0.0",
-      "tags": [
-        "质量文档",
-        "资料清单",
-        "Checklist"
-      ],
-      "examples": [
-        "这个产品需要哪些质量资料",
-        "生成资料清单"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "quality_document.collect_evidence",
-      "name": "质量证据收集",
-      "description": "从MES、检验系统等来源收集与订单相关的质量证据，关联到资料包对应条目。",
-      "version": "1.0.0",
-      "tags": [
-        "质量文档",
-        "证据收集",
-        "关联"
-      ],
-      "examples": [
-        "收集这个批次的质量证据",
-        "把检验报告关联到资料包"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "quality_document.check_completeness",
-      "name": "完整性校验",
-      "description": "检查资料包的完整性，对比清单要求和已收集证据，给出缺失项和完成度百分比。",
-      "version": "1.0.0",
-      "tags": [
-        "质量文档",
-        "完整性",
-        "校验"
-      ],
-      "examples": [
-        "检查资料是否齐全",
-        "资料包完整性如何"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "quality_document.build_package_draft",
-      "name": "资料包草稿生成",
-      "description": "根据资料清单和已收集的证据，生成质量资料包草稿，进行完整性校验，等待审批后正式发布。",
-      "version": "1.0.0",
-      "tags": [
-        "质量文档",
-        "资料包",
-        "组卷"
-      ],
-      "examples": [
-        "生成质量资料包",
-        "检查资料完整性"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
     {
       "id": "quality.get_real_package",
       "name": "真实get_real_package",

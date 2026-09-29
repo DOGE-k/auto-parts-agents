@@ -37,7 +37,9 @@ function App() {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [runtimeSurface, setRuntimeSurface] = useState<RuntimeSurface | null>(null);
-  const mockDemoEnabled = runtimeSurface?.mock_demo_enabled ?? true;
+  // Real mode is the safe initial state while the runtime surface is loading;
+  // do not briefly expose Mock navigation during that request.
+  const mockDemoEnabled = runtimeSurface?.mock_demo_enabled ?? false;
   const visibleNavigation = mockDemoEnabled ? navigation : navigation.filter((item) => !item.mock);
 
   const refreshProjects = useCallback(async () => {
@@ -126,7 +128,9 @@ function App() {
 
   useEffect(() => {
     if (!runtimeSurface?.mock_demo_enabled || !projectId) return;
-    const stream = new WebSocket(`ws://127.0.0.1:8001/api/projects/${projectId}/stream`);
+    const wsBase = import.meta.env.VITE_WS_BASE_URL
+      ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:9000`;
+    const stream = new WebSocket(`${wsBase}/api/projects/${projectId}/stream`);
     stream.onmessage = (message) => {
       try {
         const item = JSON.parse(message.data) as Event;

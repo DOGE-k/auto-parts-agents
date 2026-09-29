@@ -1,7 +1,7 @@
 {
   "aic": "TBD-PROCUREMENT-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:31:38.008234+00:00",
+  "lastModifiedTime": "2026-09-29T17:59:35.739053+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件采购智能体",
   "description": "负责物料需求计算、供应商方案对比和采购订单草稿生成。只提供采购建议和方案对比，供应商定标和PO发布需人工审批。",
@@ -28,7 +28,7 @@
   },
   "endPoints": [
     {
-      "url": "http://localhost:8001/aip/procurement/rpc",
+      "url": "http://localhost:9000/aip/procurement/rpc",
       "transport": "JSONRPC",
       "security": [
         {
@@ -52,68 +52,6 @@
     "text/markdown"
   ],
   "skills": [
-    {
-      "id": "procurement.calculate_net_requirement",
-      "name": "净需求计算",
-      "description": "根据销售订单需求、现有库存、在途采购和安全库存，计算物料净需求量和建议采购量。",
-      "version": "1.0.0",
-      "tags": [
-        "采购",
-        "净需求",
-        "MRP"
-      ],
-      "examples": [
-        "计算这批订单的物料缺口",
-        "还需要采购多少原材料"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "procurement.compare_supply_plans",
-      "name": "供应方案对比",
-      "description": "从多个供应商中筛选可选方案，按价格、交期、质量等级等维度对比，给出推荐方案。",
-      "version": "1.0.0",
-      "tags": [
-        "采购",
-        "供应商",
-        "方案对比"
-      ],
-      "examples": [
-        "给我几个供应商的采购方案对比",
-        "推荐一个性价比最高的供应商"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "procurement.create_po_draft",
-      "name": "采购订单草稿生成",
-      "description": "根据选定的供应方案生成采购订单草稿，包含物料、数量、价格、交期等信息，等待人工审批。",
-      "version": "1.0.0",
-      "tags": [
-        "采购",
-        "PO草稿",
-        "采购订单"
-      ],
-      "examples": [
-        "生成采购订单草稿"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
     {
       "id": "procurement.find_real_plan_by_quotation",
       "name": "真实find_real_plan_by_quotation",

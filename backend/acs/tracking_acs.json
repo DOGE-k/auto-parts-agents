@@ -1,7 +1,7 @@
 {
   "aic": "TBD-TRACKING-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:31:38.008234+00:00",
+  "lastModifiedTime": "2026-09-29T17:59:35.739053+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件跟单智能体",
   "description": "负责订单交期跟踪、生产进度监控、风险识别和ETA计算。只提供风险预警和进度分析，不做生产调度和质量放行决策。",
@@ -28,7 +28,7 @@
   },
   "endPoints": [
     {
-      "url": "http://localhost:8001/aip/tracking/rpc",
+      "url": "http://localhost:9000/aip/tracking/rpc",
       "transport": "JSONRPC",
       "security": [
         {
@@ -52,69 +52,6 @@
     "text/markdown"
   ],
   "skills": [
-    {
-      "id": "tracking.calculate_eta",
-      "name": "交期预估",
-      "description": "基于生产工单进度、工序节拍、异常历史和物料到货情况，计算订单预计交付时间。",
-      "version": "1.0.0",
-      "tags": [
-        "跟单",
-        "ETA",
-        "交期"
-      ],
-      "examples": [
-        "这个订单什么时候能交",
-        "预计完工时间是多少"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "tracking.detect_risk",
-      "name": "风险识别",
-      "description": "实时监控订单执行状态，识别物料短缺、产能瓶颈、质量异常、供应商延期等风险并预警。",
-      "version": "1.0.0",
-      "tags": [
-        "跟单",
-        "风险预警",
-        "异常检测"
-      ],
-      "examples": [
-        "这个订单有什么风险",
-        "检查一下订单状态"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
-      "id": "tracking.check_ship_gate",
-      "name": "发运门禁检查",
-      "description": "在发运前检查所有前置条件是否满足：生产完工、质量放行、资料包完整、客户确认等。",
-      "version": "1.0.0",
-      "tags": [
-        "跟单",
-        "发运",
-        "门禁检查"
-      ],
-      "examples": [
-        "检查是否可以发运",
-        "发运条件都满足了吗"
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
     {
       "id": "tracking.find_real_by_no",
       "name": "真实find_real_by_no",

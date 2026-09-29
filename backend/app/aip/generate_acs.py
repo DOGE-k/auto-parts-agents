@@ -3,6 +3,7 @@
 符合 ACPs-spec-ACS-v02.02 规范。
 """
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,12 @@ from acps_sdk.acs import (
     MutualTLSSecurityScheme,
     APIKeySecurityScheme,
 )
+
+
+def _aip_endpoint(agent_path: str) -> str:
+    """Build the advertised RPC URL from the deployed backend base URL."""
+    base = os.getenv("AIP_PUBLIC_BASE_URL", "http://localhost:9000").rstrip("/")
+    return f"{base}/aip/{agent_path}/rpc"
 
 
 def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
@@ -48,9 +55,19 @@ def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
 
 
 def _append_real_skills(spec: AgentCapabilitySpec, agent_key: str) -> None:
-    """将真实技能追加到历史 ACS 技能列表，并按 ID 去重。"""
-    existing_ids = {skill.id for skill in spec.skills}
-    spec.skills.extend(skill for skill in _real_skill_specs(agent_key) if skill.id not in existing_ids)
+    """使 ACS 与真实运行注册表一致，并按 ID 去重。
+
+    基础 ACS 保留的是早期 Mock 演示技能；真实表面会过滤掉这些技能，
+    因此静态能力文件也只发布协调者目录中的真实技能，避免发现层宣称
+    一个 RPC 实际不会提供的能力。
+    """
+    real_skills = _real_skill_specs(agent_key)
+    seen: set[str] = set()
+    spec.skills = []
+    for skill in real_skills:
+        if skill.id not in seen:
+            spec.skills.append(skill)
+            seen.add(skill.id)
 
 
 def _base_provider() -> AgentProvider:
@@ -104,7 +121,7 @@ def create_quotation_acs() -> AgentCapabilitySpec:
         security_schemes=_base_security_schemes(),
         end_points=[
             AgentEndPoint(
-                url="http://localhost:8001/aip/quotation/rpc",
+                url=_aip_endpoint("quotation"),
                 transport="JSONRPC",
                 security=[{"apiKey": []}],
             )
@@ -190,7 +207,7 @@ def create_procurement_acs() -> AgentCapabilitySpec:
         security_schemes=_base_security_schemes(),
         end_points=[
             AgentEndPoint(
-                url="http://localhost:8001/aip/procurement/rpc",
+                url=_aip_endpoint("procurement"),
                 transport="JSONRPC",
                 security=[{"apiKey": []}],
             )
@@ -253,7 +270,7 @@ def create_tracking_acs() -> AgentCapabilitySpec:
         security_schemes=_base_security_schemes(),
         end_points=[
             AgentEndPoint(
-                url="http://localhost:8001/aip/tracking/rpc",
+                url=_aip_endpoint("tracking"),
                 transport="JSONRPC",
                 security=[{"apiKey": []}],
             )
@@ -319,7 +336,7 @@ def create_quality_document_acs() -> AgentCapabilitySpec:
         security_schemes=_base_security_schemes(),
         end_points=[
             AgentEndPoint(
-                url="http://localhost:8001/aip/quality-document/rpc",
+                url=_aip_endpoint("quality-document"),
                 transport="JSONRPC",
                 security=[{"apiKey": []}],
             )
