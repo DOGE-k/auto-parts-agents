@@ -17,6 +17,42 @@ from acps_sdk.acs import (
 )
 
 
+def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
+    """从协调者真实能力目录生成 ACS 技能，避免 ACS 与 AIP 注册表漂移。"""
+    # 延迟导入：生成脚本本身仍可在没有启动 FastAPI 的情况下运行。
+    from app.services.coordinator import REAL_SKILL_TOOLS
+
+    aip_agent_key = {
+        "quotation": "quotation",
+        "procurement": "procurement",
+        "tracking": "tracking",
+        "quality_document": "quality-document",
+    }[agent_key]
+    result: list[AgentSkill] = []
+    for tool in REAL_SKILL_TOOLS:
+        if tool["aip_agent"] != aip_agent_key:
+            continue
+        result.append(
+            AgentSkill(
+                id=tool["skill_id"],
+                name=f"真实{tool['skill_id'].split('.', 1)[1]}",
+                description=tool["description"],
+                version="1.0.0",
+                tags=["真实数据", "AIP", tool["agent_type"]],
+                examples=[],
+                input_modes=["application/json"],
+                output_modes=["application/json"],
+            )
+        )
+    return result
+
+
+def _append_real_skills(spec: AgentCapabilitySpec, agent_key: str) -> None:
+    """将真实技能追加到历史 ACS 技能列表，并按 ID 去重。"""
+    existing_ids = {skill.id for skill in spec.skills}
+    spec.skills.extend(skill for skill in _real_skill_specs(agent_key) if skill.id not in existing_ids)
+
+
 def _base_provider() -> AgentProvider:
     return AgentProvider(
         country_code="CN",
@@ -360,6 +396,7 @@ def generate_all(output_dir: str = "acs"):
     }
 
     for name, spec in agents.items():
+        _append_real_skills(spec, name)
         file_path = output_path / f"{name}_acs.json"
         file_path.write_text(spec.to_json(indent=2), encoding="utf-8")
         # 验证能正常加载

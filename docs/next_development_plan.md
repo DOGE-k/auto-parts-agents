@@ -281,7 +281,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 - 不接 Wutong 外部注册发现（WUTONG_* 环境变量已备，列为后续任务）；
 - 不开放写操作通道（人工审批门禁仍只在 8 步流程）；
 - 不删除 Mock 演示技能（旧 Mock 后端隔离是独立任务）；
-- ACS 能力描述文件（backend/acs/*.json）仍为 Mock 时代内容，机器可读发现以代码注册表为准，ACS 文件同步更新列为后续任务。
+- ACS 能力描述文件已由 `generate_acs.py` 按真实能力目录同步，机器可读 ACS 与 AIP 注册表一致（见 current_status_and_fix_plan.md §3.21）。
 
 ## 后续候选任务（优先级从高到低）
 
@@ -290,7 +290,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 3. NCR close/disposition 与纠正措施校验接入（当前页面如实标注 NOT_SUPPORTED）；
 4. 旧 Mock 场景后端隔离（Mock 注册表与真实链共用进程）；
 5. 速率 ETA（依赖 MES 排程/报工时序数据，当前无数据源）；
-6. Wutong 外部注册发现接入（协调智能体跨实例发现）与 ACS 能力文件同步真实技能。
+6. Wutong 外部注册发现接入（协调智能体跨实例发现）。
 
 ## 每次开发后必须记录
 

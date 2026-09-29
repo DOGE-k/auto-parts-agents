@@ -864,6 +864,13 @@ ERP 物料需求
 
 **验证结果**：后端 **83 passed**，`compileall` 通过，前端 `npm run build` 通过。外部 DeepSeek 调用和 ERPNext 草稿写入已在用户授权后完成，不再是待验收项。
 
+### 3.21 ACS 能力描述与真实 AIP 注册表同步（2026-09-30）
+
+- `backend/app/aip/generate_acs.py` 新增真实技能同步逻辑：从 `REAL_SKILL_TOOLS` 读取当前协调者能力目录，按四个 AIP 智能体追加真实技能，并按技能 ID 去重。
+- 重新生成 `backend/acs/{quotation,procurement,tracking,quality_document}_acs.json`；机器可读 ACS 现在包含阶段五至阶段八接入的真实技能（报价 4、采购 4、跟单 5、质量 2）。
+- 新增 `backend/tests/test_acs_sync.py`，校验每个 ACS 文件存在、技能 ID 不重复、真实技能集合与能力目录一致。
+- 验证：ACS 生成脚本通过，ACS 同步测试 **1 passed**，`compileall` 通过；本步骤只修改本地能力描述文件，不写入 ERPNext/OpenMES。
+
 ## 8. 当前结论
 
 阶段 1（ERP↔MES 关联）已完成：字段确认、只读接口、关联值回填（WO-2026-001 → SAL-ORD-2026-00001）、LINKED 验证。

@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUALITY-DOC-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-27T17:27:21.381488+00:00",
+  "lastModifiedTime": "2026-09-29T17:07:47.921323+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件质量文档智能体",
   "description": "负责质量证据收集、资料清单管理、完整性校验、资料包组卷和版本追溯。只负责文档管理和证据关联，不执行检验、不做质量放行、不确认根因。",
@@ -129,6 +129,42 @@
         "生成质量资料包",
         "检查资料完整性"
       ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.get_real_package",
+      "name": "真实get_real_package",
+      "description": "查询工单的真实质量资料包：质量问题及状态、SOP/Control Plan 文档、检验记录、质量门禁是否通过及原因。判断能否发运或质量是否异常时使用。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.assess_quality_impact",
+      "name": "真实assess_quality_impact",
+      "description": "质量异常影响分析：质量问题清单（状态/严重度）、批次关联、质量门禁与生产进度交叉，输出对发运/交期的影响结论、可执行处理选项与数据缺口。问“有质量异常吗/影响交付吗/质量怎么办”时优先使用本工具（比 get_real_package 更完整）。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
       "inputModes": [
         "application/json"
       ],

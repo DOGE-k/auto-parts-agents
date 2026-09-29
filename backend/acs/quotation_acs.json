@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUOTATION-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-27T17:27:21.381488+00:00",
+  "lastModifiedTime": "2026-09-29T17:07:47.921323+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件报价智能体",
   "description": "负责汽车零部件订单的报价处理，包括询价信息抽取、成本计算、报价草稿生成和成本评估。只负责报价建议和草稿生成，不做最终定价批准。",
@@ -152,6 +152,78 @@
       "examples": [
         "评估这个采购方案的成本影响"
       ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.analyze_real",
+      "name": "真实analyze_real",
+      "description": "对给定客户/物料/数量做真实报价分析：ERP 真实价格、BOM 成本、库存、基于 MES 排程的交期参考。问“这个件多少钱/多久能交”或需要报价与缺料分析时使用；已知 ERP 订单号时必须传入 erp_order_id（声明式上下文，供后续状态查询关联）。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quotation"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.get_real",
+      "name": "真实get_real",
+      "description": "查询已保存报价的状态与内容（价格、审批状态、ERP 草稿号）。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quotation"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.find_real_by_erp_order",
+      "name": "真实find_real_by_erp_order",
+      "description": "按 ERP 销售订单号查找已保存的真实报价（返回 quotation_id/价格/审批状态，并附带该报价最新采购方案的状态摘要）。当用户只给了订单号或工单号、而后续工具需要 quotation_id（如采购分析、成本评估），或用户问“方案批准了吗/PO 生成了吗”等状态问题时，先用本工具反查。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quotation"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.assess_cost_impact",
+      "name": "真实assess_cost_impact",
+      "description": "成本影响评估：缺料换供应商方案对订单收入/毛利的影响（材料成本口径，真实价格记录）。输入 plan_id 与 option_id（来自采购分析结果）。问“换供应商要多花多少钱/还赚不赚钱”时使用。价格数据缺失时返回 DATA_MISSING，如实转告用户，不得估算。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quotation"
+      ],
+      "examples": [],
       "inputModes": [
         "application/json"
       ],

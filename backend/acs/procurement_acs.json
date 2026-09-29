@@ -1,7 +1,7 @@
 {
   "aic": "TBD-PROCUREMENT-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-27T17:27:21.381488+00:00",
+  "lastModifiedTime": "2026-09-29T17:07:47.921323+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件采购智能体",
   "description": "负责物料需求计算、供应商方案对比和采购订单草稿生成。只提供采购建议和方案对比，供应商定标和PO发布需人工审批。",
@@ -107,6 +107,78 @@
       "examples": [
         "生成采购订单草稿"
       ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "procurement.find_real_plan_by_quotation",
+      "name": "真实find_real_plan_by_quotation",
+      "description": "按报价编号查找最新采购方案的状态（审批状态/选定选项/PO 草稿号）。回答“方案批准了吗/PO 草稿生成没有”时，先反查报价再用本工具查方案状态。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "procurement"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "procurement.analyze_real",
+      "name": "真实analyze_real",
+      "description": "对已有报价做真实采购分析：BOM 净需求、缺料清单、供应商方案与推荐。问“缺不缺料/物料什么时候到/选哪家供应商”时使用。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "procurement"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "procurement.get_real_plan",
+      "name": "真实get_real_plan",
+      "description": "查询已保存采购方案的状态（选定供应商、审批状态、PO 草稿号）。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "procurement"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "procurement.assess_combination",
+      "name": "真实assess_combination",
+      "description": "分单采购组合的确定性评估：给定多个供应商选项（来自同一采购方案），计算组合成本（真实价格记录合计）、缺料覆盖并集、最长交期，并对重复覆盖物料告警。当需要向用户呈现“分单采购/多家供应商组合”方案时，组合的成本与交期必须用本工具计算，禁止自行相加或估算。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "procurement"
+      ],
+      "examples": [],
       "inputModes": [
         "application/json"
       ],
