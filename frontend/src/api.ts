@@ -618,6 +618,151 @@ export async function dispatchWorkOrder(
   });
 }
 
+// ==================== 真实报工（OpenMES 官方报工链路，三步审批门禁） ====================
+
+export type ProductionReportPlan = {
+  work_order_id: string;
+  work_order_no: string;
+  customer_order_no: string;
+  planned_qty?: number | string;
+  batch_target_qty: string;
+  produced_qty: string;
+  actual_elapsed_minutes: number;
+  actual_setup_minutes?: number | null;
+  actual_run_minutes?: number | null;
+  lot_number: string;
+};
+
+export type ProductionReportResult = {
+  success: boolean;
+  status?: string;
+  written?: boolean;
+  idempotent?: boolean;
+  batch?: Record<string, any>;
+  batch_id?: string;
+  batch_step_id?: string;
+  work_order_produced_qty?: number | string;
+  read_back_verified?: boolean;
+  approval?: { approval_id: string; approved_by: string; approved: boolean };
+  report_plan?: ProductionReportPlan;
+  error?: string;
+};
+
+export async function requestProductionReport(
+  workOrderId: string,
+  payload: { target_qty: number; actual_elapsed_minutes: number; lot_number?: string },
+  requestedBy?: string,
+): Promise<ProductionReportResult> {
+  return api<ProductionReportResult>("/real-orders/production-reports/request", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId, ...payload, requested_by: requestedBy }),
+  });
+}
+
+export async function approveProductionReport(
+  approvalId: string,
+  approvedBy?: string,
+): Promise<ProductionReportResult> {
+  return api<ProductionReportResult>(
+    "/real-orders/production-reports/approvals/" + encodeURIComponent(approvalId) + "/approve",
+    {
+      method: "POST",
+      headers: writeHeaders(),
+      body: JSON.stringify({ approved_by: approvedBy }),
+    },
+  );
+}
+
+export async function executeProductionReport(
+  workOrderId: string,
+  approvalId: string,
+  approvedBy?: string,
+): Promise<ProductionReportResult> {
+  return api<ProductionReportResult>("/real-orders/production-reports/execute", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId, approval_id: approvalId, approved_by: approvedBy }),
+  });
+}
+
+// ==================== 质量问题登记（OpenMES NCR，三步审批门禁） ====================
+
+export type IssueTypeInfo = { id: number; name: string; severity?: string };
+
+export type IssueRegistrationPlan = {
+  work_order_id: string;
+  work_order_no: string;
+  issue_type_id: number;
+  issue_type_name?: string;
+  severity?: string;
+  title: string;
+  description?: string;
+};
+
+export type IssueRegistrationResult = {
+  success: boolean;
+  status?: string;
+  written?: boolean;
+  idempotent?: boolean;
+  issue_id?: string;
+  issue?: Record<string, any>;
+  read_back_verified?: boolean;
+  approval?: { approval_id: string; approved_by: string; approved: boolean };
+  issue_plan?: IssueRegistrationPlan;
+  error?: string;
+};
+
+export async function listIssueTypes(): Promise<IssueTypeInfo[]> {
+  return api<IssueTypeInfo[]>("/real-orders/quality/issue-types");
+}
+
+export async function requestIssueRegistration(
+  workOrderId: string,
+  issueTypeId: number,
+  title: string,
+  description?: string,
+  requestedBy?: string,
+): Promise<IssueRegistrationResult> {
+  return api<IssueRegistrationResult>("/real-orders/quality-issues/registration-request", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({
+      work_order_id: workOrderId,
+      issue_type_id: issueTypeId,
+      title,
+      ...(description ? { description } : {}),
+      requested_by: requestedBy,
+    }),
+  });
+}
+
+export async function approveIssueRegistration(
+  approvalId: string,
+  approvedBy?: string,
+): Promise<IssueRegistrationResult> {
+  return api<IssueRegistrationResult>(
+    "/real-orders/quality-issues/approvals/" + encodeURIComponent(approvalId) + "/approve",
+    {
+      method: "POST",
+      headers: writeHeaders(),
+      body: JSON.stringify({ approved_by: approvedBy }),
+    },
+  );
+}
+
+export async function executeIssueRegistration(
+  workOrderId: string,
+  approvalId: string,
+  approvedBy?: string,
+): Promise<IssueRegistrationResult> {
+  return api<IssueRegistrationResult>("/real-orders/quality-issues/execute", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId, approval_id: approvalId, approved_by: approvedBy }),
+  });
+}
+
 export async function askAssistant(
   question: string,
   context: Record<string, unknown> = {},
