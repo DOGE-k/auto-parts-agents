@@ -239,11 +239,17 @@ export default function RealBusinessPage() {
       if (result.net_requirement.has_shortage) {
         setSelectedOptionId(result.recommended_option_id ?? result.supplier_options[0]?.option_id ?? "");
         setStep(5);
+        notify("采购分析完成，检测到缺料");
+      } else if (result.net_requirement.shortage_evaluable === false) {
+        // BOM 缺失：缺料评估不可用（后端如实返回 EVALUATION_BLOCKED）。
+        // 停留在当前步展示阻断信息，绝不当作"库存充足无需采购"继续走流程。
+        setStep(4);
+        notify("缺料评估不可用：该物料未配置 BOM，请先在 ERPNext 补录");
       } else {
         // 库存充足无需采购：跳过方案审批与 PO 草稿步骤，直接进入跟单质量
         setStep(7);
+        notify("库存充足，无需采购");
       }
-      notify(result.net_requirement.has_shortage ? "采购分析完成，检测到缺料" : "库存充足，无需采购");
     } catch (e) {
       setError(e instanceof Error ? e.message : "采购分析失败");
     } finally {

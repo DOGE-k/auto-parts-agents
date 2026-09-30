@@ -2274,13 +2274,24 @@ async def compute_net_requirement(
     # 2. 收集所有需要的物料（BOM 子项）
     bom_items = bom.get("items", []) if bom.get("found") else []
     all_item_codes = [bi["item_code"] for bi in bom_items] + [item_code]
+    net_requirements = []
+    missing_data: list[dict[str, str]] = []
+
+    # 无 BOM 时缺料评估不可用：不能因"没有子项"而给出"无缺料"的伪结论
+    # （如实标注缺失与补救方式，由调用方决定阻断/提示，不静默放行）
+    if not bom.get("found"):
+        missing_data.append({
+            "field": "bom",
+            "detail": (
+                f"成品物料 {item_code} 未在 ERPNext 配置 BOM，子件净需求无法展开，"
+                "缺料与采购评估不可用；需先在 ERPNext 为该物料补录 BOM 后重试"
+            ),
+        })
 
     # 3. 读取库存
     inventory = await erp.get_inventory(all_item_codes)
 
     # 4. 计算每个子项的毛需求和净需求
-    net_requirements = []
-    missing_data: list[dict[str, str]] = []
     for bom_item in bom_items:
         item_id = bom_item["item_code"]
         qty_per = Decimal(str(bom_item["qty_per_product"]))
@@ -2367,6 +2378,8 @@ async def compute_net_requirement(
         "finished_item": item_code,
         "production_quantity": quantity,
         "bom_found": bom.get("found", False),
+        # 缺料评估是否可用：无 BOM 时无法展开子件需求，调用方必须阻断而不是当"无缺料"
+        "shortage_evaluable": bool(bom.get("found", False)),
         "bom_items_count": len(bom_items),
         "net_requirements": net_requirements,
         "shortage_count": len(shortage_items),
@@ -2409,7 +2422,42 @@ async def analyze_procurement(
     # 2. 计算净物料需求
     net_req = await compute_net_requirement(item_code, quantity)
 
-    # 3. 如果没有缺料，直接返回
+    # 3. BOM 缺失时缺料评估不可用：如实返回阻断方案，绝不给"库存充足无需采购"的伪结论
+    if not net_req.get("shortage_evaluable", False):
+        plan_id = _gen_id("PROC")
+        blocked_detail = next(
+            (m["detail"] for m in net_req.get("missing_data", []) if m.get("field") == "bom"),
+            "成品物料未配置 BOM，缺料评估不可用",
+        )
+        plan = {
+            "plan_id": plan_id,
+            "quotation_id": quotation_id,
+            "quotation_status": quotation.get("status", ""),
+            "status": "EVALUATION_BLOCKED",
+            "adapter_mode": mode,
+            "net_requirement": net_req,
+            "supplier_options": [],
+            "recommended_option_id": None,
+            "recommendation_rule": "not_applicable_bom_missing",
+            "recommendation": f"无法评估缺料与采购需求：{blocked_detail}",
+            "data_limitations": [{"field": "bom", "detail": blocked_detail}],
+            "evidence": [
+                {
+                    "source": net_req.get("authority", "unknown"),
+                    "record_type": "bom",
+                    "record_id": "",
+                    "summary": f"BOM: 未找到（{net_req.get('bom_items_count', 0)} 个子项），缺料评估不可用",
+                },
+            ],
+            "selected_option_id": None,
+            "approval_id": None,
+            "po_draft": None,
+            "created_at": _utc_now().isoformat(),
+        }
+        save_procurement_plan(plan)
+        return plan
+
+    # 3b. 如果没有缺料，直接返回
     if not net_req["has_shortage"]:
         plan_id = _gen_id("PROC")
         evidence = [

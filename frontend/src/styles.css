@@ -1534,6 +1534,18 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 /* ═══════════════════════════════════════════════════════════════════
    Real Business Page
    ═══════════════════════════════════════════════════════════════════ */
+/* 采购分析阻断卡片：BOM 缺失时如实提示，不放行流程 */
+.evaluation-blocked {
+  border: 1px solid #e0c8a0;
+  background: rgba(224, 168, 0, 0.06);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.evaluation-blocked > small { color: #8a6d00; font-weight: 700; }
+.evaluation-blocked p { margin: 8px 0; font-size: 12.5px; color: var(--ink-2); }
+.evaluation-blocked ul { margin: 6px 0 0 18px; font-size: 12px; color: var(--muted); }
+
 /* 页签导航（阶段十信息架构优化：问答/流程/质量/记录分区） */
 .real-tabs {
   display: flex;

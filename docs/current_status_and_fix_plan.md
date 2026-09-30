@@ -1350,3 +1350,42 @@ ERP 物料需求
 1. 演示剧本可在故事线 A 补一句"等待时调用链会逐步点亮"（演示观感卖点）。
 2. CI 首跑验证仍待 push。
 3. 深度优化候选（未排期）：回答 token 级流式（DeepSeek stream=True，当前为"步骤流+完整回答"，已覆盖主要等待感）；App.tsx（469 行）按页签模式拆分。
+
+### 3.42 通用能力实测（剧本外任意输入）与无 BOM 伪结论修复（2026-09-30）
+
+**背景**：用户明确要求——演示不能只依赖剧本预设数据，"无论遇到什么情况都能实现"。本轮对系统做"任意输入"实测，发现并修复一个通用性 bug，摸清全部能力断点。
+
+#### 一、OpenMES 写入 API 面调研（源码级，services/OpenMes）
+
+此前认为"只有只读查询能力"的三个写入端点实际全部存在（Laravel /api/v1，Sanctum 会话即可调用，admin 角色权限充分）：
+- **工单创建** `POST /api/v1/work-orders`：`customer_order_no` 是官方字段（迁移 2026_06_21_100000，注释"客户自己的订单/PO 号"），创建后 status=PENDING 并冻结工艺快照 → **step 7"ERP 草稿→MES 工单"的人工断点可以产品化**。
+- **真实报工链路** `POST /work-orders/{id}/batches` → `/batch-steps/{step}/start` → `/batch-steps/{step}/complete`（complete 接受 `actual_elapsed_minutes/actual_setup_minutes/actual_run_minutes`，正是此前 seed 直写数据库的字段）→ **任意新工单的速率 ETA 可用真实 API 产生**。
+- **质量问题创建** `POST /api/v1/issues`（work_order_id/issue_type_id/title/description）→ **"现场制造一个质量问题再走 NCR 闭环"成为可能**。
+
+#### 二、任意问题清单实测（5 个剧本外问题，真实 DeepSeek）
+
+| 输入 | 行为 | 结论 |
+|---|---|---|
+| "BD-2402 现在 500 件多少钱？"（缺客户） | 工具失败→如实说明缺 customer_id、不编价格 | ✅ 诚实 |
+| "SAL-ORD-2099-00001 什么时候能做完？"（不存在） | ERP_ORDER_NOT_FOUND 如实报告 | ✅ 诚实 |
+| "WO-2026-999 现在什么状态？"（不存在） | found:false 如实报告并列出现有工单 | ✅ 诚实 |
+| "BRG-6204 库存够不够 1000 件？" | 灵活复用报价分析技能查真实 Bin（1500 件）答"够" | ✅ 动态协同 |
+| "现在厂里最紧急的质量问题是什么？" | 如实说明无全厂扫描接口，请给线索 | ✅ 诚实，**暴露缺口：协调者缺"全厂质量待办"技能（数据在 quality todo 已有）** |
+
+#### 三、新订单实测发现并修复无 BOM 伪结论（通用性 bug，BD-2401 精修路径踩不到）
+
+- **现象**：非预设物料 BD-2402（ERP 无 BOM）走新订单流程：报价正常（真实价格 78 CNY，QUO-155D21601EFE），但采购分析返回 `has_shortage:false` + `missing_data:[]` + 方案文案"库存充足，无需采购"（NO_SHORTAGE）——**表面"不缺料"，实际是"无 BOM 无法展开子件需求"，属伪结论**；前端还会据此直接跳 step 7，链路断裂。
+- **修复**：`compute_net_requirement` 新增 `shortage_evaluable` 字段（无 BOM 时 false 并在 missing_data 标注"BOM 缺失，评估不可用+补录指引"）；`analyze_procurement` 无 BOM 时返回 `status: EVALUATION_BLOCKED`（recommendation_rule=not_applicable_bom_missing，绝不输出"库存充足"）；前端 `analyzeProcurement` 三分叉（缺料→step5 / 评估不可用→停留 step4 展示阻断卡片 / 真无缺料→step7），`ProcurementAnalyzePanel` 新增阻断卡片（补录指引）。
+- **真实复测**：BD-2402 新订单（QUO-3DD73A37B674）→ `EVALUATION_BLOCKED` + 中文如实说明与补录指引，`shortage_evaluable:false`。
+- **测试**：后端 **135 passed**（新增 test_missing_bom_blocks_shortage_evaluation）；前端 build 通过。
+
+#### 四、断点分类总账（"任意输入都能实现"的差距清单）
+
+| 断点 | 分类 | 处置 |
+|---|---|---|
+| 无 BOM 物料伪结论 | 通用性 bug | ✅ 本轮已修复 |
+| 协调者无"全厂质量待办"技能（只读，数据已有） | 可补能力 | 待办（无需审批，纯只读） |
+| 新订单 step 7：ERP 草稿后无 MES 工单（原靠人工在 OpenMES 手建） | 可补能力（写入） | OpenMES API 已确认；**等用户批准**后做"工单下达"审批门禁能力（创建工单+customer_order_no 关联+回读） |
+| 任意工单无报工数据→ETA 如实缺数 | 可补能力（写入） | OpenMES 报工 API 已确认；**等用户批准**后做"批次+报工"审批门禁能力（真实 API 替代 seed 直写） |
+| 现场无质量问题可演示处置 | 可补能力（写入） | OpenMES issues API 已确认；**等用户批准**后做"质量问题登记"能力 |
+| 工单状态 PENDING vs 完成率 90% 口径不一致 | 数据口径 | 建议保留（LLM 主动发现=诚实卖点）；如需推进工单状态走真实报工 API |

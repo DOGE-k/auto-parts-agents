@@ -196,6 +196,7 @@ export type ProcurementPlan = {
     finished_item: string;
     production_quantity: number;
     bom_found: boolean;
+    shortage_evaluable?: boolean;
     net_requirements: NetRequirementItem[];
     shortage_items: NetRequirementItem[];
     shortage_count: number;

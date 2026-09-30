@@ -50,6 +50,18 @@ export function ProcurementAnalyzePanel({
             </button>
           </div>
         )
+      ) : plan.status === "EVALUATION_BLOCKED" ? (
+        /* BOM 缺失：缺料评估不可用，如实阻断并指引补录（不伪造"无缺料"继续流程） */
+        <div className="evaluation-blocked">
+          <small>缺料评估不可用（如实阻断，不给出伪结论）</small>
+          <p>{plan.recommendation}</p>
+          <ul>
+            {(plan.data_limitations ?? []).map((d, idx) => (
+              <li key={idx}>{d.detail}</li>
+            ))}
+          </ul>
+          <p className="field-hint">处理方式：在 ERPNext 为成品物料补录 BOM（含子项与用量）后，回到步骤 4 重新执行采购分析。</p>
+        </div>
       ) : (
         <>
           {plan.net_requirement.has_shortage && (

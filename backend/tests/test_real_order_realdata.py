@@ -272,6 +272,26 @@ class ProcurementRealDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(plan["data_limitations"], list)
         self.assertIsInstance(plan["evidence"], list)
 
+    async def test_missing_bom_blocks_shortage_evaluation(self):
+        """无 BOM 时缺料评估不可用：如实返回 EVALUATION_BLOCKED，不得伪造成"无缺料/库存充足"。"""
+        self._quotation(item_id="DEMO-PROD", qty=800)
+        # _FakeERP 默认 bom found=False（模拟未配置 BOM 的成品物料）
+        erp = _FakeERP(inventory=[])
+        with patch.object(real_order, "get_erp_adapter", return_value=erp), \
+             patch.object(real_order, "get_adapter_mode", return_value="real"):
+            net = await real_order.compute_net_requirement("DEMO-PROD", 800)
+            plan = await real_order.analyze_procurement("QUO-TEST")
+
+        self.assertFalse(net["shortage_evaluable"])
+        self.assertTrue(any(m["field"] == "bom" for m in net["missing_data"]))
+        self.assertEqual(plan["status"], "EVALUATION_BLOCKED")
+        self.assertEqual(plan["recommendation_rule"], "not_applicable_bom_missing")
+        self.assertIn("BOM", plan["recommendation"])
+        self.assertNotIn("库存充足", plan["recommendation"])
+        self.assertEqual(plan["supplier_options"], [])
+        self.assertTrue(any(d.get("field") == "bom" for d in plan["data_limitations"]))
+        self.assertFalse(plan["net_requirement"]["shortage_evaluable"])
+
     async def test_po_draft_rejected_when_price_missing(self):
         """方案中有物料缺真实价格时，拒绝创建 PO 草稿。"""
         self._quotation()
