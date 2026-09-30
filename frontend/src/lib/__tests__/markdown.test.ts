@@ -13,11 +13,10 @@ describe("formatAssistantAnswer", () => {
   });
 
   it("renders markdown tables into md-table structure", () => {
-    const md = ["| 方案 | 成本 |", "|---|---|", "| A | +1180 |", "| B | +1080 |"].join("
-");
+    const md = ["| 方案 | 成本 |", "|---|---|", "| A | +1180 |", "| B | +1080 |"].join("\n");
     const out = formatAssistantAnswer(md);
     expect(out).toContain('class="md-table"');
-    expect((out.match(/<tr>/g) ?? []).length).toBe(2); // 分隔行被跳过
+    expect((out.match(/<tr>/g) ?? []).length).toBe(3); // 表头 + 2 数据行，分隔行被跳过
     expect(out).toContain("+1180");
   });
 });
