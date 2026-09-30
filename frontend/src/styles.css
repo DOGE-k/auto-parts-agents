@@ -2351,6 +2351,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .real-session-login-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .real-session-login-row input { flex: 1 1 140px; min-width: 120px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); font-size: 11px; }
 .real-session-hint { margin: 0; color: var(--muted); font-size: 10px; }
+.real-session-error { margin: 0; color: var(--red, #d64545); font-size: 11px; font-weight: 600; }
 .ncr-workflows { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .ncr-workflow-heading { display: flex; flex-direction: column; gap: 3px; }
 .ncr-workflow-heading strong { color: var(--ink-1); font-size: 13px; }

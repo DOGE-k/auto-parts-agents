@@ -321,6 +321,7 @@ export default function RealBusinessPage() {
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const [ncrWorkflows, setNcrWorkflows] = useState<Record<string, NcrWorkflow>>({});
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -921,6 +922,7 @@ export default function RealBusinessPage() {
                       disabled={loginBusy || !loginUsername.trim() || !loginPassword}
                       onClick={() => {
                         setLoginBusy(true);
+                        setLoginError("");
                         loginRealSession(loginUsername.trim(), loginPassword)
                           .then((result) => {
                             setRealSessionToken(result.access_token);
@@ -934,7 +936,7 @@ export default function RealBusinessPage() {
                                 : `已登录为 ${result.identity?.display_name ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
                             );
                           })
-                          .catch((e) => setError(e instanceof Error ? e.message : "OpenMES 登录失败"))
+                          .catch((e) => setLoginError(e instanceof Error ? e.message : "OpenMES 登录失败"))
                           .finally(() => setLoginBusy(false));
                       }}
                     >
@@ -944,6 +946,7 @@ export default function RealBusinessPage() {
                   <p className="real-session-hint">
                     登录走真实 OpenMES 认证接口，返回默认 15 分钟 TTL 的短时会话；登出只清除本浏览器会话，不吊销上游令牌。
                   </p>
+                  {loginError && <p className="real-session-error">登录失败：{loginError}（请确认 OpenMES 的用户名和密码，默认账号是安装 OpenMES 时设置的 admin）</p>}
                 </div>
                 <label>
                   Bearer 会话（可选）
