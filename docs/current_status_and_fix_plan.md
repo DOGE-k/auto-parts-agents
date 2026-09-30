@@ -1141,3 +1141,24 @@ ERP 物料需求
 - seed 过程中发现并修复脚本自身 bug（scalar() 双次执行导致 INSERT 重复），已清理重复数据并复验幂等；
 - 批次步骤 `duration_minutes` 同步写为 150；批次级 started/completed 同步更新；
 - 工单 9 状态仍为 PENDING（与 90% 进度不一致）——协调者已在回答中如实提示，状态口径属 OpenMES 业务数据，不在本 seed 范围内擅改。
+
+### 3.35 NCR 真实写入最小范围验收 + 演示加固（2026-09-30）
+
+**NCR 处置真实写入（用户批准处置 = 返工 rework）**：
+
+1. 前置就绪：`REAL_WRITE_API_TOKEN` 已配置（写入门禁激活，无效令牌 403）；OpenMES admin 登录会话（REAL_IDENTITY_ROLE_MAP 授予 quality_manager）。
+2. 页面真实执行链（身份 admin · 来源 OpenMES）：质量待办 → "去处置" issue 1 → 人工填表（rework / 不合格数量 1800 / NC 来源=内部 / 根因 / 遏制措施）→ ① 建立处置审批（**审批号 QDISP-1BC2B3498AAE**）→ ② 批准 → ③ 写回 OpenMES。
+3. 验收中发现并修复一个真 bug：首次写回的回读比对把 `non_conforming_qty` 按**字符串**比较（审批载荷 JSON number → `1800.0`，OpenMES 回读 → `"1800"`），OpenMES PUT 实际已成功写入，但被误报 `WRITE_UNVERIFIED`。修复为 Decimal 数值比较（`_same_quantity`），未验证分支补充明确错误信息"已写入但回读比对不一致，请人工核对"；新增回归测试 `test_disposition_qty_format_difference_does_not_fail_verification`。修复后页面重按 ③ → `DISPOSITION_RECORDED · 回读已验证 · 幂等命中`，卡片状态"已登记处置"。
+4. OpenMES 真实状态回读确认：issue 1 `status=RESOLVED`、`disposition=rework`、root_cause/containment_action/nc_source=internal/non_conforming_qty=1800 全部与审批载荷一致；质量待办行同步显示 `rework`。
+5. 关闭前置条件：`closure_ready=true`（问题已解决/已登记处置/已记录根因/已记录遏制措施/纠正措施已验证 五项全 ✓）。按最小范围验收**不执行 close**（保留 issue 1 在待办中作演示；close 链路审批/写回/回读代码与门禁就绪）。
+6. id=2 阻断线无扰动（0% 进度 + SOP/Control Plan 缺失不变）。
+
+**演示加固**：
+
+1. `scripts/start_demo.ps1` 一键启动 + 环境预检：幂等（端口占用跳过）、等待就绪、真实连通性检查（后端/表面/ERPNext/OpenMES/身份/DeepSeek/写入令牌），预检失败如实退出。实测全部通过（UTF-8 BOM 修正 PowerShell 5.1 解析、OpenMES check 端点改 POST）。
+2. 加急场景（例子四）页面级验收补齐：提问"客户要求把 SAL-ORD-2026-00023 提前交货……" → 三维度结论（`can_ship=true`：报价已审批 + 质量门禁通过 + 完成率 90%）+ 方案 A/B 成本风险对比（真实价格记录，方案 `PROC-5585148630C1`）+ 边界如实说明（"最多提前多少被物料交期锁死 15 天，剩余 200 件完工数据不足不编造"）。截图 `gui-test-screenshots/2026-09-30_expedite_scenario_page_acceptance.png`。
+3. `docs/demo_script.md` 演示剧本：六条故事线（动态协同/速率 ETA/缺料双审批/质量待办+处置写回/加急/诚实性）+ 关键记录编号速查 + 注意事项。
+
+**验证**：`pytest tests -q` **126 passed**（新增 1 例）、`compileall`、`npm run build` 通过。本阶段真实写入：OpenMES issue 1 处置字段（经审批）；ERPNext 无写入。
+
+**遗留**：close 写回链路未真实执行（有意保留待办演示项）；工单 9 状态 PENDING 与 90% 进度不一致属 OpenMES 业务数据口径，协调者会如实提示。

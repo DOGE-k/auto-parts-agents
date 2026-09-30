@@ -99,6 +99,40 @@ class QualityLifecycleServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["read_back_verified"])
         self.assertEqual(fake_mes.payload["disposition"], "rework")
 
+    async def test_disposition_qty_format_difference_does_not_fail_verification(self):
+        """审批载荷 1800.0（JSON number）与回读 "1800" 的格式差异不得误判为回读不一致。
+
+        2026-09-30 真实验收发现：写入已到达 OpenMES，但 non_conforming_qty
+        按字符串比较（"1800.0" vs "1800"）导致误报 WRITE_UNVERIFIED。
+        """
+        before = {
+            "record_id": "7", "status": "OPEN", "disposition": "pending",
+            "root_cause": "", "containment_action": "",
+        }
+        after = {
+            **before, "status": "RESOLVED", "disposition": "rework",
+            "root_cause": "尺寸偏差", "containment_action": "隔离并返工",
+            "non_conforming_qty": "1800", "nc_source": "internal",
+        }
+
+        class FakeMES:
+            async def set_quality_issue_disposition(self, issue_id, **kwargs):
+                return {"data": {"id": issue_id, **kwargs}}
+
+        with patch.object(real_order, "quality_package", side_effect=[self._package(before), self._package(after)]),              patch.object(real_order, "get_mes_adapter", return_value=FakeMES()):
+            requested = real_order.request_quality_issue_disposition(
+                "7", "2", "requester", disposition="rework",
+                non_conforming_qty=1800.0, root_cause="尺寸偏差", containment_action="隔离并返工",
+                nc_source="internal",
+            )
+            approval_id = requested["approval"]["approval_id"]
+            real_order.approve_quality_issue_disposition(approval_id, "quality-manager")
+            result = await real_order.set_quality_issue_disposition("7", approval_id, "quality-manager")
+
+        self.assertTrue(result["success"], result)
+        self.assertTrue(result["read_back_verified"])
+        self.assertEqual(result["status"], "DISPOSITION_RECORDED")
+
     async def test_closure_check_requires_verified_actions(self):
         issue = {
             "record_id": "7", "status": "RESOLVED", "disposition": "rework",

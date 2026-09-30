@@ -338,7 +338,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 |---|---|---|
 | 1 | 前端请求级身份会话与 NCR 人工操作面板 | ✅ 已完成：短期 Bearer/写入令牌仅存 `sessionStorage`；NCR 处置与关闭严格按审批、写回、回读分步操作；没有伪造 SSO，也没有自动选择处置 |
 | 1.5 | OpenMES 短时会话登录页 | ✅ 已完成（见 current_status_and_fix_plan.md §3.32）：真实 `/api/auth/login` 契约（Sanctum 15 分钟 TTL）、登录令牌回读身份、ERPNext 随机角色 docname 噪音过滤；成功路径待部署方提供业务账号后做端到端验收；ERPNext 密码登录/OIDC 仍待部署契约 |
-| 2 | NCR 真实写入最小范围验收 | ⏸️ 等待真实业务处置决策、具备质量角色的会话和写入令牌；当前 issue 1 仍是 `RESOLVED + disposition=pending`，不得自行猜测处置 |
+| 2 | NCR 真实写入最小范围验收 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.35）：用户批准 rework，审批 `QDISP-1BC2B3498AAE` 写回并回读验证通过、closure_ready=true；顺带修复回读数量格式比对 bug；close 链路就绪未执行（演示保留待办） |
 | 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
 | 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
 | 5 | 检验/报工数据补录 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.34）：`backend/seed_inspection_eta.py` 幂等补录 TEST_ 检验 3 条 + 批次实际耗时 150 分钟；track/9 已 RATE_BASED（720 件/小时）、quality/package/9 检验维度有数据、id=2 阻断线不受影响、125 passed |

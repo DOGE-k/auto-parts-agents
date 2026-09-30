@@ -994,6 +994,14 @@ def approve_quality_issue_disposition(approval_id: str, approved_by: str) -> dic
 
 
 @_agent_run("quality", "set_disposition")
+def _same_quantity(a: Any, b: Any) -> bool:
+    """按数值比较数量（1800.0 / "1800" / "1800.00" 视为相等），解析失败退回字符串。"""
+    try:
+        return Decimal(str(a)) == Decimal(str(b))
+    except Exception:
+        return str(a) == str(b)
+
+
 async def set_quality_issue_disposition(
     issue_id: str,
     approval_id: str,
@@ -1053,7 +1061,9 @@ async def set_quality_issue_disposition(
         and (
             payload.get("non_conforming_qty") is None
             or "non_conforming_qty" not in read_back
-            or str(read_back.get("non_conforming_qty")) == str(payload.get("non_conforming_qty"))
+            # 审批载荷（JSON number → 1800.0）与 OpenMES 回读（"1800"/"1800.00"）
+            # 的数量格式不同，按数值比较，禁止用字符串比较把格式差异误判为回读不一致。
+            or _same_quantity(read_back.get("non_conforming_qty"), payload.get("non_conforming_qty"))
         )
         and (
             payload.get("nc_source") in (None, "")
@@ -1072,6 +1082,7 @@ async def set_quality_issue_disposition(
         "quality_package": after,
         "authority": "OpenMES",
         "data_source": "openmes_api",
+        **({} if verified else {"error": "NCR 处置已写入 OpenMES，但回读比对不一致，请人工核对"}),
     }
 
 
