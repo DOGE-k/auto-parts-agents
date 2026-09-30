@@ -1162,3 +1162,32 @@ ERP 物料需求
 **验证**：`pytest tests -q` **126 passed**（新增 1 例）、`compileall`、`npm run build` 通过。本阶段真实写入：OpenMES issue 1 处置字段（经审批）；ERPNext 无写入。
 
 **遗留**：close 写回链路未真实执行（有意保留待办演示项）；工单 9 状态 PENDING 与 90% 进度不一致属 OpenMES 业务数据口径，协调者会如实提示。
+
+### 3.36 全功能本地重测报告（2026-09-30，用户授权全量重测含故障注入）
+
+**范围与方法**：6 组共 49 项检查 + 1 次真实写回链重跑，覆盖单元/接口/页面/LLM 问答/幂等门禁/故障注入。零业务代码改动；含一次 OpenMES 停机注入与一次 DeepSeek key 摘除注入（均已恢复）。
+
+| 组 | 项数 | 结果 |
+|---|---|---|
+| T1 基础回归（pytest/compileall/npm build） | 3 | ✅ 3/3（126 passed） |
+| T2 真实接口逐项探针（健康/表面/身份/待办/质量包×2/ETA×2/发运门禁×2/报价/方案/运行记录/关闭前置/ERP 客户/OpenMES 工单） | 17 | ✅ 17/17 |
+| T3 页面级（登录会话/待办渲染/无会话不泄露/8 步表单 ERP 数据/运行记录面板/MES 完工页） | 6 | ✅ 6/6 |
+| T4 协调者问答（ETA 速率线/诚实缺数线/质量协同线/报价线/SN 诚实缺口） | 5 | ✅ 5/5 |
+| T5 幂等与门禁（重复报价审批幂等复用 APPR-2DD01946C804/错写入令牌 403/缺令牌 403/Mock 表面 404 mock_surface_disabled/非 Bearer 401/NCR 全链重走幂等命中） | 6 | ✅ 6/6 |
+| T6 故障注入（停 openmes-backend：todo 502、package 500、track NOT_FOUND+如实缺口，不回退空数据，恢复验证 ✓；摘 DEEPSEEK_API_KEY：ask 503 llm_not_configured"不使用固定话术伪造回答"，恢复验证 ✓；Mock 404） | 3 | ✅ 3/3 |
+
+**关键证据**：
+
+- T5.1 NCR 全链重走：新审批 `QDISP-95702E8DA994` → 批准 → 写回 → `DISPOSITION_RECORDED · 回读已验证`（OpenMES 已是 rework，数据级幂等，无重复写入）；
+- T2.5 质量待办 2 条（#1 RESOLVED/rework 即本次写回结果）；T2.9 track/9 `RATE_BASED` 720 件/h；T2.10 id=9 `can_ship=true` 与 T2.11 id=2 正确拦截对照；
+- T4.3 质量问答正确反映写回后现状（RESOLVED + 返工已登记），并如实指出真正阻塞是"文档缺失 + 未开工"；
+- T4.4 报价链引用真实价格记录（ERPNext Standard Selling 85 元/件）。
+
+**发现与结论（无系统缺陷，3 条小项）**：
+
+1. 探针笔误：`/api/real-orders/mes/work-orders` 不存在（404），正确端点为 `/api/mes/work-orders`（9 条工单）——测试脚本问题，非系统缺陷；
+2. 错误码不一致（改进项）：OpenMES 停机时 `quality/todo` 502 而 `quality/package` 500，均如实失败但映射不统一，后续可统一为 502；
+3. 措辞精度（改进项）：MES 停机时 `track` 返回 `NOT_FOUND`+"工单不存在"，更准确表述应为"MES 不可达"；不构成数据伪造。
+4. 测试过程新增 1 条 NCR 处置审批记录（QDISP-95702E8DA994，幂等写回），审计留痕属正常业务数据。
+
+**结论**：全部功能在本地真实环境重测通过；两条演示线（id=2 阻断 / id=9 通过）、治理门禁、诚实性故障行为均符合设计。
