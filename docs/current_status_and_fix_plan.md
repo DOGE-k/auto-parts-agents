@@ -1464,6 +1464,27 @@ ERP 物料需求
 - 任务 2：对上述工单真实登记质量问题 → `quality/package` 与全厂待办出现新条目 → NCR 卡片可处置（处置闭环演示可复用既有链路）。
 - 铁律不变：写入=人工审批→写回→回读→幂等；审批依据记入返回；每步跑测试；文档先更新再提交（逐个 add）。
 
-#### 四、验证结果（实现完成后补记）
+#### 四、验证结果（2026-10-01 实现 + 真实验证完成）
 
-（待补）
+**测试基线**：后端 **154 passed**（新增 15 例：工单下达 product_type 映射 2 + 真实报工 7 + 质量问题登记 6），`compileall` 通过；前端 vitest **14 passed** + `npm run build`（tsc 严格检查）通过。
+
+**任务 1 真实报工（全部真实系统，审批门禁内）**：
+
+- 链路 A（全额报工 → COMPLETED）：报价 `QUO-E15130196052`（BD-2401·上汽集团·400 件·交期 2026-11-20，真实价格 85 CNY/件）→ 审批 `APPR-215FE775C6E4` → ERP 销售订单草稿 **SAL-ORD-2026-00025**（docstatus=0；首次未带交期被如实拒绝——"报价缺少交期不能创建草稿"，无默认值）→ 工单下达审批 `WOD-43F4AA8D9F97`（**product_type 映射命中：id=2 制动盘-前轮**，product_type_match=resolved）→ 批准 → **真实创建 OpenMES 工单 id=11**（WO-SO-2026-00025，customer_order_no 回读验证通过）→ 报工审批 `RPT-FBE8161972A7`（400 件/50 分钟，lot=TEST_LOT_WO11_1）→ 批准 → **官方报工链路真实执行**（批次 id=4 创建 → 步骤开工 → 完工带 actual_elapsed_minutes）→ 回读验证通过（批次步骤 DONE、工单 produced_qty=400.00）；重复执行幂等（idempotent=true，零写入）；track/11 ETA 口径 `COMPLETED`（400/400）。
+- 链路 B（部分报工 → RATE_BASED）：`QUO-1DB191C271FA`（300 件）→ 审批 → **SAL-ORD-2026-00026** → 下达 → **工单 id=12**（WO-SO-2026-00026，product_type 映射命中）→ 报工审批 `RPT-415078956178`（100 件/20 分钟，批次号留空自动派生 `LOT-0B24E68049E0`）→ 回读验证通过（工单 produced_qty=100.00）→ **track/12：完成率 33.3%、实测速率 300 件/小时、ETA=2026-10-01 01:24（本地），eta_status=RATE_BASED**。
+- 顺带完成 §3.43 遗留小待办：工单下达按 item_code 精确匹配 `product-types.code` 传 product_type_id（新工单有工艺快照、product_name 有值）；未命中/查询失败如实记录（product_type_match=not_found/lookup_failed），不阻断下达。
+- **工单 id=10 保持如实缺数**：BD-2402 在 OpenMES 无激活工艺模板（真实状态），官方报工 API 无法在其上执行；服务层对无快照步骤工单写前如实拒绝（附补模板指引），不做任何伪造补数。
+
+**任务 2 质量问题登记（全部真实系统，审批门禁内）**：
+
+- 只读端点 `GET /real-orders/quality/issue-types` 返回真实 11 类（Material Defect·HIGH / Material Shortage·CRITICAL 等）。
+- 登记链路：登记审批 `QISS-8B341F69A022`（工单 id=11 · 类型 Material Defect(HIGH) · "制动盘端面跳动超差（现场登记验证）"）→ 批准 → **真实创建 OpenMES issue id=3** → 回读验证通过（work_order_id 与标题精确匹配）；重复执行幂等（written=false）。
+- 可见性验证：`quality/package/11` 出现新记录（record_id=3·HIGH·OPEN，质量门禁正确转为未通过）；全厂质量待办出现新条目（待办 2→3 条）。**issue 3 有意保留 OPEN**，作为现场处置三步闭环的演示素材（与 issue 1 同策略）。
+
+**页面级说明**：两个新区块（Step 8 报工 / 登记）复制 §3.43 页面已验收的下达区块模式（tsc 严格类型检查通过）；端到端页面冒烟需 OpenMES 登录会话（密码仅用户掌握），留待下次演示登录时顺带复核——API 级验证已覆盖页面所调用的同一路径与同一校验。
+
+**写入记录**（均为人工审批门禁内真实写入，审批依据=用户 2026-10-01 批准按交接文档开工并验收）：ERPNext 销售订单草稿 SAL-ORD-2026-00025/00026（docstatus=0）；OpenMES 工单 id=11/12、批次 4 与 LOT-0B24E68049E0、issue id=3。全部回读验证通过、无未审批写入、无 Mock 兜底。
+
+**修改文件**：`backend/app/adapters/mes/openmes.py`（batch×3/issue-types/create_issue/get_issue）、`backend/app/adapters/mes/openmes_adapter.py`（透传 + list_product_types）、`backend/app/services/real_order.py`（RPT/QISS 三步 + 下达 product_type 映射）、`backend/app/main.py`（7 个端点：报工 3 + 登记 3 + issue-types 只读）、`backend/tests/test_real_order_realdata.py`（+15 例）、`frontend/src/api.ts`、`frontend/src/components/flow/TrackingFlow.tsx`（报工/登记两区块，自包含状态）、`docs/demo_script.md`（故事线 B/D + 记录速查）。
+
+**遗留与下一步**：① 页面级冒烟（待用户登录演示时复核两个新区块）；② BD-2402 等物料的 OpenMES 工艺模板属主数据工程，补模板后新订单即可报工；③ CI 首跑验证仍待 push。
