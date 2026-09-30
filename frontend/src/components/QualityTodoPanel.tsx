@@ -25,7 +25,7 @@ export default function QualityTodoPanel({
       <div className="panel-heading">
         <div>
           <h2>质量待办</h2>
-          <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"进入该工单既有的 NCR 审批处置面板。</p>
+          <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"切换到订单流程页签中该工单的 NCR 审批处置面板。</p>
         </div>
         {hasOpenmesSession && (
           <button className="button ghost" onClick={onRefresh} disabled={qualityTodoLoading}>

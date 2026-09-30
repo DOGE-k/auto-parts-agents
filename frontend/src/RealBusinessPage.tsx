@@ -45,8 +45,18 @@ import type {
   WorkOrder,
 } from "./types/realBusiness";
 
+// ========== 页面页签（阶段十信息架构优化：单页纵向堆叠改为页签分区） ==========
+type RealTabKey = "assistant" | "flow" | "quality" | "runs";
+const TAB_ITEMS: { key: RealTabKey; label: string }[] = [
+  { key: "assistant", label: "协同问答" },
+  { key: "flow", label: "订单流程" },
+  { key: "quality", label: "质量中心" },
+  { key: "runs", label: "运行记录" },
+];
+
 // ========== 页面组件 ==========
 export default function RealBusinessPage() {
+  const [activeTab, setActiveTab] = useState<RealTabKey>("flow");
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -451,7 +461,7 @@ export default function RealBusinessPage() {
     }
   }, []);
 
-  // 跳转后滚动并高亮目标 NCR 卡片
+  // 跳转后滚动并高亮目标 NCR 卡片（依赖 activeTab：去处置先切回订单流程页签，渲染后再滚动）
   useEffect(() => {
     if (!todoFocusIssueId) return;
     const el = document.getElementById(`ncr-issue-${todoFocusIssueId}`);
@@ -460,7 +470,7 @@ export default function RealBusinessPage() {
       const timer = window.setTimeout(() => setTodoFocusIssueId(""), 5000);
       return () => window.clearTimeout(timer);
     }
-  }, [todoFocusIssueId, quality, step]);
+  }, [todoFocusIssueId, quality, step, activeTab]);
 
 
 
@@ -613,27 +623,62 @@ export default function RealBusinessPage() {
         </div>
       </div>
 
+      {/* 页签导航（阶段十信息架构优化：问答/流程/质量/记录分区，待办数徽标提醒） */}
+      <div className="real-tabs" role="tablist">
+        {TAB_ITEMS.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={activeTab === t.key}
+            className={`real-tab ${activeTab === t.key ? "active" : ""}`}
+            onClick={() => setActiveTab(t.key)}
+          >
+            {t.label}
+            {t.key === "quality" && hasOpenmesSession && (qualityTodo?.length ?? 0) > 0 && (
+              <span className="real-tab-count">{qualityTodo?.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* 全局错误横幅：任何页签的操作失败都在此显示 */}
+      {error && (
+        <div className="error-banner">
+          <span>操作失败</span> {error}
+          <button onClick={() => setError("")}>×</button>
+        </div>
+      )}
+
       {/* 智能协同问答（阶段五-八：协调智能体 + 方案批准执行闭环；10.5 抽出组件） */}
-      <AssistantPanel
-        identity={identity}
-        currentErpDraftId={quotation?.erp_draft_id ?? ""}
-        currentWorkOrderId={workOrderId}
-        notify={notify}
-        onError={setError}
-      />
+      {activeTab === "assistant" && (
+        <AssistantPanel
+          identity={identity}
+          currentErpDraftId={quotation?.erp_draft_id ?? ""}
+          currentWorkOrderId={workOrderId}
+          notify={notify}
+          onError={setError}
+        />
+      )}
 
       {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见；10.5 抽出组件） */}
-      <QualityTodoPanel
-        hasOpenmesSession={hasOpenmesSession}
-        qualityTodo={qualityTodo}
-        qualityTodoLoading={qualityTodoLoading}
-        qualityTodoError={qualityTodoError}
-        busy={loading}
-        onRefresh={() => void loadQualityTodo()}
-        onGoDispose={(item) => void goToQualityDispose(item)}
-      />
+      {activeTab === "quality" && (
+        <QualityTodoPanel
+          hasOpenmesSession={hasOpenmesSession}
+          qualityTodo={qualityTodo}
+          qualityTodoLoading={qualityTodoLoading}
+          qualityTodoError={qualityTodoError}
+          busy={loading}
+          onRefresh={() => void loadQualityTodo()}
+          onGoDispose={(item) => {
+            setActiveTab("flow");
+            void goToQualityDispose(item);
+          }}
+        />
+      )}
 
-      {/* 步骤指示器 */}
+      {/* 步骤指示器（订单流程页签） */}
+      {activeTab === "flow" && (
+        <>
       <div className="stepper">
         {[
           { n: 1, label: "报价分析" },
@@ -654,13 +699,6 @@ export default function RealBusinessPage() {
           </div>
         ))}
       </div>
-
-      {error && (
-        <div className="error-banner">
-          <span>操作失败</span> {error}
-          <button onClick={() => setError("")}>×</button>
-        </div>
-      )}
 
       {/* Step 1: 报价输入 */}
       {step === 1 && (
@@ -763,8 +801,11 @@ export default function RealBusinessPage() {
           onReset={resetFlow}
         />
       )}
+        </>
+      )}
+
       {/* Agent 运行记录（阶段三：持久化可查；10.5 抽出组件） */}
-      <AgentRunsPanel />
+      {activeTab === "runs" && <AgentRunsPanel />}
 
       {toast && <div className="toast">✓ &nbsp;{toast}</div>}
       {loading && <div className="busy-indicator"><span />处理中</div>}
