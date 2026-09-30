@@ -283,6 +283,43 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 - 不删除 Mock 演示技能（旧 Mock 后端隔离是独立任务）；
 - ACS 能力描述文件已由 `generate_acs.py` 按真实能力目录同步，机器可读 ACS 与 AIP 注册表一致（见 current_status_and_fix_plan.md §3.21）。
 
+## 阶段九：质量待办面板（2026-09-30 立项，待开发）
+
+### 背景与目标
+
+NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作面板均已完成（§3.29、§3.32），但操作入口藏在"8 步流程 → 跟单质量"步骤内，必须先进入具体工单才能看到。真实工厂（IATF 16949/MRB 流程）的标准形态是：质检角色打开系统先看到**跨工单的质量待办队列**，点单条进入处置。本阶段把这一形态补齐。
+
+### 真实契约依据（已核实）
+
+- OpenMES `GET /api/v1/issues`（vendored 源码 `routes/api.php:663`，`Api/V1/IssueController::index`）：原生支持 `status` 过滤（`OPEN/ACKNOWLEDGED/RESOLVED/CLOSED`）、`work_order_id`、`line_id`，返回含 `issueType/reportedBy/assignedTo/workOrder/batchStep` 关联。
+- 现有后端能力：`quality_package(work_order_id)`、`assess_quality_issue_closure`、disposition/close 全链路端点（§3.29 列表）。
+- 现有 OpenMES 适配器只有按工单取质量记录的 `get_quality_records(batch_scope)`；**没有**跨工单列表方法，需要新增。
+
+### 任务清单
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | OpenMES 客户端/适配器新增 `list_open_issues(status?)`：调用 `GET /api/v1/issues`（建议一次取 `OPEN,ACKNOWLEDGED,RESOLVED` 三态，CLOSED 不进待办）；字段映射为统一 issue 结构（issue_id、work_order_id、work_order_no、title、severity、status、disposition、reported_at、assigned_to）；读取失败如实报错，不回退空列表冒充"没有待办" | ⬜ |
+| 2 | `real_order.py` 新增 `quality_todo_list()` 聚合函数：列表 + 每条附 `closure_ready` 捷径信息（复用 closure-check 逻辑可选，避免 N+1 可先只给状态）+ 数据缺口如实标注 | ⬜ |
+| 3 | 新端点 `GET /api/real-orders/quality/todo`：只读，走 `require_real_identity`，返回 `{items, authority, data_source}` | ⬜ |
+| 4 | 前端"质量待办"面板：真实业务页新增区块（或侧栏入口），表格列：工单号、问题标题、严重度、状态、已报告天数（超 3 天标红）、操作按钮"去处置"→ 跳转/展开既有 NCR 操作面板并预选该 issue；仅登录用户可见该入口（无会话时显示"登录后查看质量待办"） | ⬜ |
+| 5 | 测试：适配器假数据测试（三态过滤、失败传播）、聚合函数测试、端点接线测试；全量回归不下降 | ⬜ |
+| 6 | 真实验收：`GET /api/real-orders/quality/todo` 返回 OpenMES 真实 issue（当前已知 issue 1 为 RESOLVED+disposition=pending，必须出现在待办里）；页面截图存证 `gui-test-screenshots/` | ⬜ |
+| 7 | 文档：`current_status_and_fix_plan.md` 追加验收记录（接口、状态码、authority、是否写入、回读）+ 本表勾稽 | ⬜ |
+
+### 验收标准
+
+1. 待办列表数据全部来自 OpenMES `GET /api/v1/issues` 真实记录，带 `authority=OpenMES`；接口失败明确报错，不用空数组冒充；
+2. 无登录会话时不显示待办内容（或明确提示需登录），有会话时正常显示——与请求级身份治理一致；
+3. 点击"去处置"能到达既有 NCR 操作面板，处置流程（审批→写回→回读）不回归；
+4. 全量后端测试 + `npm run build` + `compileall` 通过。
+
+### 明确不做（本阶段边界）
+
+- 不做待办分派/指派改派（assignedTo 编辑）——OpenMES 契约里改指派是 `PATCH /issues/{id}`，涉及写权限设计，另立任务；
+- 不做推送/消息通知；
+- 不在本阶段执行真实 disposition 写入（仍等业务决策，见执行计划第 2 项）。
+
 ## 后续候选任务（优先级从高到低）
 
 1. ~~**阶段八质量异常协同 + 审批一致性**~~ 已完成（见上节和 `current_status_and_fix_plan.md` §3.20）；
@@ -304,5 +341,6 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 | 2 | NCR 真实写入最小范围验收 | ⏸️ 等待真实业务处置决策、具备质量角色的会话和写入令牌；当前 issue 1 仍是 `RESOLVED + disposition=pending`，不得自行猜测处置 |
 | 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
 | 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
+| 5 | 质量待办面板（阶段九） | ⬜ 已立项：跨工单未关闭质量问题队列 + 去处置入口，契约与任务清单见上方阶段九章节 |
 
 每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。
