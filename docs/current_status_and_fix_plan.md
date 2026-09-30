@@ -1081,5 +1081,5 @@ ERP 物料需求
 **边界与下一步**：
 
 - ERPNext 侧用户名/密码登录依赖 frappe 会话/OIDC 契约，部署未提供，保持服务端集成身份不变；
-- 成功路径端到端验收需要部署方提供一个 OpenMES 业务账号（预期 identity provider=openmes、角色门禁按 REAL_IDENTITY_ROLE_MAP 生效）；
+- **成功路径已于本日完成端到端验收**：部署只有 `admin` 一个 OpenMES 账号，经用户同意后通过 artisan 重置其密码，随后 `POST /api/real-orders/auth/login` 返回 provider=openmes、subject=admin、roles=[Admin]、force_password_change=false（真实 OpenMES Sanctum 令牌）；登录失败提示已改为会话面板内联显示（`fba5609`）；ERPNext 密码登录/OIDC 仍待部署契约；
 - NCR 真实写入最小范围验收仍等待业务处置决策 + 具备质量角色的会话 + 写入令牌。
