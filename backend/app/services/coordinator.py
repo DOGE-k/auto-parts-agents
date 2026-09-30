@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from app.aip.aip_agent_client import AipAgentClient
@@ -430,8 +430,13 @@ class BusinessCoordinator:
         self,
         question: str,
         context: dict[str, Any] | None = None,
+        on_step: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。"""
+        """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
+
+        on_step（可选）：每完成一次工具调用即回调当前调用链步骤（SSE 流式
+        端点用它把"协调者正在查什么"实时推给前端；同步端点不传，行为不变）。
+        """
         if not question.strip():
             raise ValueError("问题不能为空")
 
@@ -511,6 +516,8 @@ class BusinessCoordinator:
                     "status": "error" if step_result.get("error") else "ok",
                     "elapsed_ms": elapsed_ms,
                 })
+                if on_step is not None:
+                    on_step(call_chain[-1])
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", ""),

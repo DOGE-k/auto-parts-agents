@@ -4,11 +4,13 @@ import { formatAssistantAnswer } from "../lib/markdown";
 import {
   agentRunTypeNames,
   askAssistant,
+  askAssistantStream,
+  AssistantStreamExecError,
   approveProcurementPlan,
   approveQuotation as approveQuotationApi,
   createPoFromPlan,
 } from "../api";
-import type { AssistantAnswer, ProposalSupplierOption, RealIdentity } from "../api";
+import type { AssistantAnswer, AssistantCallStep, ProposalSupplierOption, RealIdentity } from "../api";
 
 type Props = {
   identity: RealIdentity | null;
@@ -28,6 +30,8 @@ export default function AssistantPanel({
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState<AssistantAnswer | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  // 流式问答（阶段十 SSE）：等待期间逐条收到的调用链步骤（点亮"协调者正在查什么"）
+  const [streamSteps, setStreamSteps] = useState<AssistantCallStep[]>([]);
   // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
   const [proposalExec, setProposalExec] = useState<{
     option_id: string;
@@ -86,18 +90,30 @@ export default function AssistantPanel({
     if (!q || assistantLoading) return;
     setAssistantLoading(true);
     setAssistantAnswer(null);
+    setStreamSteps([]);
     onError("");
     try {
       const context: Record<string, unknown> = {};
       if (currentErpDraftId) context.当前流程ERP订单号 = currentErpDraftId;
       if (currentWorkOrderId) context.当前流程MES工单id = currentWorkOrderId;
-      const result = await askAssistant(q, context);
+      let result: AssistantAnswer;
+      try {
+        // 流式优先（SSE）：调用链逐步点亮；协调者执行失败不回退（同步重试必然同样失败），
+        // 传输层失败（网络异常/端点不可用/流中断）回退同步端点。
+        result = await askAssistantStream(q, context, {
+          onStep: (step) => setStreamSteps((prev) => [...prev, step]),
+        });
+      } catch (streamErr) {
+        if (streamErr instanceof AssistantStreamExecError) throw streamErr;
+        result = await askAssistant(q, context);
+      }
       setAssistantAnswer(result);
       notify("协调智能体已回答");
     } catch (e) {
       onError(e instanceof Error ? e.message : "协调智能体调用失败");
     } finally {
       setAssistantLoading(false);
+      setStreamSteps([]);
     }
   }, [assistantQuestion, assistantLoading, currentErpDraftId, currentWorkOrderId, notify, onError]);
 
@@ -131,6 +147,25 @@ export default function AssistantPanel({
           {assistantLoading ? "协调智能体处理中..." : "提问 →"}
         </button>
       </div>
+      {/* 流式进行中（阶段十 SSE）：调用链逐步点亮，替代原来的长时间无反馈等待 */}
+      {assistantLoading && streamSteps.length > 0 && (
+        <div className="assistant-result">
+          <div className="assistant-chain">
+            <small>协调智能体工作中，已完成 {streamSteps.length} 次智能体调用…</small>
+            {streamSteps.map((step) => (
+              <div key={step.seq} className={`assistant-step ${step.status}`}>
+                <span className="assistant-step-seq">{step.seq}</span>
+                <span className="assistant-step-callee">{agentRunTypeNames[step.callee] ?? step.callee}</span>
+                <code className="assistant-step-skill">{step.skill_id}</code>
+                <code className="assistant-step-args">{JSON.stringify(step.arguments)}</code>
+                <span className="assistant-step-status">
+                  {step.status === "ok" ? "✓" : "✗"} {step.elapsed_ms}ms
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {assistantAnswer && (
         <div className="assistant-result">
           <div

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import QualityTodoPanel from "./components/QualityTodoPanel";
 import AgentRunsPanel from "./components/AgentRunsPanel";
 import AssistantPanel from "./components/AssistantPanel";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { useNcrWorkflows } from "./hooks/useNcrWorkflows";
 import {
   QuotationInputStep,
@@ -651,17 +652,20 @@ export default function RealBusinessPage() {
 
       {/* 智能协同问答（阶段五-八：协调智能体 + 方案批准执行闭环；10.5 抽出组件） */}
       {activeTab === "assistant" && (
-        <AssistantPanel
-          identity={identity}
-          currentErpDraftId={quotation?.erp_draft_id ?? ""}
-          currentWorkOrderId={workOrderId}
-          notify={notify}
-          onError={setError}
-        />
+        <ErrorBoundary name="智能协同问答">
+          <AssistantPanel
+            identity={identity}
+            currentErpDraftId={quotation?.erp_draft_id ?? ""}
+            currentWorkOrderId={workOrderId}
+            notify={notify}
+            onError={setError}
+          />
+        </ErrorBoundary>
       )}
 
       {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见；10.5 抽出组件） */}
       {activeTab === "quality" && (
+        <ErrorBoundary name="质量中心">
         <QualityTodoPanel
           hasOpenmesSession={hasOpenmesSession}
           qualityTodo={qualityTodo}
@@ -674,6 +678,7 @@ export default function RealBusinessPage() {
             void goToQualityDispose(item);
           }}
         />
+        </ErrorBoundary>
       )}
 
       {/* 步骤指示器（订单流程页签） */}
@@ -778,8 +783,9 @@ export default function RealBusinessPage() {
           onLoadTracking={() => void loadTracking()}
         />
       )}
-      {/* Step 8: 跟单 + 质量 + 发运门禁 */}
+      {/* Step 8: 跟单 + 质量 + 发运门禁（面板级降级：NCR 卡片渲染异常不影响流程其余部分） */}
       {step >= 8 && tracking && quality && shipGate && (
+        <ErrorBoundary name="跟单质量与发运门禁">
         <TrackingQualityGatePanels
           tracking={tracking}
           quality={quality}
@@ -800,12 +806,17 @@ export default function RealBusinessPage() {
           onReload={() => void loadTracking()}
           onReset={resetFlow}
         />
+        </ErrorBoundary>
       )}
         </>
       )}
 
       {/* Agent 运行记录（阶段三：持久化可查；10.5 抽出组件） */}
-      {activeTab === "runs" && <AgentRunsPanel />}
+      {activeTab === "runs" && (
+        <ErrorBoundary name="Agent 运行记录">
+          <AgentRunsPanel />
+        </ErrorBoundary>
+      )}
 
       {toast && <div className="toast">✓ &nbsp;{toast}</div>}
       {loading && <div className="busy-indicator"><span />处理中</div>}

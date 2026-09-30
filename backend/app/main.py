@@ -1424,6 +1424,80 @@ async def real_order_assistant_ask(body: dict) -> dict:
         await coordinator.aclose()
 
 
+@app.post("/api/real-orders/assistant/ask/stream", tags=["real-orders"])
+async def real_order_assistant_ask_stream(body: dict):
+    """协调智能体流式版（SSE）：每完成一次智能体工具调用推送一条 step 事件，
+    回答完成后推送 done（完整结果，结构与同步端点一致）或 error。
+
+    只读通道与同步端点完全相同（同一个 ask()，额外透传 on_step 回调）；
+    前端在网络异常或事件流中断时应回退同步端点。
+    """
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from app.integrations.errors import IntegrationNotConfigured
+    from app.services.coordinator import build_coordinator
+
+    question = str((body or {}).get("question", "")).strip()
+    context = (body or {}).get("context") or {}
+    if not question:
+        raise HTTPException(status_code=422, detail="question 不能为空")
+
+    try:
+        coordinator = build_coordinator()
+    except IntegrationNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "llm_not_configured",
+                "message": f"协调智能体不可用：{exc}。不使用固定话术伪造回答。",
+            },
+        )
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _run() -> None:
+        try:
+            result = await coordinator.ask(
+                question,
+                context,
+                on_step=lambda step: queue.put_nowait(("step", step)),
+            )
+            queue.put_nowait(("done", result))
+        except IntegrationError as exc:
+            queue.put_nowait(("error", {"message": str(exc), "kind": "integration_error"}))
+        except Exception as exc:  # 任何失败都如实推送，不让事件流静默挂死
+            queue.put_nowait(("error", {"message": f"{type(exc).__name__}: {exc}", "kind": "internal_error"}))
+        finally:
+            await coordinator.aclose()
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(_run())
+
+    async def _event_stream():
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # 心跳注释行，防止代理在长工具调用期间断开
+                    continue
+                if item is None:
+                    break
+                kind, payload = item
+                data = _json.dumps(payload, ensure_ascii=False, default=str)
+                yield f"event: {kind}\ndata: {data}\n\n"
+        finally:
+            task.cancel()  # 客户端断开时中止仍在运行的协调任务
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/real-orders/erp/sales-orders", tags=["real-orders"])
 async def real_order_list_sales_orders(limit: int = 50) -> dict:
     """列出真实 ERP 销售订单（供用户选择）。连接失败时明确报错。"""

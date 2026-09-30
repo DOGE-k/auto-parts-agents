@@ -1316,3 +1316,37 @@ ERP 物料需求
 **写入**：无 ERPNext/OpenMES 写入。
 
 **遗留**：① 协调问答（SSE 流式）仍为可选未开始；② CI 首跑验证待 push；③ App.tsx（469 行，含 MES 完工数据页）如需可按同模式继续拆分，优先级低。
+
+### 3.41 问答流式输出（SSE）+ 面板级 ErrorBoundary（2026-09-30）
+
+**范围**：§3.38 交接清单第 3 项（问答 SSE）+ 演示容错（面板降级）。后端只读通道逻辑零变更（同一个 ask()，新增可选 on_step 回调）；零 ERPNext/OpenMES 写入。
+
+#### 一、问答流式输出（SSE）
+
+- **后端**（`app/services/coordinator.py` + `app/main.py`）：
+  - `BusinessCoordinator.ask` 新增可选参数 `on_step`：每完成一次工具调用即回调当前调用链步骤（`call_chain[-1]`）；不传时行为与同步端点完全一致（恢复机制、持久化、proposal 汇集均复用）。
+  - 新端点 `POST /api/real-orders/assistant/ask/stream`（`text/event-stream`）：后台任务运行 ask，经 asyncio.Queue 推事件——`step`（每次智能体调用完成）、`done`（完整结果，结构与同步端点一致）、`error`（IntegrationError/内部异常如实推送，不让事件流静默挂死）；15 秒无事件发 `: ping` 心跳防代理断连；客户端断开时 cancel 后台任务并关闭协调者。DeepSeek 未配置同样返回 503。
+- **前端**（`src/lib/sse.ts` + `src/api.ts` + `AssistantPanel.tsx`）：
+  - `SseParser`：增量行协议解析（跨 chunk 半包、CRLF、心跳注释、多行 data），纯函数配 vitest 锁定。
+  - `askAssistantStream(question, context, {onStep})`：fetch POST + ReadableStream 解析；**回退语义**——传输层失败（网络异常/非 200/流中断）抛普通 Error，面板捕获后回退同步端点 `/ask`；协调者执行失败（SSE `error` 事件）抛 `AssistantStreamExecError`，不回退（同步重试必然同样失败）。
+  - AssistantPanel：流式优先；等待期间渲染"协调智能体工作中，已完成 N 次智能体调用…"+ 调用链逐条点亮（复用 `.assistant-step` 样式）；完成或回退后切换最终回答。
+- **页面冒烟（真实 DeepSeek）**：问"SAL-ORD-2026-00023 为什么还不能发运？"（5 步链）采样时间线——t=1.4s 首步点亮 → t=3.2s 五步全亮 → t=7.7s 最终回答渲染。等待体验从"黑屏干等"变为"协同过程实时展示"。curl 直连端点验证事件序列 step×2→done（简单问题）。
+
+#### 二、面板级 ErrorBoundary（演示容错）
+
+- 新组件 `src/components/ErrorBoundary.tsx`（class 组件，getDerivedStateFromError + componentDidCatch 控制台留痕）：面板渲染崩溃时降级为"XX · 模块暂时不可用"卡片（含错误消息与"重试恢复该面板"按钮），**不影响其他面板与页签**。
+- 包裹 4 处：智能协同问答、质量中心、Agent 运行记录三个页签内容 + 订单流程页签内 Step 8"跟单质量与发运门禁"（NCR 卡片最复杂、演示关键；step 1-7 不受其崩溃影响）。
+- vitest 3 例（jsdom + react-dom/client + act）：正常渲染不出现降级卡、崩溃降级含面板名与错误信息、重试恢复后重新渲染正常内容。
+
+#### 三、测试与记录
+
+- 后端 `pytest tests -q` **134 passed**（新增 6 例：on_step 回调 2 + 流式端点 4——事件序列/协调者关闭/错误事件/503/空问题 422）。
+- 前端 vitest **14 passed**（原 6 + SSE 解析器 5 + ErrorBoundary 3）；`npm run build` 通过。
+- 后端已重启生效（uvicorn 9000）；截图接口本轮持续超时，以 DOM 采样时间线与 curl 事件流为证据。
+- 修改文件：`backend/app/services/coordinator.py`、`backend/app/main.py`、`backend/tests/test_assistant_stream.py`（新）、`frontend/src/lib/sse.ts`（新）、`frontend/src/lib/__tests__/sse.test.ts`（新）、`frontend/src/api.ts`、`frontend/src/components/AssistantPanel.tsx`、`frontend/src/components/ErrorBoundary.tsx`（新）、`frontend/src/components/__tests__/ErrorBoundary.test.tsx`（新）、`frontend/src/RealBusinessPage.tsx`、`frontend/src/styles.css`。
+
+#### 四、遗留与下一步
+
+1. 演示剧本可在故事线 A 补一句"等待时调用链会逐步点亮"（演示观感卖点）。
+2. CI 首跑验证仍待 push。
+3. 深度优化候选（未排期）：回答 token 级流式（DeepSeek stream=True，当前为"步骤流+完整回答"，已覆盖主要等待感）；App.tsx（469 行）按页签模式拆分。

@@ -1,3 +1,5 @@
+import { SseParser } from "./lib/sse";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9001/api";
 const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
 const REAL_SESSION_ISSUED_KEY = "real_business_session_issued_at";
@@ -562,3 +564,57 @@ export async function askAssistant(
     body: JSON.stringify({ question, context }),
   });
 }
+
+// 流式问答（阶段十 SSE）：每完成一次智能体工具调用回调 onStep（调用链逐步点亮），
+// 返回与同步端点结构一致的完整回答。网络异常/非 200/事件流中断时抛错，由调用方回退同步端点。
+export async function askAssistantStream(
+  question: string,
+  context: Record<string, unknown> = {},
+  options: { onStep?: (step: AssistantCallStep) => void; signal?: AbortSignal } = {},
+): Promise<AssistantAnswer> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const sessionToken = getRealSessionToken();
+  if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
+  const response = await fetch(`${API_BASE}/real-orders/assistant/ask/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ question, context }),
+    signal: options.signal,
+  });
+  if (!response.ok || !response.body) {
+    let message = `流式问答请求失败 (${response.status})`;
+    try {
+      const data = await response.json();
+      const detail = data?.detail;
+      message = typeof detail === "string" ? detail : detail?.message ?? message;
+    } catch {
+      // 保留默认消息
+    }
+    throw new Error(message);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parser = new SseParser();
+  let final: AssistantAnswer | null = null;
+  let streamError = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const ev of parser.feed(decoder.decode(value, { stream: true }))) {
+      if (ev.event === "step") {
+        options.onStep?.(JSON.parse(ev.data) as AssistantCallStep);
+      } else if (ev.event === "done") {
+        final = JSON.parse(ev.data) as AssistantAnswer;
+      } else if (ev.event === "error") {
+        streamError = (JSON.parse(ev.data) as { message?: string }).message ?? "协调智能体执行失败";
+      }
+    }
+  }
+  if (streamError) throw new AssistantStreamExecError(streamError);
+  if (!final) throw new Error("流式响应提前结束，未收到完整回答");
+  return final;
+}
+
+// 协调者执行失败（SSE error 事件）——同步端点重试必然同样失败，调用方不应回退；
+// 传输层失败（网络/非 200/流中断）抛普通 Error，调用方回退同步端点。
+export class AssistantStreamExecError extends Error {}
