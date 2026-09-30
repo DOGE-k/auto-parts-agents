@@ -336,14 +336,18 @@ class _FakeMESForDispatch:
 
     authority = "OpenMES"
 
-    def __init__(self, corrupt_read_back: bool = False):
+    def __init__(self, corrupt_read_back: bool = False, product_types: list | None = None):
         self.created: list[dict] = []
         self._orders: list[dict] = []
         self._corrupt = corrupt_read_back
+        self._product_types = product_types or []
 
     async def get_work_orders_strict(self, scope):
         limit = int((scope or {}).get("limit", 50))
         return self._orders[:limit]
+
+    async def list_product_types(self, query: str = ""):
+        return list(self._product_types)
 
     async def create_work_order(self, payload):
         self.created.append(payload)
@@ -442,6 +446,349 @@ class WorkOrderDispatchTests(unittest.IsolatedAsyncioTestCase):
         result = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
         self.assertFalse(result["success"])
         self.assertIn("ERP 销售订单草稿", result["error"])
+
+    async def test_dispatch_resolves_product_type_by_item_code(self):
+        """下达计划按 item_code 精确匹配 OpenMES 产品类型，命中时创建带 product_type_id（报工前置）。"""
+        self._quotation_with_draft()
+        mes = _FakeMESForDispatch(product_types=[{"id": 2, "code": "BD-2401", "name": "制动盘-前轮"}])
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            requested = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        self.assertTrue(requested["success"])
+        plan = requested["dispatch_plan"]
+        self.assertEqual(plan["product_type_id"], 2)
+        self.assertEqual(plan["product_type_match"], "resolved")
+        approval_id = requested["approval"]["approval_id"]
+        real_order.approve_work_order_dispatch(approval_id, "user-a")
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            result = await real_order.dispatch_work_order_to_openmes("QUO-WOD", approval_id, "user-a")
+        self.assertTrue(result["success"])
+        self.assertEqual(mes.created[0].get("product_type_id"), 2)
+
+    async def test_dispatch_records_missing_product_type_honestly(self):
+        """产品类型未命中时如实记录 not_found，不阻断下达（工单仍可创建）。"""
+        self._quotation_with_draft()
+        mes = _FakeMESForDispatch(product_types=[{"id": 5, "code": "TS-4501", "name": "传动轴"}])
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            requested = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        self.assertTrue(requested["success"])
+        plan = requested["dispatch_plan"]
+        self.assertIsNone(plan["product_type_id"])
+        self.assertEqual(plan["product_type_match"], "not_found")
+        self.assertIn("不可报工", plan["product_type_note"])
+
+
+class _FakeMESForReport:
+    """真实报工测试用假 OpenMES 适配器（模拟官方报工链路，可注入无快照/既有批次）。"""
+
+    authority = "OpenMES"
+
+    def __init__(self, planned_qty="800.00", with_snapshot=True, existing_batches=None):
+        self.planned_qty = planned_qty
+        self.with_snapshot = with_snapshot
+        self._batches = [dict(b) for b in (existing_batches or [])]
+        self._next_id = 50
+        self.created_batches: list[dict] = []
+        self.started_steps: list[str] = []
+        self.completed_steps: list[dict] = []
+        self.produced_qty = sum(float(b.get("produced_qty") or 0) for b in self._batches)
+
+    async def get_work_order_raw(self, work_order_id):
+        snapshot = (
+            {"steps": [{"step_number": 1, "name": "TEST_Final_Assembly"}]}
+            if self.with_snapshot
+            else None
+        )
+        return {
+            "id": int(work_order_id),
+            "order_no": "WO-SO-2026-90002",
+            "customer_order_no": "SAL-ORD-2026-90002",
+            "planned_qty": self.planned_qty,
+            "produced_qty": str(self.produced_qty),
+            "process_snapshot": snapshot,
+        }
+
+    async def get_work_order_batches(self, work_order_id):
+        return [dict(b) for b in self._batches]
+
+    async def create_batch(self, work_order_id, payload):
+        self.created_batches.append(dict(payload))
+        self._next_id += 1
+        batch_id = self._next_id
+        batch = {
+            "batch_id": str(batch_id),
+            "lot_number": payload.get("lot_number", ""),
+            "target_qty": str(payload.get("target_qty", "")),
+            "produced_qty": "0",
+            "status": "PENDING",
+            "steps": [{
+                "step_id": f"step-{batch_id}", "step_number": 1, "name": "TEST_Final_Assembly",
+                "status": "PENDING", "passed_qty": "0", "started_at": "", "completed_at": "",
+                "actual_elapsed_minutes": None, "actual_run_minutes": None,
+            }],
+        }
+        self._batches.append(batch)
+        return {"data": {"id": batch_id, "target_qty": payload.get("target_qty"),
+                         "steps": [{"id": f"step-{batch_id}", "status": "PENDING"}]}}
+
+    async def start_batch_step(self, batch_step_id):
+        self.started_steps.append(str(batch_step_id))
+        return {"data": {"id": batch_step_id, "status": "IN_PROGRESS"}}
+
+    async def complete_batch_step(self, batch_step_id, payload):
+        self.completed_steps.append({"step_id": str(batch_step_id), **payload})
+        for b in self._batches:
+            if any(s.get("step_id") == str(batch_step_id) for s in b.get("steps", [])):
+                for s in b["steps"]:
+                    if s.get("step_id") == str(batch_step_id):
+                        s["status"] = "DONE"
+                        s["actual_elapsed_minutes"] = payload.get("actual_elapsed_minutes")
+                        s["passed_qty"] = str(payload.get("produced_qty", ""))
+                b["status"] = "DONE"
+                b["produced_qty"] = str(payload.get("produced_qty", b.get("produced_qty")))
+                self.produced_qty += float(payload.get("produced_qty") or 0)
+        return {"data": {"id": batch_step_id, "status": "DONE"}}
+
+
+class ProductionReportTests(unittest.IsolatedAsyncioTestCase):
+    """真实报工（OpenMES 官方报工链路）：三步审批门禁 + lot_number 幂等 + 回读验证。"""
+
+    async def _request(self, mes, *args, **kwargs):
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            return await real_order.request_production_report(*args, **kwargs)
+
+    async def _execute(self, mes, wo_id, approval_id):
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            return await real_order.execute_production_report(wo_id, approval_id, "user-a")
+
+    async def test_report_requires_approval_before_writing(self):
+        """审批未批准时拒绝执行，OpenMES 零写入。"""
+        mes = _FakeMESForReport()
+        requested = await self._request(mes, "11", 500, 90, "user-a", lot_number="TEST_LOT_RPT_1")
+        self.assertTrue(requested["success"])
+        self.assertFalse(requested["written"])
+        plan = requested["report_plan"]
+        self.assertEqual(plan["lot_number"], "TEST_LOT_RPT_1")
+        self.assertEqual(plan["batch_target_qty"], "500")
+        self.assertEqual(plan["actual_elapsed_minutes"], 90)
+
+        approval_id = requested["approval"]["approval_id"]
+        denied = await self._execute(mes, "11", approval_id)
+        self.assertFalse(denied["success"])
+        self.assertEqual(mes.created_batches, [])
+
+    async def test_report_executes_official_chain_with_read_back(self):
+        """批准后按 建批次→开工→完工 执行并回读验证；工单 produced_qty 增加。"""
+        mes = _FakeMESForReport()
+        requested = await self._request(mes, "11", 500, 90, "user-a", lot_number="TEST_LOT_RPT_1")
+        approval_id = requested["approval"]["approval_id"]
+        approved = real_order.approve_production_report(approval_id, "user-a")
+        self.assertTrue(approved["success"])
+
+        result = await self._execute(mes, "11", approval_id)
+        self.assertTrue(result["success"])
+        self.assertTrue(result["written"])
+        self.assertTrue(result["read_back_verified"])
+        # 官方链路三步按序执行，完工载荷带数量与整数耗时
+        self.assertEqual(len(mes.created_batches), 1)
+        self.assertEqual(len(mes.started_steps), 1)
+        self.assertEqual(len(mes.completed_steps), 1)
+        payload = mes.completed_steps[0]
+        self.assertEqual(payload["produced_qty"], "500")
+        self.assertEqual(payload["actual_elapsed_minutes"], 90)
+        self.assertEqual(result["batch"]["produced_qty"], "500")
+        self.assertEqual(result["work_order_produced_qty"], "500.0")
+
+    async def test_report_idempotent_on_same_lot(self):
+        """同工单同批次号重复报工幂等返回既有批次，零新写入。"""
+        mes = _FakeMESForReport()
+        requested = await self._request(mes, "11", 500, 90, "user-a", lot_number="TEST_LOT_RPT_1")
+        approval_id = requested["approval"]["approval_id"]
+        real_order.approve_production_report(approval_id, "user-a")
+        first = await self._execute(mes, "11", approval_id)
+        again = await self._execute(mes, "11", approval_id)
+        self.assertTrue(first["success"])
+        self.assertTrue(again["success"])
+        self.assertTrue(again["idempotent"])
+        self.assertFalse(again["written"])
+        self.assertEqual(len(mes.created_batches), 1)
+
+    async def test_report_rejected_without_snapshot_steps(self):
+        """无工艺快照步骤的工单写前如实拒绝（不做伪造报工、不产生孤儿批次）。"""
+        mes = _FakeMESForReport(with_snapshot=False)
+        result = await self._request(mes, "11", 500, 90, "user-a", lot_number="TEST_LOT_RPT_2")
+        self.assertFalse(result["success"])
+        self.assertIn("工艺快照步骤", result["error"])
+        self.assertEqual(mes.created_batches, [])
+
+    async def test_report_rejected_when_batch_exceeds_planned(self):
+        """既有批次合计 + 本次数量超过 planned_qty 时写前拦截。"""
+        existing = [{
+            "batch_id": "3", "lot_number": "TEST_LOT_PAGE_9", "target_qty": "600",
+            "produced_qty": "600", "status": "DONE", "steps": [],
+        }]
+        mes = _FakeMESForReport(planned_qty="800.00", existing_batches=existing)
+        result = await self._request(mes, "11", 300, 60, "user-a", lot_number="TEST_LOT_RPT_3")
+        self.assertFalse(result["success"])
+        self.assertIn("超过", result["error"])
+        self.assertEqual(mes.created_batches, [])
+
+    async def test_report_rejects_setup_run_over_elapsed(self):
+        """setup + run 超过 elapsed 时写前拦截（OpenMES 契约校验前置）。"""
+        result = await real_order.request_production_report(
+            "11", 500, 60, "user-a", lot_number="TEST_LOT_RPT_4",
+            actual_setup_minutes=30, actual_run_minutes=50,
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("不能超过", result["error"])
+
+    async def test_report_lot_auto_generated_from_approval_when_missing(self):
+        """未提供批次号时自动派生（幂等键仍确定）。"""
+        mes = _FakeMESForReport()
+        requested = await self._request(mes, "11", 100, 30, "user-a")
+        self.assertTrue(requested["success"])
+        self.assertTrue(requested["report_plan"]["lot_number"].startswith("LOT-"))
+
+
+class _FakeMESForIssue:
+    """质量问题登记测试用假 OpenMES 适配器（可注入既有未关闭问题做幂等）。"""
+
+    authority = "OpenMES"
+
+    def __init__(self, existing_open=None):
+        self._types = [
+            {"id": 4, "name": "Quality Issue", "severity": "MEDIUM"},
+            {"id": 1, "name": "Material Defect", "severity": "HIGH"},
+        ]
+        self._issues = [dict(i) for i in (existing_open or [])]
+        self.created: list[dict] = []
+        self._next_id = 90
+
+    async def get_work_order_raw(self, work_order_id):
+        if str(work_order_id) == "404":
+            return {}
+        return {"id": int(work_order_id), "order_no": "WO-SO-2026-90003", "planned_qty": "500"}
+
+    async def list_issue_types(self):
+        return list(self._types)
+
+    async def list_open_issues(self, statuses=("OPEN", "ACKNOWLEDGED")):
+        wanted = set(statuses or ())
+        return [
+            {
+                "issue_id": str(raw["id"]),
+                "work_order_id": str(raw.get("work_order_id", "")),
+                "title": str(raw.get("title", "")),
+                "status": raw.get("status"),
+            }
+            for raw in self._issues
+            if raw.get("status") in wanted
+        ]
+
+    async def create_issue(self, payload):
+        self.created.append(dict(payload))
+        self._next_id += 1
+        issue = {
+            "id": self._next_id,
+            "work_order_id": payload.get("work_order_id"),
+            "issue_type_id": payload.get("issue_type_id"),
+            "title": payload.get("title"),
+            "description": payload.get("description", ""),
+            "status": "OPEN",
+        }
+        self._issues.append(issue)
+        return {"data": issue}
+
+    async def get_issue_raw(self, issue_id):
+        for raw in self._issues:
+            if str(raw.get("id")) == str(issue_id):
+                return raw
+        return {}
+
+
+class IssueRegistrationTests(unittest.IsolatedAsyncioTestCase):
+    """质量问题登记（OpenMES NCR）：三步审批门禁 + work_order_id+title 幂等 + 回读验证。"""
+
+    async def _request(self, mes, *args, **kwargs):
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            return await real_order.request_issue_registration(*args, **kwargs)
+
+    async def _execute(self, mes, wo_id, approval_id):
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            return await real_order.execute_issue_registration(wo_id, approval_id, "user-a")
+
+    async def test_issue_requires_approval_before_writing(self):
+        """审批未批准时拒绝执行，OpenMES 零写入。"""
+        mes = _FakeMESForIssue()
+        requested = await self._request(mes, "13", 4, "制动盘外径超差", "user-a", description="直径超差 0.05mm")
+        self.assertTrue(requested["success"])
+        self.assertFalse(requested["written"])
+        plan = requested["issue_plan"]
+        self.assertEqual(plan["work_order_no"], "WO-SO-2026-90003")
+        self.assertEqual(plan["issue_type_name"], "Quality Issue")
+        self.assertEqual(plan["severity"], "MEDIUM")
+
+        approval_id = requested["approval"]["approval_id"]
+        denied = await self._execute(mes, "13", approval_id)
+        self.assertFalse(denied["success"])
+        self.assertEqual(mes.created, [])
+
+    async def test_issue_creates_with_read_back(self):
+        """批准后创建质量问题并回读验证 work_order_id 与标题。"""
+        mes = _FakeMESForIssue()
+        requested = await self._request(mes, "13", 4, "制动盘外径超差", "user-a")
+        approval_id = requested["approval"]["approval_id"]
+        approved = real_order.approve_issue_registration(approval_id, "user-a")
+        self.assertTrue(approved["success"])
+
+        result = await self._execute(mes, "13", approval_id)
+        self.assertTrue(result["success"])
+        self.assertTrue(result["written"])
+        self.assertTrue(result["read_back_verified"])
+        self.assertEqual(len(mes.created), 1)
+        payload = mes.created[0]
+        self.assertEqual(payload["work_order_id"], 13)
+        self.assertEqual(payload["issue_type_id"], 4)
+        self.assertEqual(payload["title"], "制动盘外径超差")
+        self.assertEqual(result["issue_id"], "91")
+
+    async def test_issue_idempotent_same_work_order_and_title(self):
+        """同工单同标题的未关闭问题已存在时幂等返回既有，零新写入。"""
+        existing = [{
+            "id": 77, "work_order_id": 13, "title": "制动盘外径超差",
+            "status": "OPEN",
+        }]
+        mes = _FakeMESForIssue(existing_open=existing)
+        requested = await self._request(mes, "13", 4, "制动盘外径超差", "user-a")
+        approval_id = requested["approval"]["approval_id"]
+        real_order.approve_issue_registration(approval_id, "user-a")
+        result = await self._execute(mes, "13", approval_id)
+        self.assertTrue(result["success"])
+        self.assertTrue(result["idempotent"])
+        self.assertFalse(result["written"])
+        self.assertEqual(result["issue_id"], "77")
+        self.assertEqual(mes.created, [])
+
+    async def test_issue_rejected_when_work_order_missing(self):
+        """工单不存在时写前如实拒绝。"""
+        mes = _FakeMESForIssue()
+        result = await self._request(mes, "404", 4, "任意标题", "user-a")
+        self.assertFalse(result["success"])
+        self.assertIn("不存在", result["error"])
+        self.assertEqual(mes.created, [])
+
+    async def test_issue_rejected_with_unknown_issue_type(self):
+        """issue_type_id 不在真实类型列表时写前拦截（避免 422 试错）。"""
+        mes = _FakeMESForIssue()
+        result = await self._request(mes, "13", 999, "任意标题", "user-a")
+        self.assertFalse(result["success"])
+        self.assertIn("issue_type_id=999", result["error"])
+        self.assertEqual(mes.created, [])
+
+    async def test_issue_rejected_with_empty_title(self):
+        """缺少标题时拒绝建立审批。"""
+        result = await real_order.request_issue_registration("13", 4, "  ", "user-a")
+        self.assertFalse(result["success"])
+        self.assertIn("title", result["error"])
 
 
 if __name__ == "__main__":

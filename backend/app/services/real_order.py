@@ -2227,16 +2227,48 @@ async def request_work_order_dispatch(
     if not erp_draft_id:
         return {"success": False, "error": "报价尚未创建 ERP 销售订单草稿，不能下达工单"}
     item = quotation.get("item") or {}
+
+    # product_type 映射（§3.43 小待办）：OpenMES product_types.code 与 ERP
+    # item_code 同码。命中才在下达时传 product_type_id——工艺快照（进而批次
+    # 步骤、官方报工）由产品类型的 BOM 工艺模板生成；未命中/查询失败如实
+    # 记录，不阻断下达（工单仍可创建，只是无快照、不可报工）。
+    item_code = str(item.get("item_id") or item.get("item_code") or "").strip()
+    product_type_id: int | None = None
+    product_name = ""
+    product_type_match = "not_found"
+    product_type_note = ""
+    if item_code:
+        try:
+            matched = [
+                pt for pt in await get_mes_adapter().list_product_types()
+                if str(pt.get("code") or "").strip() == item_code
+            ]
+        except Exception as exc:
+            product_type_match = "lookup_failed"
+            product_type_note = f"OpenMES 产品类型查询失败：{exc}"
+        else:
+            if matched:
+                product_type_id = matched[0].get("id")
+                product_name = str(matched[0].get("name") or "")
+                product_type_match = "resolved"
+            else:
+                product_type_note = f"OpenMES 无 code={item_code} 的产品类型，工单将无工艺快照（不可报工）"
+
     plan = {
         "quotation_id": quotation_id,
         "erp_draft_id": erp_draft_id,
         "order_no": _dispatch_work_order_no(erp_draft_id),
         "customer_order_no": erp_draft_id,
         "product_id": item.get("item_id", item.get("item_code", "")),
+        "product_type_id": product_type_id,
+        "product_name": product_name,
+        "product_type_match": product_type_match,
         "planned_qty": quotation.get("quantity"),
         "due_date": quotation.get("delivery_date") or "",
         "customer_name": (quotation.get("customer") or {}).get("customer_name", ""),
     }
+    if product_type_note:
+        plan["product_type_note"] = product_type_note
     approval_id = _gen_id("WOD")
     approval = _register_approval(
         approval_id=approval_id,
@@ -2320,6 +2352,9 @@ async def dispatch_work_order_to_openmes(
     }
     if plan.get("due_date"):
         payload["due_date"] = plan["due_date"]
+    if plan.get("product_type_id") is not None:
+        # 映射命中才有值；快照由该产品类型的 BOM 工艺模板冻结生成。
+        payload["product_type_id"] = plan["product_type_id"]
     try:
         result = await mes.create_work_order(payload)
     except Exception as e:
@@ -2366,6 +2401,556 @@ async def dispatch_work_order_to_openmes(
         "idempotent": False,
         "work_order": read_back,
         "work_order_id": work_order_id,
+        "read_back_verified": True,
+        "approval": approval,
+        "authority": "OpenMES",
+        "data_source": "openmes_api",
+    }
+
+
+# 人工审批门禁三步（真实报工，与工单下达同构）：① 建立审批（不写入）→
+# ② 人工批准 → ③ 审批校验通过后按序调 OpenMES 官方报工链路（建批次 →
+# 开工 → 完工带实际耗时）并严格回读。幂等键为 lot_number：同工单同批次号
+# 已有批次时直接返回既有结果，绝不重复报工。
+
+
+def _positive_number(value: Any) -> Decimal | None:
+    try:
+        number = Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+async def _report_batch_steps_available(mes, work_order_id: str) -> tuple[bool, str, dict[str, Any]]:
+    """预检工单可报工：工单存在且工艺快照有批次步骤。
+
+    官方报工 API 在批次步骤上执行（start/complete）；无快照步骤的工单建
+    批次只会得到没有步骤的孤儿批次——写前如实拒绝，不做任何伪造报工。
+    """
+    try:
+        raw = await mes.get_work_order_raw(work_order_id)
+    except Exception as exc:
+        return False, f"读取 OpenMES 工单失败，无法预检报工条件：{exc}", {}
+    if not raw:
+        return False, f"OpenMES 工单 {work_order_id} 不存在，不能报工", {}
+    snapshot = raw.get("process_snapshot")
+    steps = snapshot.get("steps") if isinstance(snapshot, dict) else None
+    if not (isinstance(steps, list) and steps):
+        return False, (
+            "该工单没有工艺快照步骤，OpenMES 官方报工 API 无法执行。"
+            "通常原因是下达时未映射产品类型，或该产品在 OpenMES 没有激活的 BOM 工艺模板；"
+            "请先在 OpenMES 补充工艺模板，并对新订单重新走工单下达。"
+        ), raw
+    return True, "", raw
+
+
+def _register_production_report_approval(
+    work_order_id: str,
+    raw: dict[str, Any],
+    target_qty: Decimal,
+    produced_qty: Decimal,
+    elapsed_minutes: int,
+    lot_number: str,
+    requested_by: str,
+    actual_setup_minutes: int | None,
+    actual_run_minutes: int | None,
+) -> dict[str, Any]:
+    plan = {
+        "work_order_id": str(work_order_id),
+        "work_order_no": str(raw.get("order_no") or raw.get("work_order_no") or ""),
+        "customer_order_no": str(raw.get("customer_order_no") or ""),
+        "planned_qty": raw.get("planned_qty"),
+        "batch_target_qty": str(target_qty),
+        "produced_qty": str(produced_qty),
+        "actual_elapsed_minutes": elapsed_minutes,
+        "actual_setup_minutes": actual_setup_minutes,
+        "actual_run_minutes": actual_run_minutes,
+        "lot_number": lot_number,
+    }
+    approval_id = _gen_id("RPT")
+    approval = _register_approval(
+        approval_id=approval_id,
+        approved=False,
+        approved_by=requested_by,
+        reference_type="production_report",
+        reference_id=str(work_order_id),
+        notes=json.dumps(plan, ensure_ascii=False, default=str),
+    )
+    return {"approval": approval, "plan": plan}
+
+
+async def request_production_report(
+    work_order_id: str,
+    target_qty: Any,
+    actual_elapsed_minutes: Any,
+    requested_by: str,
+    *,
+    lot_number: str = "",
+    produced_qty: Any = None,
+    actual_setup_minutes: Any = None,
+    actual_run_minutes: Any = None,
+) -> dict[str, Any]:
+    """① 建立"真实报工"审批：预检 + 登记将执行内容，不写 OpenMES。"""
+    if not str(work_order_id).strip() or not str(requested_by).strip():
+        return {"success": False, "error": "缺少 work_order_id 或 requested_by"}
+    qty = _positive_number(target_qty)
+    if qty is None:
+        return {"success": False, "error": "报工数量 target_qty 必须是正数"}
+    elapsed_raw = _positive_number(actual_elapsed_minutes)
+    if elapsed_raw is None or elapsed_raw != elapsed_raw.to_integral_value():
+        return {"success": False, "error": "实际耗时 actual_elapsed_minutes 必须是正整数分钟（OpenMES 契约要求整数）"}
+    elapsed = int(elapsed_raw)
+    produced = _positive_number(produced_qty) if produced_qty not in (None, "") else qty
+    if produced is None:
+        return {"success": False, "error": "produced_qty 必须是正数"}
+    setup_minutes: int | None = None
+    if actual_setup_minutes not in (None, ""):
+        setup_val = _positive_number(actual_setup_minutes)
+        if setup_val is None or setup_val != setup_val.to_integral_value():
+            return {"success": False, "error": "actual_setup_minutes 必须是正整数分钟"}
+        setup_minutes = int(setup_val)
+    run_minutes: int | None = None
+    if actual_run_minutes not in (None, ""):
+        run_val = _positive_number(actual_run_minutes)
+        if run_val is None or run_val != run_val.to_integral_value():
+            return {"success": False, "error": "actual_run_minutes 必须是正整数分钟"}
+        run_minutes = int(run_val)
+    if setup_minutes is not None and run_minutes is not None and setup_minutes + run_minutes > elapsed:
+        # OpenMES BatchService 强制 setup+run ≤ elapsed，写前拦截避免 422。
+        return {"success": False, "error": f"setup({setup_minutes}) + run({run_minutes}) 不能超过实际耗时({elapsed})分钟"}
+
+    mes = get_mes_adapter()
+    ok, error, raw = await _report_batch_steps_available(mes, str(work_order_id).strip())
+    if not ok:
+        return {"success": False, "error": error, "authority": "OpenMES"}
+
+    # 批次 target_qty 合计不得超过 planned_qty（OpenMES 契约），写前拦截。
+    planned = _positive_number(raw.get("planned_qty"))
+    if planned is not None:
+        try:
+            existing = await mes.get_work_order_batches(str(work_order_id).strip())
+        except Exception as exc:
+            return {"success": False, "error": f"读取既有批次失败，无法预检数量上限：{exc}", "authority": "OpenMES"}
+        already = sum((_positive_number(b.get("target_qty")) or Decimal("0")) for b in existing)
+        if already + qty > planned:
+            return {
+                "success": False,
+                "error": (
+                    f"批次数量超限：既有批次合计 {already} + 本次 {qty} > 工单计划数量 {planned}"
+                    "（OpenMES 约束：批次总量不得超过 planned_qty）"
+                ),
+                "authority": "OpenMES",
+            }
+
+    lot = str(lot_number or "").strip() or _gen_id("LOT")
+    registered = _register_production_report_approval(
+        str(work_order_id).strip(), raw, qty, produced, elapsed, lot, str(requested_by).strip(),
+        setup_minutes, run_minutes,
+    )
+    return {
+        "success": True,
+        "approval": registered["approval"],
+        "report_plan": registered["plan"],
+        "written": False,
+    }
+
+
+def approve_production_report(approval_id: str, approved_by: str) -> dict[str, Any]:
+    """② 人工批准真实报工审批；审批人由真实身份依赖在 API 层解析。"""
+    with SessionLocal() as session:
+        row = session.get(RealApprovalRow, approval_id)
+        if row is None or row.reference_type != "production_report":
+            return {"success": False, "error": "报工审批记录不存在"}
+        row.approved = True
+        row.approved_by = approved_by
+        session.commit()
+    return {"success": True, "approval": get_approval(approval_id), "written": False}
+
+
+def _load_report_plan(approval_id: str, work_order_id: str) -> dict[str, Any] | None:
+    approval = get_approval(approval_id)
+    if not approval or approval.get("reference_type") != "production_report":
+        return None
+    try:
+        plan = json.loads(approval.get("notes") or "{}")
+    except ValueError:
+        return None
+    if str(plan.get("work_order_id")) != str(work_order_id) or not plan.get("lot_number"):
+        return None
+    plan["_approval"] = approval
+    return plan
+
+
+def _batch_step_finished(step: dict[str, Any]) -> bool:
+    return str(step.get("status") or "").strip().upper() == "DONE"
+
+
+def _same_report_number(left: Any, right: Any) -> bool:
+    a = _positive_number(left)
+    b = _positive_number(right)
+    if a is None or b is None:
+        return False
+    return abs(a - b) <= Decimal("0.001")
+
+
+async def execute_production_report(
+    work_order_id: str,
+    approval_id: str,
+    approved_by: str,
+) -> dict[str, Any]:
+    """③ 审批校验通过后走官方报工链路并回读验证（lot_number 幂等）。"""
+    plan = _load_report_plan(approval_id, str(work_order_id).strip())
+    if plan is None:
+        return {"success": False, "error": "报工审批不存在、对象不匹配或缺少报工计划"}
+    if not await _approval_verifier(approval_id, approved_by):
+        return {"success": False, "error": "报工审批未通过，拒绝写入 OpenMES"}
+
+    mes = get_mes_adapter()
+    wo_id = str(work_order_id).strip()
+    lot = str(plan["lot_number"])
+    target_qty = Decimal(str(plan["batch_target_qty"]))
+    produced_qty = Decimal(str(plan["produced_qty"]))
+    elapsed = int(plan["actual_elapsed_minutes"])
+
+    # 幂等：同工单同批次号已有批次时直接返回既有结果，零新写入。
+    try:
+        existing_batches = await mes.get_work_order_batches(wo_id)
+    except Exception as exc:
+        return {"success": False, "error": f"读取 OpenMES 批次失败：{exc}", "authority": "OpenMES"}
+    existing = [
+        b for b in existing_batches
+        if str(b.get("lot_number") or "").strip() == lot
+    ]
+    if existing:
+        return {
+            "success": True,
+            "status": "REPORTED",
+            "written": False,
+            "idempotent": True,
+            "batch": existing[0],
+            "batch_id": existing[0].get("batch_id"),
+            "read_back_verified": True,
+            "approval": plan["_approval"],
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+        }
+
+    # 审批建立后工单可能变化，写入前再核一次快照步骤仍然可用。
+    ok, error, _raw = await _report_batch_steps_available(mes, wo_id)
+    if not ok:
+        return {"success": False, "error": error, "authority": "OpenMES"}
+
+    try:
+        created = await mes.create_batch(wo_id, {"target_qty": str(target_qty), "lot_number": lot})
+    except Exception as exc:
+        return {"success": False, "error": f"OpenMES 批次创建失败: {exc}", "authority": "OpenMES"}
+    batch = created.get("data") or {}
+    batch_id = batch.get("id")
+    steps = batch.get("steps") or []
+    if not steps:
+        return {
+            "success": False,
+            "error": (
+                f"批次（id={batch_id}）已创建但没有任何批次步骤，无法报工——"
+                "工单工艺快照在审批后发生变化。请人工在 OpenMES 核对该批次。"
+            ),
+            "created_batch_id": batch_id,
+            "written": True,
+            "authority": "OpenMES",
+        }
+    step_id = steps[0].get("id")
+
+    try:
+        await mes.start_batch_step(step_id)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"OpenMES 批次步骤开工失败: {exc}",
+            "created_batch_id": batch_id,
+            "batch_step_id": step_id,
+            "written": True,
+            "authority": "OpenMES",
+        }
+
+    complete_payload: dict[str, Any] = {
+        "produced_qty": str(produced_qty),
+        "actual_elapsed_minutes": elapsed,
+    }
+    if plan.get("actual_setup_minutes") is not None:
+        complete_payload["actual_setup_minutes"] = int(plan["actual_setup_minutes"])
+    if plan.get("actual_run_minutes") is not None:
+        complete_payload["actual_run_minutes"] = int(plan["actual_run_minutes"])
+    try:
+        await mes.complete_batch_step(step_id, complete_payload)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"OpenMES 批次步骤报工失败: {exc}",
+            "created_batch_id": batch_id,
+            "batch_step_id": step_id,
+            "written": True,
+            "authority": "OpenMES",
+        }
+
+    # 回读验证：批次步骤真实完成、数量与耗时与审批一致、工单 produced_qty
+    # 相应增加（BatchService 完成批次时回写批次与工单两层 produced_qty）。
+    read_back_verified = False
+    read_back_batch: dict[str, Any] | None = None
+    read_back_work_order: dict[str, Any] | None = None
+    read_back_error = ""
+    try:
+        batches = await mes.get_work_order_batches(wo_id)
+        read_back_batch = next(
+            (b for b in batches if str(b.get("batch_id")) == str(batch_id)), None
+        )
+        read_back_work_order = await mes.get_work_order_raw(wo_id)
+    except Exception as exc:
+        read_back_error = str(exc)
+    if read_back_batch is not None and read_back_work_order is not None:
+        steps_after = read_back_batch.get("steps") or []
+        elapsed_ok = any(
+            _same_report_number(s.get("actual_elapsed_minutes"), elapsed)
+            for s in steps_after
+        )
+        produced_ok = _same_report_number(read_back_batch.get("produced_qty"), produced_qty)
+        step_done = any(_batch_step_finished(s) for s in steps_after)
+        wo_produced = _positive_number(read_back_work_order.get("produced_qty"))
+        wo_ok = wo_produced is not None and wo_produced >= produced_qty
+        read_back_verified = elapsed_ok and produced_ok and step_done and wo_ok
+        if not read_back_verified:
+            read_back_error = (
+                f"步骤完成={step_done} 耗时一致={elapsed_ok} 批次产量一致={produced_ok} "
+                f"工单产量增加={wo_ok}"
+            )
+    if not read_back_verified:
+        return {
+            "success": False,
+            "error": "OpenMES 报工已执行但回读验证未通过（步骤状态/数量/耗时不匹配），请人工核对："
+                     + (read_back_error or "回读读取失败"),
+            "created_batch_id": batch_id,
+            "batch_step_id": step_id,
+            "read_back_batch": read_back_batch,
+            "read_back_work_order_produced_qty": (
+                read_back_work_order or {}
+            ).get("produced_qty"),
+            "written": True,
+            "authority": "OpenMES",
+        }
+
+    _save_agent_run(
+        f"RUN-RPT-{uuid4().hex[:12].upper()}",
+        "tracking",
+        "report_production",
+        {"args": [wo_id, approval_id], "kwargs": {"lot_number": lot}},
+        "ok",
+        {"batch": read_back_batch, "approval_id": approval_id},
+        None,
+        _utc_now(),
+    )
+    return {
+        "success": True,
+        "status": "REPORTED",
+        "written": True,
+        "idempotent": False,
+        "batch": read_back_batch,
+        "batch_id": str(batch_id),
+        "batch_step_id": str(step_id),
+        "work_order_produced_qty": (read_back_work_order or {}).get("produced_qty"),
+        "read_back_verified": True,
+        "approval": plan["_approval"],
+        "authority": "OpenMES",
+        "data_source": "openmes_api",
+    }
+
+
+# 人工审批门禁三步（质量问题登记，与工单下达/真实报工同构）：① 建立审批
+# （不写入）→ ② 人工批准 → ③ 审批校验通过后创建 OpenMES 质量问题并严格
+# 回读。幂等键为 work_order_id + title：同工单同标题的未关闭问题已存在时
+# 直接返回既有问题，绝不重复登记。
+
+
+async def request_issue_registration(
+    work_order_id: str,
+    issue_type_id: Any,
+    title: str,
+    requested_by: str,
+    *,
+    description: str = "",
+) -> dict[str, Any]:
+    """① 建立"质量问题登记"审批：预检（工单/类型真实存在）+ 登记内容，不写 OpenMES。"""
+    if not str(work_order_id).strip() or not str(requested_by).strip():
+        return {"success": False, "error": "缺少 work_order_id 或 requested_by"}
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        return {"success": False, "error": "缺少问题标题 title"}
+    if len(clean_title) > 255:
+        return {"success": False, "error": "问题标题超过 OpenMES 上限 255 字符"}
+    type_val = _positive_number(issue_type_id)
+    if type_val is None or type_val != type_val.to_integral_value():
+        return {"success": False, "error": "issue_type_id 必须是正整数（真实类型见只读端点 /quality/issue-types）"}
+    description_text = str(description or "").strip()
+    if len(description_text) > 5000:
+        return {"success": False, "error": "描述超过 OpenMES 上限 5000 字符"}
+
+    mes = get_mes_adapter()
+    wo_id = str(work_order_id).strip()
+    try:
+        raw = await mes.get_work_order_raw(wo_id)
+    except Exception as exc:
+        return {"success": False, "error": f"读取 OpenMES 工单失败：{exc}", "authority": "OpenMES"}
+    if not raw:
+        return {"success": False, "error": f"OpenMES 工单 {wo_id} 不存在，不能登记质量问题", "authority": "OpenMES"}
+
+    # issue_type 必须真实存在：对照只读类型列表，写前拦截避免 422 试错。
+    try:
+        types = await mes.list_issue_types()
+    except Exception as exc:
+        return {"success": False, "error": f"读取 OpenMES 问题类型失败：{exc}", "authority": "OpenMES"}
+    matched_type = next((t for t in types if str(t.get("id")) == str(int(type_val))), None)
+    if matched_type is None:
+        return {
+            "success": False,
+            "error": f"issue_type_id={int(type_val)} 在 OpenMES 不存在（真实类型见只读端点 /quality/issue-types）",
+            "authority": "OpenMES",
+        }
+
+    plan = {
+        "work_order_id": wo_id,
+        "work_order_no": str(raw.get("order_no") or ""),
+        "issue_type_id": int(type_val),
+        "issue_type_name": str(matched_type.get("name") or ""),
+        "severity": str(matched_type.get("severity") or ""),
+        "title": clean_title,
+        "description": description_text,
+    }
+    approval_id = _gen_id("QISS")
+    approval = _register_approval(
+        approval_id=approval_id,
+        approved=False,
+        approved_by=str(requested_by).strip(),
+        reference_type="quality_issue_registration",
+        reference_id=wo_id,
+        notes=json.dumps(plan, ensure_ascii=False, default=str),
+    )
+    return {"success": True, "approval": approval, "issue_plan": plan, "written": False}
+
+
+def approve_issue_registration(approval_id: str, approved_by: str) -> dict[str, Any]:
+    """② 人工批准质量问题登记审批；审批人由真实身份依赖在 API 层解析。"""
+    with SessionLocal() as session:
+        row = session.get(RealApprovalRow, approval_id)
+        if row is None or row.reference_type != "quality_issue_registration":
+            return {"success": False, "error": "质量问题登记审批记录不存在"}
+        row.approved = True
+        row.approved_by = approved_by
+        session.commit()
+    return {"success": True, "approval": get_approval(approval_id), "written": False}
+
+
+async def execute_issue_registration(
+    work_order_id: str,
+    approval_id: str,
+    approved_by: str,
+) -> dict[str, Any]:
+    """③ 审批校验通过后创建 OpenMES 质量问题并回读验证（work_order_id+title 幂等）。"""
+    approval = get_approval(approval_id)
+    plan: dict[str, Any] = {}
+    if approval and approval.get("reference_type") == "quality_issue_registration":
+        try:
+            plan = json.loads(approval.get("notes") or "{}")
+        except ValueError:
+            plan = {}
+    if not plan or str(plan.get("work_order_id")) != str(work_order_id).strip() or not plan.get("title"):
+        return {"success": False, "error": "质量问题登记审批不存在、对象不匹配或缺少登记计划"}
+    if not await _approval_verifier(approval_id, approved_by):
+        return {"success": False, "error": "质量问题登记审批未通过，拒绝写入 OpenMES"}
+
+    mes = get_mes_adapter()
+    wo_id = str(work_order_id).strip()
+    title = str(plan["title"])
+
+    # 幂等：同工单同标题的未关闭问题已存在时直接返回既有，零新写入。
+    try:
+        open_issues = await mes.list_open_issues(statuses=("OPEN", "ACKNOWLEDGED"))
+    except Exception as exc:
+        return {"success": False, "error": f"读取 OpenMES 未关闭问题失败，无法查重：{exc}", "authority": "OpenMES"}
+    duplicate = next(
+        (
+            i for i in open_issues
+            if str(i.get("work_order_id") or "").strip() == wo_id
+            and str(i.get("title") or "").strip() == title
+        ),
+        None,
+    )
+    if duplicate:
+        return {
+            "success": True,
+            "status": "REGISTERED",
+            "written": False,
+            "idempotent": True,
+            "issue_id": duplicate.get("issue_id"),
+            "issue": duplicate,
+            "read_back_verified": True,
+            "approval": approval,
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+        }
+
+    payload: dict[str, Any] = {
+        "work_order_id": int(wo_id) if wo_id.isdigit() else wo_id,
+        "issue_type_id": plan["issue_type_id"],
+        "title": title,
+    }
+    if plan.get("description"):
+        payload["description"] = plan["description"]
+    try:
+        created = await mes.create_issue(payload)
+    except Exception as exc:
+        return {"success": False, "error": f"OpenMES 质量问题创建失败: {exc}", "authority": "OpenMES"}
+    created_issue = created.get("data") or {}
+    issue_id = created_issue.get("id")
+
+    # 回读验证：work_order_id 与 title 必须精确匹配。
+    read_back_verified = False
+    read_back: dict[str, Any] | None = None
+    if issue_id:
+        try:
+            read_back = await mes.get_issue_raw(issue_id)
+            read_back_verified = bool(
+                read_back
+                and str(read_back.get("work_order_id") or "").strip() == wo_id
+                and str(read_back.get("title") or "").strip() == title
+            )
+        except Exception as exc:
+            created["read_back_error"] = str(exc)
+    if not read_back_verified:
+        return {
+            "success": False,
+            "error": "OpenMES 质量问题已创建但回读验证未通过（work_order_id 或标题不匹配），请人工核对",
+            "create_result": created,
+            "read_back": read_back,
+            "written": True,
+            "authority": "OpenMES",
+        }
+
+    _save_agent_run(
+        f"RUN-QISS-{uuid4().hex[:12].upper()}",
+        "quality",
+        "register_quality_issue",
+        {"args": [wo_id, approval_id], "kwargs": {"issue_type_id": plan["issue_type_id"], "title": title}},
+        "ok",
+        {"issue": read_back, "approval_id": approval_id},
+        None,
+        _utc_now(),
+    )
+    return {
+        "success": True,
+        "status": "REGISTERED",
+        "written": True,
+        "idempotent": False,
+        "issue_id": str(issue_id),
+        "issue": read_back,
         "read_back_verified": True,
         "approval": approval,
         "authority": "OpenMES",

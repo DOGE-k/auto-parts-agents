@@ -150,6 +150,10 @@ class OpenMESAdapter:
         result = await self._client.get_work_order(work_order_id)
         return result.get("data", {}) or {}
 
+    async def list_product_types(self, query: str = "") -> list[dict[str, Any]]:
+        """产品类型列表（只读；工单下达按 code 与 ERP item_code 精确匹配）。"""
+        return await self._client.list_product_types(query)
+
     async def import_erp_work_orders(
         self, orders: list[dict[str, Any]], strategy: str = "update_or_create"
     ) -> dict[str, Any]:
@@ -338,6 +342,19 @@ class OpenMESAdapter:
         items.sort(key=lambda row: row.get("reported_at") or "", reverse=True)
         return items
 
+    async def list_issue_types(self) -> list[dict[str, Any]]:
+        """质量问题类型列表（只读；登记质量问题下拉用）。"""
+        return await self._client.list_issue_types()
+
+    async def create_issue(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """创建 OpenMES 质量问题/NCR（写操作，Sanctum 用户会话；仅限审批门禁后调用）。"""
+        return await self._client.create_issue(payload)
+
+    async def get_issue_raw(self, issue_id: str | int) -> dict[str, Any]:
+        """按 id 回读质量问题原始记录（创建后验证用，不做映射）。"""
+        result = await self._client.get_issue(issue_id)
+        return result.get("data", {}) or {}
+
     async def get_work_order_documents(self, work_order_id: str) -> list[dict[str, Any]]:
         """获取工单关联工程文档（SOP/Control Plan 类载体的真实记录）。
 
@@ -431,6 +448,18 @@ class OpenMESAdapter:
             }
             for r in rows
         ]
+
+    async def create_batch(self, work_order_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        """创建 OpenMES 生产批次（写操作，Sanctum 用户会话；仅限审批门禁后调用）。"""
+        return await self._client.create_batch(work_order_id, payload)
+
+    async def start_batch_step(self, batch_step_id: str | int) -> dict[str, Any]:
+        """批次步骤开工（写操作；仅限审批门禁后调用）。"""
+        return await self._client.start_batch_step(batch_step_id)
+
+    async def complete_batch_step(self, batch_step_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        """批次步骤报工/完工（写操作；仅限审批门禁后调用）。"""
+        return await self._client.complete_batch_step(batch_step_id, payload)
 
     async def resolve_quality_issue(self, issue_id: str, resolution_notes: str) -> dict[str, Any]:
         return await self._client.resolve_issue(issue_id, resolution_notes)

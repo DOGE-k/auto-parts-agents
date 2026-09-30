@@ -77,6 +77,51 @@ class OpenMESClient:
             raise ValueError("OpenMES 质量问题列表返回格式不符合其 API 文档")
         return result
 
+    async def list_issue_types(self) -> list[dict[str, Any]]:
+        """质量问题类型列表（只读，`GET /api/v1/issue-types`）。"""
+        self._require_user_token()
+        result = await self._http.request_json(
+            "GET", "api/v1/issue-types",
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, list):
+            raise ValueError("OpenMES 问题类型接口返回格式不符合其 API 文档")
+        return data
+
+    async def create_issue(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """创建质量问题/NCR（写操作，`POST /api/v1/issues`；仅限审批门禁后调用）。
+
+        required: work_order_id / issue_type_id / title；reported_by 服务端取
+        当前会话用户。响应 ``{"data": {...}}``。
+        """
+        self._require_user_token()
+        required = {"work_order_id", "issue_type_id", "title"}
+        missing = sorted(required - set(payload))
+        if missing:
+            raise ValueError(f"创建 OpenMES 质量问题缺少字段：{', '.join(missing)}")
+        result = await self._http.request_json(
+            "POST", "api/v1/issues", json_body=payload,
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
+            raise ValueError("OpenMES 质量问题创建接口返回格式不符合其 API 文档")
+        return result
+
+    async def get_issue(self, issue_id: str | int) -> dict[str, Any]:
+        """按 id 回读质量问题原始记录（`GET /api/v1/issues/{id}`，不做映射）。"""
+        self._require_user_token()
+        value = str(issue_id).strip()
+        if not value:
+            raise ValueError("OpenMES issue_id 不能为空")
+        result = await self._http.request_json(
+            "GET", f"api/v1/issues/{quote(value, safe='')}",
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
+            raise ValueError("OpenMES 质量问题详情返回格式不符合其 API 文档")
+        return result
+
     async def list_work_orders(self, filters: dict[str, str | int] | None = None) -> dict[str, Any]:
         self._require_user_token()
         filters = filters or {}
@@ -246,6 +291,64 @@ class OpenMESClient:
         if not isinstance(data, list):
             raise ValueError("OpenMES 工单批次接口返回格式不符合其 API 文档")
         return data
+
+    async def create_batch(self, work_order_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        """创建生产批次（写操作，`POST /api/v1/work-orders/{id}/batches`）。
+
+        仅限审批门禁后调用。响应 `data.steps` 为按工艺快照生成的批次步骤；
+        无快照的工单返回空步骤列表——调用方必须先预检快照步骤，避免
+        建出没有任何可报工步骤的孤儿批次。
+        """
+        self._require_user_token()
+        value = str(work_order_id).strip()
+        if not value:
+            raise ValueError("创建 OpenMES 批次必须提供 work_order_id")
+        if "target_qty" not in payload or payload.get("target_qty") in (None, ""):
+            raise ValueError("创建 OpenMES 批次缺少字段：target_qty")
+        result = await self._http.request_json(
+            "POST",
+            f"api/v1/work-orders/{quote(value, safe='')}/batches",
+            json_body=payload,
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
+            raise ValueError("OpenMES 批次创建接口返回格式不符合其 API 文档")
+        return result
+
+    async def start_batch_step(self, batch_step_id: str | int) -> dict[str, Any]:
+        """批次步骤开工（写操作，`POST /api/v1/batch-steps/{id}/start`）。"""
+        self._require_user_token()
+        value = str(batch_step_id).strip()
+        if not value:
+            raise ValueError("OpenMES 批次步骤开工必须提供 batch_step_id")
+        result = await self._http.request_json(
+            "POST",
+            f"api/v1/batch-steps/{quote(value, safe='')}/start",
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
+            raise ValueError("OpenMES 批次步骤开工接口返回格式不符合其 API 文档")
+        return result
+
+    async def complete_batch_step(self, batch_step_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        """批次步骤报工/完工（写操作，`POST /api/v1/batch-steps/{id}/complete`）。
+
+        payload 支持 produced_qty 与 actual_setup/elapsed/run_minutes；服务端
+        强制 setup+run ≤ elapsed，违规返回 422（错误消息由 HTTP 层如实透传）。
+        """
+        self._require_user_token()
+        value = str(batch_step_id).strip()
+        if not value:
+            raise ValueError("OpenMES 批次步骤报工必须提供 batch_step_id")
+        result = await self._http.request_json(
+            "POST",
+            f"api/v1/batch-steps/{quote(value, safe='')}/complete",
+            json_body=payload,
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
+            raise ValueError("OpenMES 批次步骤报工接口返回格式不符合其 API 文档")
+        return result
 
     async def upload_engineering_document(
         self,
