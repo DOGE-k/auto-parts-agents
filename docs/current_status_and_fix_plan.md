@@ -1084,3 +1084,9 @@ ERP 物料需求
 - **成功路径已于本日完成 API 与页面双重验收**：部署只有 `admin` 一个 OpenMES 账号，经用户同意后通过 artisan 重置其密码；`POST /api/real-orders/auth/login` 返回 provider=openmes、subject=admin、roles=[Admin]、force_password_change=false（真实 OpenMES Sanctum 令牌）；页面上用该凭据登录成功，审批身份行变为 `Administrator（admin，OpenMES，角色：…）`，截图 `gui-test-screenshots/2026-09-30_openmes_session_login_success_page.png`；登录失败提示已改为会话面板内联显示（`fba5609`）；ERPNext 密码登录/OIDC 仍待部署契约；
 - **登录会话的角色门禁配套**：OpenMES admin 会话原生只有 `Admin` 角色，会话下执行审批会被 403 拦截；已在部署 `.env` 配置 `REAL_IDENTITY_ROLE_MAP={"admin": ["sales_manager", "purchase_manager", "quality_manager"]}`（仅显式授予部署管理员业务审批角色，不提交仓库），重启后页面身份行显示 `Admin、purchase_manager、quality_manager、sales_manager`，会话内审批可用；
 - NCR 真实写入最小范围验收仍等待业务处置决策 + 具备质量角色的会话 + 写入令牌。
+
+### 3.33 检验/报工数据补录：已批准，交由外部执行（2026-09-30）
+
+- 用户批准按演示故事线补录 `TEST_` 标记的检验记录与带实际耗时的报工数据（解锁质量检验维度展示与速率 ETA）；
+- 执行方式由用户决定为**外部执行**，本项目不代跑；完整执行提示词（四条故事线设计、幂等要求、验收标准、文档收尾要求）已固化到 `docs/prompt_seed_test_data.md`；
+- 本节为占位记录：外部执行完成后，由执行者在下方追加实际写入的表/接口、验收返回、测试结果与截图；在此之前检验维度仍如实显示"无数据"、ETA 保持 `DATA_MISSING`。
