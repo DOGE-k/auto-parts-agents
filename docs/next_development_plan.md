@@ -350,6 +350,17 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 4. **NCR 写入真实验收**：在真实角色、令牌和审批对象绑定完善后，对 disposition/close 做最小范围回读验收（代码门禁、对象绑定和幂等已完成）；
 5. **Wutong 外部注册发现**：只读 ACPs discovery 查询通道已完成（见 `current_status_and_fix_plan.md` §3.27）；待部署提供 Registry 注册与鉴权契约后，继续做跨实例注册和 AIP 调用闭环。Mock WebSocket 隔离和静态 ACS/运行注册表同步已完成。
 
+## 交接执行计划（2026-09-30 更新，交由下一任 AI）
+
+> 详细交接状态见 `current_status_and_fix_plan.md` §3.38。
+
+| 优先级 | 任务 | 状态与交接点 |
+|---|---|---|
+| 1 | 完成 10.5 剩余前端组件拆分 | 🟡 进行中：已抽 markdown/QualityTodoPanel，剩问答/NCR/8 步/运行记录四个面板，按同模式 |
+| 2 | CI 配置（pytest/vitest/build） | ⬜ 未开始；前端两项纯 Node 最易先行 |
+| 3 | 问答流式输出（SSE，可选） | ⬜ 未开始；不阻塞演示 |
+| 4 | Wutong 写路径 / OIDC / close 真实执行 | ⏸️ 均有外部依赖或有意保留，勿擅自推进（见 §3.38 第三节第 4 条） |
+
 ## 每次开发后必须记录
 
 修改文件、真实记录编号、接口和状态码、数据 authority、是否写入、回读结果、测试命令、页面验证结果、遗留问题和下一步任务，统一更新 `current_status_and_fix_plan.md`。

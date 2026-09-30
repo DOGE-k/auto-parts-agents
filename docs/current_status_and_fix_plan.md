@@ -1213,3 +1213,46 @@ ERP 物料需求
 **验证**：后端 **128 passed**（新增 2 例：工作流恢复、检验关联过滤）、`compileall` 通过；前端 vitest **6 passed** + `npm run build` 通过。本阶段无 ERPNext/OpenMES 业务写入（仅本地业务库迁移）。
 
 **遗留（阶段十未完成项）**：主文件剩余面板（问答/NCR/8 步流程）继续按 10.5 模式拆分；CI 配置；问答流式输出（可选）。
+
+### 3.38 交接状态（2026-09-30，交由下一任 AI 继续）
+
+> 本节是交接快照：正在做的事、已完成的事、后面要做的事。接手者从这里开始，先读本节再读 §3.37 及之前各节。
+
+#### 一、当前系统状态（交接时实测）
+
+- 分支 `codex/real-integration-layer`，全部工作已提交（最新 `d581a30`），工作区仅 4 个约定不提交的本地文件（见下）。
+- 测试基线：后端 `pytest tests -q` **128 passed**；前端 `vitest` **6 passed** + `npm run build` 通过；`compileall` 通过。
+- 运行时（全部健康）：后端 9000（业务库已切 PostgreSQL `autoparts-db` 容器，端口 15432）、前端 5173、OpenMES（caddy/backend/reverb/postgres）与 ERPNext 容器组运行中。
+- 演示入口：`powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`（幂等 + 环境预检），剧本 `docs/demo_script.md`（六条故事线）。
+
+#### 二、正在做的事（阶段十"工厂级工程质感"，比赛定位）
+
+阶段十 7 项中 **5 项完成、2 项部分/未开始**，交接点如下：
+
+| 任务 | 状态 | 交接说明 |
+|---|---|---|
+| 10.1 NCR 工作流刷新后恢复 | ✅ 完成 | `GET /api/real-orders/quality/workflow-states` + 前端自动合并恢复 |
+| 10.2 会话过期提醒 | ✅ 完成 | 13.5 分钟阈值 + 20s 轮询横幅 |
+| 10.3 错误码统一 + MES 不可达措辞 | ✅ 完成 | package 502 映射；track `MES_UNREACHABLE` |
+| 10.4 检验按批次 lot 关联 | ✅ 完成 | 精确相等/前缀扩展均关联；seed 已对齐 |
+| 10.5 前端组件拆分 | 🟡 **第一批完成，进行中** | 已抽出 `src/lib/markdown.ts` + `src/components/QualityTodoPanel.tsx`；**剩余**：问答面板、NCR 面板、8 步流程面板、Agent 运行记录面板，按同模式继续（props 化、纯函数进 lib/、每抽一个跑 vitest+build） |
+| 10.6 前端关键行为 vitest | ✅ 完成 | `npm test` 可用（6 例） |
+| 10.7 业务库迁移 PostgreSQL | ✅ 完成 | 17 表 2765 行迁入；`migrate_sqlite_to_postgres.py` 幂等；SQLite 文件保留回退（.env 的 DATABASE_URL 一行切回） |
+
+#### 三、后面要做的事（优先级从高到低，接手者按序做）
+
+1. **完成 10.5 剩余组件拆分**（进行中的任务）：RealBusinessPage.tsx 仍约 2200 行；每抽一个面板：跑 `npx vitest run` + `npm run build`，页面冒烟（问答提问一次 + 待办渲染），完成后更新本文件与 next_development_plan.md 再继续下一个。
+2. **CI 配置**（未开始）：GitHub Actions 单 workflow——backend（pytest+compileall，注意 conda 环境在自托管机器；或改用 requirements 安装）、frontend（vitest+build）。仓库无 CI 时保持最小：至少跑前端两项（纯 Node）。
+3. **可选：问答流式输出（SSE）**：协调者回答 20-30 秒干等，流式可改善演示观感；改动点：后端 ask 端点改 StreamingResponse，前端问答面板增量渲染。不改也不阻塞演示。
+4. **长期遗留（有外部依赖，勿擅自推进）**：Wutong Registry 写路径（等部署方鉴权/租户契约）；完整 OIDC/SSO（等契约，现有 OpenMES 账号登录已够演示）；NCR close 链路真实执行（**有意保留** issue 1 在待办中做演示，勿关闭）；订单级质量放行/SN 追溯（OpenMES 无 API，保持 NOT_SUPPORTED）。
+5. **演示前检查**（若要再次演示）：跑 start_demo.ps1 预检全绿；登录会话用 OpenMES 账号 admin（密码已于 2026-09-30 重置，具体值询问用户，勿写入文档/代码/提交）。
+
+#### 四、接手必读的约束（铁律，与项目历史一致）
+
+- 所有业务数据必须来自本地真实 ERPNext/OpenMES；接口失败/无数据如实报错，禁止空数组/编造冒充；不绕过审批门禁（写入=人工审批→写回→回读→幂等）。
+- 测试命令：`cd backend && ../.conda-env/python.exe -m pytest tests -q`（基线 128，不许下降）；`../.conda-env/python.exe -m compileall -q app`；`cd frontend && npm test && npm run build`。
+- 每完成一个子任务：先更新 `docs/current_status_and_fix_plan.md`（追加 § 小节）与 `docs/next_development_plan.md`（任务表勾稽），再 git 提交（逐个 add，勿 `git add -A`）。
+- 不提交：`backend/ask_a6.json`、`backend/ask_q6.json`、`backend/uvicorn-9000.log`、`backend/uvicorn-9000.err.log`。
+- 不输出/提交 `.env` 中的任何密钥（ERPNEXT_*/OPENMES_*/DEEPSEEK_API_KEY/REAL_WRITE_API_TOKEN/DATABASE_URL 等）。
+- 后端重启模式：杀 9000 监听进程 → `cd backend && ../.conda-env/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 9000`。
+- 业务库现为 PostgreSQL（autoparts-db 容器）：若容器未启动，`docker start autoparts-db`；数据迁移历史见 §3.37。
