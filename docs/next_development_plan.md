@@ -341,7 +341,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 2 | NCR 真实写入最小范围验收 | ⏸️ 等待真实业务处置决策、具备质量角色的会话和写入令牌；当前 issue 1 仍是 `RESOLVED + disposition=pending`，不得自行猜测处置 |
 | 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
 | 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
-| 5 | 检验/报工数据补录 | ✅ 用户已批准（2026-09-30）；执行提示词已固化到 [prompt_seed_test_data.md](prompt_seed_test_data.md)，交由外部执行；完成后在 current_status_and_fix_plan.md §3.34 记录验收结果 |
+| 5 | 检验/报工数据补录 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.34）：`backend/seed_inspection_eta.py` 幂等补录 TEST_ 检验 3 条 + 批次实际耗时 150 分钟；track/9 已 RATE_BASED（720 件/小时）、quality/package/9 检验维度有数据、id=2 阻断线不受影响、125 passed |
 | 6 | 质量待办面板（阶段九） | ✅ 已完成（见 current_status_and_fix_plan.md §3.33）：真实三态待办 + 去处置直达既有 NCR 面板，125 passed；真实 disposition 写入验收仍等业务决策 |
 
 每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。

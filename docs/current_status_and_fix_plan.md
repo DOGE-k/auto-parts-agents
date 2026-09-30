@@ -1115,3 +1115,29 @@ ERP 物料需求
 - OpenMES 登录会话 15 分钟 TTL 过期后需重新登录（refresh 刻意不代理，见 §3.32）；过期时面板表现符合"如实报错"要求。
 - 质量待办的"去处置"仍不代选处置方案；真实 disposition 写入验收仍等待业务决策（执行计划第 2 项）。
 - issues 列表分页封顶 10 页（200 条/状态），超出时不再向后翻页（当前部署 2 条，余量充足）。
+
+### 3.34 检验/报工数据补录（TEST_ seed，2026-09-30，依据 prompt_seed_test_data.md 执行）
+
+**写入方式**（任务规则要求记录）：`materials` 表为空导致官方 `POST /api/v1/inspections`（要求已存在 material_id）不可用，因此统一经 `docker exec openmes-postgres psql` 直接写 `openmmes` 库；全部数据 `TEST_` 前缀、幂等可重跑（按 code/lot_number 查存在再插 + 固定时间戳覆盖写入）。**未触碰 ERPNext；未改动任何业务代码；未动 id=2（WO-2026-001）的任何记录。**
+
+**补录内容**（`backend/seed_inspection_eta.py`）：
+
+1. 检验线：1 个 TEST_ 物料（`TEST-BD-2401-SEED`）+ 3 条检验记录（`TEST-IQC-20260930-01` / `TEST-IPQC-20260930-01/02`，status=pass、disposition=accept、检验员 Administrator）；
+2. ETA 线：工单 9（TEST_WO_PAGE_00023）批次 3（`TEST_LOT_PAGE_9`）及其步骤 `TEST_Final_Assembly` 补真实执行窗口 `2026-09-29 12:00→14:30 UTC`（150 分钟），并将此前官方 complete API 写入的 `actual_elapsed_minutes=30`（与窗口不一致）统一为 150，速率 1800 件/150 分钟 = **720 件/小时**；
+3. 阻断线（id=2）与缺失线（SN 追溯）刻意不动。
+
+**验收结果（对照 prompt_seed_test_data.md 五节）**：
+
+1. `GET /api/real-orders/quality/package/9`：检验维度返回 3 条 TEST_ 记录（pass/accept，inspection_id 7/8/9）；SOP/Control Plan released、`quality_gate_passed=true`；
+2. `GET /api/real-orders/mes/track/9`：`eta_status=RATE_BASED`、`eta_basis=observed_production_rate`、`observed_rate={quantity:1800.00, elapsed_minutes:150.0, units_per_hour:720.0, remaining_qty:200.00, estimated_remaining_hours:0.28}`；
+3. 协调者问答（DeepSeek）"SAL-ORD-2026-00023 什么时候能做完"：回答含 RATE_BASED 估算（2026-09-30 06:08 UTC）、真实记录编号与调用链 2 步留痕（`RUN-COORD-1F88B4AF6609`：lookup_order_link → track_real），并主动提示"ETA 为实测外推、工单状态仍 PENDING"的口径提醒；"质量检验数据怎么样"回答 3 条检验记录全部合格 + 如实标注"无订单级质量放行 API / 无 SN 追溯 API"缺口；
+4. id=2 阻断线不受影响：`quality/package/2` 仍 `open_issues=0` + SOP/Control Plan 缺失；`mes/track/2` 仍 `completion=0.0%`、`eta_status=DATA_MISSING`；
+5. `pytest tests -q` **125 passed**、`compileall` 通过、`npm run build` 通过（本阶段零业务代码改动）；
+6. seed 脚本重复执行 3 次，materials=1、inspections=3、批次时间戳不变，无重复记录；
+7. 截图：`gui-test-screenshots/2026-09-30_seed_eta_rate_based_answer.png`（ETA 展示）、`2026-09-30_seed_inspection_data_answer.png`（检验数据展示）。
+
+**遗留与说明**：
+
+- seed 过程中发现并修复脚本自身 bug（scalar() 双次执行导致 INSERT 重复），已清理重复数据并复验幂等；
+- 批次步骤 `duration_minutes` 同步写为 150；批次级 started/completed 同步更新；
+- 工单 9 状态仍为 PENDING（与 90% 进度不一致）——协调者已在回答中如实提示，状态口径属 OpenMES 业务数据，不在本 seed 范围内擅改。
