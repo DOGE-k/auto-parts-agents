@@ -119,6 +119,20 @@ def runtime_discovery() -> dict:
     }
 
 
+@app.get("/api/runtime/registry", tags=["system"])
+def runtime_registry() -> dict:
+    """Expose the optional Registry read contract without credentials."""
+    settings = IntegrationSettings.from_environment()
+    return {
+        "provider": "wutong",
+        "configured": bool(settings.wutong_registry_url),
+        "tenant_configured": bool(settings.wutong_tenant),
+        "read_only": True,
+        "contract": "vendored ACPs Registry /health + /api/v1/agent/public/recent",
+        "writes_enabled": False,
+    }
+
+
 @app.post("/api/real-orders/discovery/search", tags=["real-orders"])
 async def real_order_discovery_search(body: dict) -> dict:
     """Query an optional Wutong/ACPs discovery service (read-only)."""
@@ -151,6 +165,29 @@ async def real_order_discovery_search(body: dict) -> dict:
             discovery_type=discovery_type,
             filter_obj=filter_obj if isinstance(filter_obj, dict) else None,
         )
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    finally:
+        await client.aclose()
+
+
+@app.get("/api/real-orders/registry/agents", tags=["real-orders"])
+async def real_order_registry_agents(limit: int = 5) -> dict:
+    """Read recently approved external agents from the optional Registry."""
+    settings = IntegrationSettings.from_environment()
+    if not settings.wutong_registry_url:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "registry_not_configured",
+                "message": "Wutong Registry 未配置 WUTONG_REGISTRY_URL；未使用本地 ACS 目录冒充外部注册结果",
+            },
+        )
+    from app.integrations.wutong import WutongRegistryClient
+
+    client = WutongRegistryClient(settings.wutong_registry_url, tenant=settings.wutong_tenant)
+    try:
+        return await client.list_recent_agents(limit=limit)
     except IntegrationError as exc:
         raise _integration_status_error(exc) from exc
     finally:

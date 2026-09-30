@@ -1,5 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, agentRunTypeNames, askAssistant, approveProcurementPlan, approveQuotation as approveQuotationApi, createPoFromPlan, getRealIdentity } from "./api";
+import {
+  api,
+  agentRunTypeNames,
+  askAssistant,
+  approveProcurementPlan,
+  approveQuotation as approveQuotationApi,
+  createPoFromPlan,
+  getRealIdentity,
+  getRealSessionToken,
+  getRealWriteToken,
+  setRealSessionToken,
+  setRealWriteToken,
+  requestQualityIssueDisposition,
+  approveQualityIssueDisposition,
+  writeQualityIssueDisposition,
+  checkQualityIssueClosure,
+  requestQualityIssueClose,
+  approveQualityIssueClose,
+  writeQualityIssueClose,
+} from "./api";
 import type {
   AgentRunSummary,
   AgentRunDetail,
@@ -7,6 +26,8 @@ import type {
   AssistantAnswer,
   ProposalSupplierOption,
   RealIdentity,
+  RealQualityIssue,
+  QualityClosureCheck,
 } from "./api";
 
 // ========== 类型定义 ==========
@@ -87,7 +108,7 @@ type TrackingInfo = {
 
 type QualityInfo = {
   work_order_id: string;
-  quality_records: Record<string, any>[];
+  quality_records: RealQualityIssue[];
   documents: Record<string, any>[];
   inspections: Record<string, any>[];
   open_issues_count: number;
@@ -97,6 +118,26 @@ type QualityInfo = {
   gate_details: Record<string, any>;
   authority: string;
   data_source: string;
+};
+
+type NcrForm = {
+  disposition: string;
+  non_conforming_qty: string;
+  root_cause: string;
+  containment_action: string;
+  nc_source: string;
+};
+
+type NcrWorkflow = {
+  form: NcrForm;
+  dispositionApprovalId?: string;
+  dispositionApproved?: boolean;
+  dispositionResult?: { status?: string; error?: string; read_back_verified?: boolean; idempotent?: boolean };
+  closureCheck?: QualityClosureCheck;
+  closeApprovalId?: string;
+  closeApproved?: boolean;
+  closeResult?: { status?: string; error?: string; read_back_verified?: boolean; idempotent?: boolean };
+  busy?: string;
 };
 
 type ShipGateInfo = {
@@ -273,6 +314,10 @@ export default function RealBusinessPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [identity, setIdentity] = useState<RealIdentity | null>(null);
+  const [sessionToken, setSessionToken] = useState(() => getRealSessionToken());
+  const [writeToken, setWriteToken] = useState(() => getRealWriteToken());
+  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
+  const [ncrWorkflows, setNcrWorkflows] = useState<Record<string, NcrWorkflow>>({});
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
   const [agentRuns, setAgentRuns] = useState<AgentRunSummary[]>([]);
@@ -639,6 +684,177 @@ export default function RealBusinessPage() {
     }
   }, [workOrderId, quotation, workOrders]);
 
+  const refreshQualityAndGate = useCallback(async () => {
+    if (!workOrderId) return;
+    const [qual, ship] = await Promise.all([
+      api<QualityInfo>(`/real-orders/quality/package/${encodeURIComponent(workOrderId)}`),
+      api<ShipGateInfo>(
+        `/real-orders/ship-gate/${encodeURIComponent(workOrderId)}?quotation_approved=${quotation?.status === "APPROVED"}`,
+      ),
+    ]);
+    setQuality(qual);
+    setShipGate(ship);
+  }, [workOrderId, quotation]);
+
+  const updateNcrWorkflow = useCallback((issueId: string, patch: Partial<NcrWorkflow>) => {
+    setNcrWorkflows((prev) => ({
+      ...prev,
+      [issueId]: { ...prev[issueId], ...patch, form: patch.form ?? prev[issueId]?.form ?? {
+        disposition: "",
+        non_conforming_qty: "",
+        root_cause: "",
+        containment_action: "",
+        nc_source: "",
+      } },
+    }));
+  }, []);
+
+  const updateNcrForm = useCallback((issueId: string, field: keyof NcrForm, value: string) => {
+    setNcrWorkflows((prev) => {
+      const current = prev[issueId] ?? {
+        form: { disposition: "", non_conforming_qty: "", root_cause: "", containment_action: "", nc_source: "" },
+      };
+      return { ...prev, [issueId]: { ...current, form: { ...current.form, [field]: value } } };
+    });
+  }, []);
+
+  const requestNcrDisposition = useCallback(async (issue: RealQualityIssue) => {
+    const issueId = String(issue.record_id ?? "");
+    if (!issueId || !workOrderId) return;
+    const form = ncrWorkflows[issueId]?.form;
+    if (!form?.disposition || !form.root_cause.trim() || !form.containment_action.trim()) {
+      setError("请先选择 NCR 处置，并填写根因与遏制措施；系统不会替你推断处置结论。");
+      return;
+    }
+    updateNcrWorkflow(issueId, { busy: "requesting_disposition" });
+    setError("");
+    try {
+      const result = await requestQualityIssueDisposition(issueId, {
+        work_order_id: workOrderId,
+        disposition: form.disposition,
+        non_conforming_qty: form.non_conforming_qty.trim() ? Number(form.non_conforming_qty) : undefined,
+        root_cause: form.root_cause.trim(),
+        containment_action: form.containment_action.trim(),
+        nc_source: form.nc_source || undefined,
+      });
+      updateNcrWorkflow(issueId, {
+        dispositionApprovalId: result.approval?.approval_id,
+        dispositionApproved: false,
+        dispositionResult: { status: result.status ?? "待审批", error: result.error },
+        busy: "",
+      });
+      notify(`NCR ${issueId} 处置审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "创建处置审批失败" } });
+      setError(e instanceof Error ? e.message : "创建处置审批失败");
+    }
+  }, [ncrWorkflows, updateNcrWorkflow, workOrderId]);
+
+  const approveNcrDisposition = useCallback(async (issueId: string) => {
+    const approvalId = ncrWorkflows[issueId]?.dispositionApprovalId;
+    if (!approvalId) return;
+    updateNcrWorkflow(issueId, { busy: "approving_disposition" });
+    setError("");
+    try {
+      const result = await approveQualityIssueDisposition(approvalId);
+      updateNcrWorkflow(issueId, { dispositionApproved: true, dispositionResult: { status: "已批准", ...result }, busy: "" });
+      notify(`NCR ${issueId} 处置审批已批准`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "处置审批失败" } });
+      setError(e instanceof Error ? e.message : "处置审批失败");
+    }
+  }, [ncrWorkflows, updateNcrWorkflow]);
+
+  const writeNcrDisposition = useCallback(async (issueId: string) => {
+    const workflow = ncrWorkflows[issueId];
+    const approvalId = workflow?.dispositionApprovalId;
+    if (!approvalId || !workflow.dispositionApproved || !workOrderId) return;
+    updateNcrWorkflow(issueId, { busy: "writing_disposition" });
+    setError("");
+    try {
+      const result = await writeQualityIssueDisposition(issueId, workOrderId, approvalId);
+      updateNcrWorkflow(issueId, {
+        dispositionResult: {
+          status: result.status,
+          error: result.success ? undefined : result.error,
+          read_back_verified: result.read_back_verified,
+          idempotent: result.idempotent,
+        },
+        busy: "",
+      });
+      await refreshQualityAndGate();
+      if (!result.success) throw new Error(result.error ?? "NCR 处置写回未验证");
+      notify(`NCR ${issueId} 处置已写回并完成回读验证`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "NCR 处置写回失败" } });
+      setError(e instanceof Error ? e.message : "NCR 处置写回失败");
+    }
+  }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId]);
+
+  const checkNcrClosure = useCallback(async (issueId: string) => {
+    if (!workOrderId) return;
+    updateNcrWorkflow(issueId, { busy: "checking_closure" });
+    setError("");
+    try {
+      const result = await checkQualityIssueClosure(issueId, workOrderId);
+      updateNcrWorkflow(issueId, { closureCheck: result, busy: "" });
+      notify(result.closure_ready ? `NCR ${issueId} 已满足关闭前置条件` : `NCR ${issueId} 仍有关闭前置条件未满足`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", closureCheck: undefined });
+      setError(e instanceof Error ? e.message : "关闭前置校验失败");
+    }
+  }, [updateNcrWorkflow, workOrderId]);
+
+  const requestNcrClose = useCallback(async (issueId: string) => {
+    if (!workOrderId) return;
+    updateNcrWorkflow(issueId, { busy: "requesting_close" });
+    setError("");
+    try {
+      const result = await requestQualityIssueClose(issueId, workOrderId);
+      updateNcrWorkflow(issueId, { closeApprovalId: result.approval?.approval_id, closeApproved: false, closeResult: { status: "待审批" }, busy: "" });
+      notify(`NCR ${issueId} 关闭审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "创建关闭审批失败" } });
+      setError(e instanceof Error ? e.message : "创建关闭审批失败");
+    }
+  }, [updateNcrWorkflow, workOrderId]);
+
+  const approveNcrClose = useCallback(async (issueId: string) => {
+    const approvalId = ncrWorkflows[issueId]?.closeApprovalId;
+    if (!approvalId) return;
+    updateNcrWorkflow(issueId, { busy: "approving_close" });
+    setError("");
+    try {
+      await approveQualityIssueClose(approvalId);
+      updateNcrWorkflow(issueId, { closeApproved: true, closeResult: { status: "已批准" }, busy: "" });
+      notify(`NCR ${issueId} 关闭审批已批准`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "关闭审批失败" } });
+      setError(e instanceof Error ? e.message : "关闭审批失败");
+    }
+  }, [ncrWorkflows, updateNcrWorkflow]);
+
+  const writeNcrClose = useCallback(async (issueId: string) => {
+    const workflow = ncrWorkflows[issueId];
+    const approvalId = workflow?.closeApprovalId;
+    if (!approvalId || !workflow.closeApproved || !workOrderId) return;
+    updateNcrWorkflow(issueId, { busy: "writing_close" });
+    setError("");
+    try {
+      const result = await writeQualityIssueClose(issueId, workOrderId, approvalId);
+      updateNcrWorkflow(issueId, {
+        closeResult: { status: result.status, error: result.success ? undefined : result.error, read_back_verified: result.read_back_verified, idempotent: result.idempotent },
+        busy: "",
+      });
+      await refreshQualityAndGate();
+      if (!result.success) throw new Error(result.error ?? "NCR 关闭写回未验证");
+      notify(`NCR ${issueId} 已关闭并完成回读验证`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "NCR 关闭写回失败" } });
+      setError(e instanceof Error ? e.message : "NCR 关闭写回失败");
+    }
+  }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId]);
+
   const resetFlow = () => {
     setStep(1);
     setQuotation(null);
@@ -647,6 +863,7 @@ export default function RealBusinessPage() {
     setTracking(null);
     setQuality(null);
     setShipGate(null);
+    setNcrWorkflows({});
   };
 
   return (
@@ -671,6 +888,61 @@ export default function RealBusinessPage() {
                 ? `${identity.display_name}（${identity.actor_id}，${identity.authority}，角色：${identity.roles.join("、") || "未返回"}）`
                 : "正在从 ERPNext/OpenMES 解析当前登录用户…"}
             </span>
+          </div>
+          <div className="real-session-toolbar">
+            <button className="button ghost session-toggle" onClick={() => setSessionSettingsOpen((open) => !open)}>
+              {sessionSettingsOpen ? "收起会话设置 ▲" : "会话设置 ▼"}
+            </button>
+            {sessionSettingsOpen && (
+              <div className="real-session-panel">
+                <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。</p>
+                <label>
+                  Bearer 会话（可选）
+                  <input
+                    type="password"
+                    value={sessionToken}
+                    onChange={(e) => setSessionToken(e.target.value)}
+                    placeholder="粘贴短期企业会话令牌"
+                    autoComplete="off"
+                  />
+                </label>
+                <label>
+                  本地写入令牌（可选）
+                  <input
+                    type="password"
+                    value={writeToken}
+                    onChange={(e) => setWriteToken(e.target.value)}
+                    placeholder="服务端 REAL_WRITE_API_TOKEN"
+                    autoComplete="off"
+                  />
+                </label>
+                <div className="real-session-actions">
+                  <button
+                    className="button primary"
+                    onClick={() => {
+                      setRealSessionToken(sessionToken);
+                      setRealWriteToken(writeToken);
+                      void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+                      notify("会话设置已保存到当前浏览器会话");
+                    }}
+                  >
+                    保存并重新解析身份
+                  </button>
+                  <button
+                    className="button ghost"
+                    onClick={() => {
+                      setSessionToken("");
+                      setWriteToken("");
+                      setRealSessionToken("");
+                      setRealWriteToken("");
+                      void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+                    }}
+                  >
+                    清除会话
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="heading-badges">
@@ -1591,6 +1863,139 @@ export default function RealBusinessPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {quality.quality_records.some((q) => q.record_id) && (
+                <div className="ncr-workflows">
+                  <div className="ncr-workflow-heading">
+                    <strong>NCR 人工处置与关闭</strong>
+                    <small>真实 OpenMES 写回必须经过处置方案、审批、写回、回读；关闭还必须通过纠正措施校验。</small>
+                  </div>
+                  {quality.quality_records.filter((q) => q.record_id).map((issue) => {
+                    const issueId = String(issue.record_id);
+                    const workflow = ncrWorkflows[issueId];
+                    const form = workflow?.form ?? { disposition: "", non_conforming_qty: "", root_cause: "", containment_action: "", nc_source: "" };
+                    const busy = Boolean(workflow?.busy);
+                    const isClosed = String(issue.status ?? "").toUpperCase() === "CLOSED";
+                    const dispositionRecorded = ["scrap", "rework", "return_to_supplier", "use_as_is"].includes(String(issue.disposition ?? "").toLowerCase());
+                    return (
+                      <div key={issueId} className="ncr-workflow-card">
+                        <div className="ncr-workflow-title">
+                          <div>
+                            <strong>{issue.title || issue.record_type || `质量问题 ${issueId}`}</strong>
+                            <small>#{issueId} · {issue.severity ?? "未标严重度"} · 当前状态 {issue.status ?? "未知"} · 当前处置 {issue.disposition ?? "pending"}</small>
+                          </div>
+                          <span className={`badge ${isClosed ? "green" : dispositionRecorded ? "blue-badge" : "red-badge"}`}>
+                            {isClosed ? "已关闭" : dispositionRecorded ? "已登记处置" : "待处置"}
+                          </span>
+                        </div>
+                        {issue.description && <p className="ncr-description">{issue.description}</p>}
+                        {!isClosed && (
+                          <>
+                            <div className="ncr-form-grid">
+                              <label>
+                                处置方案（人工选择）
+                                <select value={form.disposition} onChange={(e) => updateNcrForm(issueId, "disposition", e.target.value)} disabled={busy || Boolean(workflow?.dispositionApprovalId)}>
+                                  <option value="">请选择，不自动推断</option>
+                                  <option value="scrap">报废（scrap）</option>
+                                  <option value="rework">返工（rework）</option>
+                                  <option value="return_to_supplier">退供应商（return_to_supplier）</option>
+                                  <option value="use_as_is">让步接收（use_as_is）</option>
+                                </select>
+                              </label>
+                              <label>
+                                不合格数量（可选）
+                                <input type="number" min="0" value={form.non_conforming_qty} onChange={(e) => updateNcrForm(issueId, "non_conforming_qty", e.target.value)} disabled={busy || Boolean(workflow?.dispositionApprovalId)} />
+                              </label>
+                              <label>
+                                NC 来源（可选）
+                                <select value={form.nc_source} onChange={(e) => updateNcrForm(issueId, "nc_source", e.target.value)} disabled={busy || Boolean(workflow?.dispositionApprovalId)}>
+                                  <option value="">未指定</option>
+                                  <option value="internal">内部</option>
+                                  <option value="supplier">供应商</option>
+                                  <option value="external">外部</option>
+                                </select>
+                              </label>
+                              <label className="ncr-wide-field">
+                                根因
+                                <textarea value={form.root_cause} onChange={(e) => updateNcrForm(issueId, "root_cause", e.target.value)} disabled={busy || Boolean(workflow?.dispositionApprovalId)} rows={2} placeholder="填写可审计的根因" />
+                              </label>
+                              <label className="ncr-wide-field">
+                                遏制措施
+                                <textarea value={form.containment_action} onChange={(e) => updateNcrForm(issueId, "containment_action", e.target.value)} disabled={busy || Boolean(workflow?.dispositionApprovalId)} rows={2} placeholder="填写已执行或计划执行的遏制措施" />
+                              </label>
+                            </div>
+                            <div className="ncr-action-row">
+                              <button className="button ghost" disabled={busy || Boolean(workflow?.dispositionApprovalId)} onClick={() => void requestNcrDisposition(issue)}>
+                                {workflow?.busy === "requesting_disposition" ? "建立审批中…" : "① 建立处置审批"}
+                              </button>
+                              {workflow?.dispositionApprovalId && <code>审批号 {workflow.dispositionApprovalId}</code>}
+                              {workflow?.dispositionApprovalId && !workflow.dispositionApproved && (
+                                <button className="button ghost" disabled={busy} onClick={() => void approveNcrDisposition(issueId)}>
+                                  {workflow?.busy === "approving_disposition" ? "审批中…" : "② 批准处置"}
+                                </button>
+                              )}
+                              {workflow?.dispositionApprovalId && workflow.dispositionApproved && (
+                                <button className="button primary" disabled={busy} onClick={() => void writeNcrDisposition(issueId)}>
+                                  {workflow?.busy === "writing_disposition" ? "写回并回读中…" : "③ 写回 OpenMES"}
+                                </button>
+                              )}
+                            </div>
+                            {workflow?.dispositionResult && (
+                              <div className={`ncr-result ${workflow.dispositionResult.error ? "error" : "ok"}`}>
+                                处置状态：{workflow.dispositionResult.error ?? workflow.dispositionResult.status ?? "未知"}
+                                {workflow.dispositionResult.read_back_verified ? " · 回读已验证" : ""}
+                                {workflow.dispositionResult.idempotent ? " · 幂等命中" : ""}
+                              </div>
+                            )}
+                            <div className="ncr-close-row">
+                              <button className="button ghost" disabled={busy} onClick={() => void checkNcrClosure(issueId)}>
+                                {workflow?.busy === "checking_closure" ? "校验中…" : "读取关闭前置条件"}
+                              </button>
+                              {workflow?.closureCheck && (
+                                <span className={`ncr-check-status ${workflow.closureCheck.closure_ready ? "ready" : "blocked"}`}>
+                                  {workflow.closureCheck.closure_ready ? "关闭前置条件已满足" : "仍有前置条件未满足"}
+                                </span>
+                              )}
+                            </div>
+                            {workflow?.closureCheck && (
+                              <div className="ncr-check-details">
+                                {Object.entries(workflow.closureCheck.checks ?? {}).map(([key, passed]) => (
+                                  <span key={key} className={passed ? "check-pass" : "check-fail"}>{passed ? "✓" : "✗"} {({ resolved: "问题已解决", disposition_recorded: "已登记处置", root_cause_recorded: "已记录根因", containment_action_recorded: "已记录遏制措施", corrective_actions_verified: "纠正措施已验证" } as Record<string, string>)[key] ?? key}</span>
+                                ))}
+                              </div>
+                            )}
+                            {workflow?.closureCheck?.closure_ready && (
+                              <div className="ncr-action-row close-actions">
+                                <button className="button ghost" disabled={busy || Boolean(workflow.closeApprovalId)} onClick={() => void requestNcrClose(issueId)}>
+                                  {workflow?.busy === "requesting_close" ? "建立关闭审批中…" : "① 建立关闭审批"}
+                                </button>
+                                {workflow?.closeApprovalId && <code>关闭审批号 {workflow.closeApprovalId}</code>}
+                                {workflow?.closeApprovalId && !workflow.closeApproved && (
+                                  <button className="button ghost" disabled={busy} onClick={() => void approveNcrClose(issueId)}>
+                                    {workflow?.busy === "approving_close" ? "审批中…" : "② 批准关闭"}
+                                  </button>
+                                )}
+                                {workflow?.closeApprovalId && workflow.closeApproved && (
+                                  <button className="button primary" disabled={busy} onClick={() => void writeNcrClose(issueId)}>
+                                    {workflow?.busy === "writing_close" ? "关闭并回读中…" : "③ 写回关闭"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {workflow?.closeResult && (
+                              <div className={`ncr-result ${workflow.closeResult.error ? "error" : "ok"}`}>
+                                关闭状态：{workflow.closeResult.error ?? workflow.closeResult.status ?? "未知"}
+                                {workflow.closeResult.read_back_verified ? " · 回读已验证" : ""}
+                                {workflow.closeResult.idempotent ? " · 幂等命中" : ""}
+                              </div>
+                            )}
+                          </>
+                        )}
+                        <small className="ncr-audit-hint">身份：{identity?.actor_id ?? "未解析"} · 来源：{identity?.authority ?? "—"} · 数据：{issue.data_source ?? quality.data_source}</small>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <p className="gate-reason">{quality.gate_details.reason}</p>

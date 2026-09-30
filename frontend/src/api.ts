@@ -1,4 +1,34 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9001/api";
+const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
+const REAL_WRITE_TOKEN_KEY = "real_business_write_token";
+
+/**
+ * Keep short lived runtime credentials in sessionStorage only. They are never
+ * written to project files, query strings, agent run payloads, or logs.
+ */
+export function getRealSessionToken(): string {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage.getItem(REAL_SESSION_TOKEN_KEY) ?? "";
+}
+
+export function setRealSessionToken(token: string): void {
+  if (typeof window === "undefined") return;
+  const value = token.trim();
+  if (value) window.sessionStorage.setItem(REAL_SESSION_TOKEN_KEY, value);
+  else window.sessionStorage.removeItem(REAL_SESSION_TOKEN_KEY);
+}
+
+export function getRealWriteToken(): string {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage.getItem(REAL_WRITE_TOKEN_KEY) ?? "";
+}
+
+export function setRealWriteToken(token: string): void {
+  if (typeof window === "undefined") return;
+  const value = token.trim();
+  if (value) window.sessionStorage.setItem(REAL_WRITE_TOKEN_KEY, value);
+  else window.sessionStorage.removeItem(REAL_WRITE_TOKEN_KEY);
+}
 
 export type Project = {
   project_id: string;
@@ -52,9 +82,13 @@ export type Event = {
 export type ProductionCompletion = Record<string, any>;
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const sessionToken = getRealSessionToken();
+  if (sessionToken && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${sessionToken}`);
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    headers,
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
@@ -71,7 +105,127 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function writeHeaders(): HeadersInit {
-  return { "Idempotency-Key": crypto.randomUUID() };
+  const headers: Record<string, string> = { "Idempotency-Key": crypto.randomUUID() };
+  const writeToken = getRealWriteToken();
+  if (writeToken) headers["X-Real-Write-Token"] = writeToken;
+  return headers;
+}
+
+export type RealQualityIssue = {
+  record_id?: string;
+  record_type?: string;
+  issue_code?: string;
+  work_order_id?: string;
+  work_order_no?: string;
+  title?: string;
+  description?: string;
+  severity?: string;
+  status?: string;
+  disposition?: string;
+  non_conforming_qty?: string | number | null;
+  nc_source?: string;
+  root_cause?: string;
+  containment_action?: string;
+  reported_at?: string;
+  resolved_at?: string;
+  authority?: string;
+  data_source?: string;
+};
+
+export type QualityApproval = {
+  approval_id: string;
+  approved?: boolean;
+  approved_by?: string;
+  reference_id?: string;
+  reference_type?: string;
+  notes?: string;
+  created_at?: string;
+};
+
+export type QualityClosureCheck = {
+  status: string;
+  work_order_id: string;
+  issue_id: string;
+  issue?: RealQualityIssue;
+  actions?: { action_id?: string; title?: string; status?: string; due_date?: string; verified_at?: string }[];
+  checks?: Record<string, boolean>;
+  closure_ready: boolean;
+  data_gap?: string | null;
+  authority?: string;
+  data_source?: string;
+};
+
+export type QualityWorkflowResult = {
+  success: boolean;
+  status?: string;
+  written?: boolean;
+  idempotent?: boolean;
+  approval?: QualityApproval;
+  read_back?: RealQualityIssue;
+  read_back_verified?: boolean;
+  closure_check?: QualityClosureCheck;
+  error?: string;
+  authority?: string;
+  data_source?: string;
+};
+
+export async function requestQualityIssueDisposition(issueId: string, payload: {
+  work_order_id: string;
+  disposition: string;
+  non_conforming_qty?: number;
+  root_cause: string;
+  containment_action: string;
+  nc_source?: string;
+}): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/disposition-request`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function approveQualityIssueDisposition(approvalId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/disposition-approvals/${encodeURIComponent(approvalId)}/approve`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({}),
+  });
+}
+
+export async function writeQualityIssueDisposition(issueId: string, workOrderId: string, approvalId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/disposition`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId, approval_id: approvalId }),
+  });
+}
+
+export async function checkQualityIssueClosure(issueId: string, workOrderId: string): Promise<QualityClosureCheck> {
+  return api<QualityClosureCheck>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/closure-check?work_order_id=${encodeURIComponent(workOrderId)}`);
+}
+
+export async function requestQualityIssueClose(issueId: string, workOrderId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/close-request`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId }),
+  });
+}
+
+export async function approveQualityIssueClose(approvalId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/close-approvals/${encodeURIComponent(approvalId)}/approve`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({}),
+  });
+}
+
+export async function writeQualityIssueClose(issueId: string, workOrderId: string, approvalId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/close`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ work_order_id: workOrderId, approval_id: approvalId }),
+  });
 }
 
 export const eventNames: Record<string, string> = {

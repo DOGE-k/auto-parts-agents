@@ -294,3 +294,14 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 ## 每次开发后必须记录
 
 修改文件、真实记录编号、接口和状态码、数据 authority、是否写入、回读结果、测试命令、页面验证结果、遗留问题和下一步任务，统一更新 `current_status_and_fix_plan.md`。
+
+## 当前执行计划（2026-09-30 更新）
+
+| 优先级 | 任务 | 状态与边界 |
+|---|---|---|
+| 1 | 前端请求级身份会话与 NCR 人工操作面板 | ✅ 已完成：短期 Bearer/写入令牌仅存 `sessionStorage`；NCR 处置与关闭严格按审批、写回、回读分步操作；没有伪造 SSO，也没有自动选择处置 |
+| 2 | NCR 真实写入最小范围验收 | ⏸️ 等待真实业务处置决策、具备质量角色的会话和写入令牌；当前 issue 1 仍是 `RESOLVED + disposition=pending`，不得自行猜测处置 |
+| 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
+| 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
+
+每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。

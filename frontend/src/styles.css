@@ -2333,6 +2333,52 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 }
 .text-red { color: #c4453c; }
 
+/* ===== 真实会话与 NCR 人工审批面板 ===== */
+.real-session-toolbar { margin-top: 10px; }
+.session-toggle { font-size: 11px; padding: 5px 9px; }
+.real-session-panel {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px;
+  max-width: 820px; margin-top: 8px; padding: 10px 12px;
+  border: 1px dashed var(--line); border-radius: var(--r-sm); background: var(--surface-2);
+}
+.real-session-panel p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 11px; }
+.real-session-panel label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.real-session-panel input { min-width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); font-size: 11px; }
+.real-session-actions { display: flex; gap: 6px; }
+.real-session-actions .button { font-size: 11px; padding: 6px 9px; }
+.ncr-workflows { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.ncr-workflow-heading { display: flex; flex-direction: column; gap: 3px; }
+.ncr-workflow-heading strong { color: var(--ink-1); font-size: 13px; }
+.ncr-workflow-heading small, .ncr-audit-hint { color: var(--muted); font-size: 10px; }
+.ncr-workflow-card { padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
+.ncr-workflow-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ncr-workflow-title strong { display: block; color: var(--ink-1); font-size: 12px; }
+.ncr-workflow-title small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.ncr-description { margin: 7px 0; color: var(--ink-2); font-size: 11px; line-height: 1.5; }
+.ncr-form-grid { display: grid; grid-template-columns: 1fr 0.7fr 0.8fr; gap: 8px; margin-top: 9px; }
+.ncr-form-grid label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.ncr-form-grid input, .ncr-form-grid select, .ncr-form-grid textarea { width: 100%; box-sizing: border-box; padding: 6px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink-2); font: inherit; font-weight: 400; }
+.ncr-form-grid textarea { resize: vertical; }
+.ncr-wide-field { grid-column: span 3; }
+.ncr-action-row, .ncr-close-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.ncr-action-row .button, .ncr-close-row .button { font-size: 10px; padding: 6px 9px; }
+.ncr-action-row code { padding: 4px 6px; border-radius: 4px; background: var(--surface); color: var(--ink-2); font: 10px var(--mono); }
+.ncr-result { margin-top: 7px; padding: 6px 8px; border-radius: 4px; font-size: 10px; }
+.ncr-result.ok { background: var(--teal-light); color: var(--teal-dark); }
+.ncr-result.error { background: rgba(196, 69, 60, 0.08); color: #a8352d; }
+.ncr-check-status { font-size: 10px; font-weight: 700; }
+.ncr-check-status.ready, .check-pass { color: var(--teal-dark); }
+.ncr-check-status.blocked, .check-fail { color: #a8352d; }
+.ncr-check-details { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 6px; font-size: 10px; }
+.ncr-audit-hint { display: block; margin-top: 9px; }
+@media (max-width: 760px) {
+  .real-session-panel { align-items: stretch; }
+  .real-session-panel label { flex: 1 1 100%; }
+  .real-session-panel input { min-width: 0; }
+  .ncr-form-grid { grid-template-columns: 1fr; }
+  .ncr-wide-field { grid-column: auto; }
+}
+
 /* ===== 协调者回答的轻量 Markdown 渲染 ===== */
 .md-body { line-height: 1.7; }
 .md-body .md-heading { font-weight: 700; color: var(--ink); margin-top: 4px; }

@@ -1,9 +1,10 @@
-"""Optional ACPs/Wutong discovery client.
+"""Optional ACPs/Wutong discovery and Registry read clients.
 
 The vendored ACPs discovery contract is intentionally used as the wire
 contract: ``POST /discover`` accepts a DiscoveryRequest and returns a common
 response with ``result.acsMap``/``agents``/``routes`` or ``error``. This
-module is read-only. It never registers or mutates a remote registry.
+module is read-only. It never registers, updates, submits, or mutates a
+remote registry.
 """
 from __future__ import annotations
 
@@ -96,4 +97,72 @@ class WutongDiscoveryClient:
             "alive_map": result.get("aliveMap") if isinstance(result.get("aliveMap"), dict) else {},
             "authority": "Wutong",
             "data_source": "wutong_discovery",
+        }
+
+
+class WutongRegistryClient:
+    """Read-only client for the vendored ACPs Registry public contract.
+
+    The vendored registry-server exposes ``GET /health`` and the public agent
+    listing at ``GET /api/v1/agent/public/recent``. Authenticated registry
+    writes are intentionally not exposed without deployment-owned credentials
+    and registration policy.
+    """
+
+    def __init__(self, registry_url: str, *, tenant: str = "", client=None) -> None:
+        value = registry_url.strip().rstrip("/")
+        if not value:
+            raise IntegrationNotConfigured("Wutong Registry", ["WUTONG_REGISTRY_URL"])
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("WUTONG_REGISTRY_URL 必须是完整的 http:// 或 https:// URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("WUTONG_REGISTRY_URL 不得包含账号、密码、查询参数或片段")
+        root = f"{parsed.scheme}://{parsed.netloc}"
+        path = parsed.path.rstrip("/")
+        if path.endswith("/api/v1"):
+            api_path = path
+            root_path = path[:-7].rstrip("/")
+        else:
+            root_path = path
+            api_path = f"{path}/api/v1" if path else "/api/v1"
+        self._health_path = f"{root_path}/health" if root_path else "/health"
+        self._recent_path = f"{api_path}/agent/public/recent"
+        self._tenant = tenant.strip()
+        self._client = JsonHttpClient(root, client=client)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Wutong-Tenant": self._tenant} if self._tenant else {}
+
+    async def health(self) -> dict[str, Any]:
+        payload = await self._client.request_json("GET", self._health_path, headers=self._headers())
+        if not isinstance(payload, dict):
+            raise IntegrationError("Wutong Registry 健康响应格式无效", code="registry_invalid_response")
+        return {"status": "ok", "payload": payload, "authority": "Wutong Registry", "data_source": "wutong_registry"}
+
+    async def list_recent_agents(self, *, limit: int = 5) -> dict[str, Any]:
+        if not 1 <= limit <= 50:
+            raise ValueError("Wutong Registry limit 必须在 1-50 之间")
+        payload = await self._client.request_json(
+            "GET",
+            self._recent_path,
+            params={"limit": limit, "with_users": "false"},
+            headers=self._headers(),
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise IntegrationError(
+                "Wutong Registry 最近 Agent 响应缺少 items",
+                code="registry_invalid_response",
+            )
+        return {
+            "status": "ok",
+            "items": payload["items"],
+            "total": payload.get("total", len(payload["items"])),
+            "page_num": payload.get("page_num", 1),
+            "page_size": payload.get("page_size", limit),
+            "authority": "Wutong Registry",
+            "data_source": "wutong_registry",
         }

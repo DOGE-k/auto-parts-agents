@@ -1017,4 +1017,45 @@ ERP 物料需求
 **验证**：新增请求会话优先级、ERPNext provider 拒绝降级、嵌套 OpenMES 用户响应测试；后端全量 **108 passed**、`compileall` 通过。当前运行环境仍使用服务端 ERPNext `Administrator`（没有浏览器 Bearer 会话），因此没有新增真实系统写入。
 
 **边界与下一步**：前端尚未内置企业 SSO 登录页；接入 OIDC/ERPNext/OpenMES 登录后，只需把短期 Bearer 会话附加到 API 请求即可复用现有角色门禁。长期 token 不写入项目配置或审计日志。
+
+### 3.29 真实身份会话与 NCR 人工操作面板（2026-09-30）
+
+**前端实现**：
+
+1. `frontend/src/api.ts` 新增浏览器会话级 Bearer 注入：`sessionStorage` 仅保存短期会话，所有 API 请求自动附加 `Authorization: Bearer <token>`；新增本地写入令牌的会话级注入，仍不写入项目配置、URL、Agent 运行参数或日志。
+2. `RealBusinessPage.tsx` 新增可选会话设置区，可保存/清除短期 Bearer 与 `REAL_WRITE_API_TOKEN` 对应的本地写入令牌，并重新解析后端身份；未配置时继续使用服务端集成身份，不伪造企业登录流程。
+3. 质量面板新增真实 NCR 操作链：处置方案由人工选择（`scrap/rework/return_to_supplier/use_as_is`），依次执行“建立处置审批 → 批准 → OpenMES 写回”；关闭依次执行“读取 closure-check → 建立关闭审批 → 批准 → OpenMES 写回”。每一步展示审批号、身份来源、前置校验、失败原因、幂等命中和回读验证状态。
+4. 写回成功后重新读取质量资料包与发运门禁，避免页面继续显示旧状态；任何失败都不会宣称真实系统已完成。
+
+**验证**：
+
+- `npm run build`：通过。
+- `..\\.conda-env\\python.exe -m pytest -q tests`：**108 passed**。
+- `python -m compileall -q app`、`git diff --check`：通过。
+- 9000 实时只读探针：`GET /api/health`、`GET /api/runtime/surface`、`GET /api/real-orders/identity/me` 均 200；身份为 ERPNext `Administrator`。
+- `GET /api/real-orders/quality/package/2` 返回 OpenMES 真实质量记录 `issue_id=1`；`GET /api/real-orders/quality/issues/1/closure-check?work_order_id=2` 返回 200，`status=ok`、`closure_ready=false`（`RESOLVED=true`、`disposition_recorded=false`、纠正措施已验证）。本子任务没有调用 disposition/close 写回接口，没有新增 ERPNext/OpenMES 业务记录。
+
+**边界与下一步**：当前没有企业 OIDC/SSO 登录契约，前端只提供安全的短期 Bearer 注入入口；真实 NCR 仍需业务人员明确选择处置并具备角色与写入令牌后才能执行。下一步继续核对 Wutong Registry 注册契约，或在获得真实业务处置决策后做最小范围 NCR 写入回读验收；订单级质量放行仍保持 `NOT_SUPPORTED`。
+
+### 3.30 Wutong Registry 只读契约适配（2026-09-30）
+
+**实现内容**：
+
+1. 根据仓库内 `acps-sdk-src/registry-server` 与 `acps-cli` 的真实路由确认 Registry 公共契约：`GET /health`、`GET /api/v1/agent/public/recent`；客户端支持根 URL 或 `/api/v1` URL，并透传可选 `X-Wutong-Tenant`。
+2. 新增 `WutongRegistryClient`，严格校验 URL、响应 JSON 和 `items` 列表；HTTP/网络/格式错误转为明确集成错误，不回退本地 ACS 或协调者静态目录。
+3. 新增 `GET /api/runtime/registry` 配置状态与只读声明，以及 `GET /api/real-orders/registry/agents?limit=5` 最近已审批 Agent 查询。没有 `WUTONG_REGISTRY_URL` 时返回 HTTP 503、`registry_not_configured`；没有实现 `/agent/client` 注册/更新/提交写操作。
+
+**验证**：
+
+- `tests/test_wutong.py`：**5 passed**（Discovery 3 + Registry 2），覆盖租户头、路径推导、健康/列表响应和缺失 `items` 不回退。
+- `python -m compileall -q app`、`git diff --check`：通过。
+- 重启 9000 后：`GET /api/health` 200；`GET /api/runtime/registry` 200，返回 `configured=false`、`read_only=true`、`writes_enabled=false`；`GET /api/real-orders/registry/agents` 返回 HTTP 503 `registry_not_configured`。当前 `WUTONG_REGISTRY_URL` 为空，没有外部网络访问或写入。
+
+**边界与下一步**：Registry 账户/OIDC/mTLS 资料和注册审批策略仍未配置；在部署方明确认证契约前，继续保持只读。下一项优先处理真实 NCR 处置的业务输入与最小范围回读验收，或在取得 Registry 认证资料后扩展跨实例 AIP 调用。
+
+### 3.31 页面级渲染检查（2026-09-30）
+
+- 本地前端 `http://127.0.0.1:5173/` 刷新后真实业务页正常读取 9000：显示 ERPNext/OpenMES 真实连接、解析身份 `Administrator（ERPNext）`、客户/物料真实列表，页面不再出现 `Failed to fetch`。
+- 通过页面键盘交互展开“会话设置”，确认 Bearer 会话、本地写入令牌输入框、保存/清除按钮和“仅当前浏览器会话保存”提示均可见；检查过程中没有输入令牌、没有提交表单、没有调用任何写入接口。
+- NCR 操作控件已由 TypeScript 构建验证；真实工单 2 的 quality package 当前有 issue 1，页面进入跟单质量步骤后按该记录渲染处置/关闭门禁，处置下拉默认空值，不自动选择业务决策。
 ```
