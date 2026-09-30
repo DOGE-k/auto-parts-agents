@@ -39,29 +39,35 @@ BATCH_ELAPSED_MINUTES = 150  # 与起止窗口一致：1800 件 / 150 分钟 = 7
 # 检验线：1 个 TEST_ 物料 + 3 条合格检验（IQC 来料 1 条 + IPQC 过程 2 条）。
 SEED_MATERIAL_CODE = "TEST-BD-2401-SEED"
 SEED_MATERIAL_NAME = "TEST_ 补录物料-制动盘毛坯（seed_inspection_eta）"
-INSPECTIONS = [
-    {
-        "lot": "TEST-IQC-20260930-01",
-        "qty": "2000",
-        "started": "2026-09-30 01:00:00",
-        "completed": "2026-09-30 01:25:00",
-        "notes": "TEST_ 补录（seed_inspection_eta.py）：IQC 来料检验合格",
-    },
-    {
-        "lot": "TEST-IPQC-20260930-01",
-        "qty": "500",
-        "started": "2026-09-30 02:00:00",
-        "completed": "2026-09-30 02:10:00",
-        "notes": "TEST_ 补录（seed_inspection_eta.py）：IPQC 首件检验合格",
-    },
-    {
-        "lot": "TEST-IPQC-20260930-02",
-        "qty": "1500",
-        "started": "2026-09-30 03:00:00",
-        "completed": "2026-09-30 03:15:00",
-        "notes": "TEST_ 补录（seed_inspection_eta.py）：IPQC 巡检合格",
-    },
-]
+# lot 前缀对齐工单 9 的批次 lot（TEST_LOT_PAGE_9），使质量包的检验维度
+# 能按"工单批次 lot"关联到该工单（阶段十 10.4）。
+def _inspection_specs() -> list[dict]:
+    return [
+        {
+            "lot": f"{BATCH_LOT}-IQC-20260930-01",
+            "qty": "2000",
+            "started": "2026-09-30 01:00:00",
+            "completed": "2026-09-30 01:25:00",
+            "notes": "TEST_ 补录（seed_inspection_eta.py）：IQC 来料检验合格",
+        },
+        {
+            "lot": f"{BATCH_LOT}-IPQC-20260930-01",
+            "qty": "500",
+            "started": "2026-09-30 02:00:00",
+            "completed": "2026-09-30 02:10:00",
+            "notes": "TEST_ 补录（seed_inspection_eta.py）：IPQC 首件检验合格",
+        },
+        {
+            "lot": f"{BATCH_LOT}-IPQC-20260930-02",
+            "qty": "1500",
+            "started": "2026-09-30 03:00:00",
+            "completed": "2026-09-30 03:15:00",
+            "notes": "TEST_ 补录（seed_inspection_eta.py）：IPQC 巡检合格",
+        },
+    ]
+
+
+INSPECTIONS = _inspection_specs()
 
 
 def psql(sql: str) -> str:
@@ -135,7 +141,7 @@ def report() -> None:
         f"SELECT count(*) FROM materials WHERE code = '{SEED_MATERIAL_CODE}';"
     )
     inspection_rows = scalar(
-        "SELECT count(*) FROM inspections WHERE lot_number LIKE 'TEST-%';"
+        r"SELECT count(*) FROM inspections WHERE lot_number LIKE 'TEST\_%';"
     )
     timings = psql(
         f"SELECT bs.name, bs.passed_qty, bs.started_at, bs.completed_at "

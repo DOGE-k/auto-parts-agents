@@ -810,8 +810,15 @@ async def real_order_track(work_order_id: str) -> dict:
 async def real_order_quality_package(work_order_id: str) -> dict:
     """质量文档 Agent：读取真实质量记录，生成质量资料包和门禁判断。"""
     from app.services.real_order import quality_package
-    result = await quality_package(work_order_id)
-    return result
+    try:
+        return await quality_package(work_order_id)
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "openmes_quality_invalid", "message": str(exc)},
+        ) from exc
 
 
 class RealOrderQualityIssueResolutionRequest(BaseModel):
@@ -1247,6 +1254,19 @@ async def real_order_quality_todo(identity=Depends(require_real_identity)) -> di
         ) from exc
     result["authenticated_identity"] = identity.as_dict()
     return result
+
+
+@app.get("/api/real-orders/quality/workflow-states", tags=["real-orders"])
+async def real_order_quality_workflow_states(identity=Depends(require_real_identity)) -> dict:
+    """按 issue 聚合最近的 NCR 处置/关闭审批（只读，前端刷新后恢复面板进度）。"""
+    from app.services.real_order import get_quality_issue_workflow_states
+
+    return {
+        "states": get_quality_issue_workflow_states(),
+        "authority": "OpenMES",
+        "data_source": "real_approvals",
+        "authenticated_identity": identity.as_dict(),
+    }
 
 
 @app.get("/api/real-orders/quotations", tags=["real-orders"])

@@ -2352,6 +2352,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .real-session-login-row input { flex: 1 1 140px; min-width: 120px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); font-size: 11px; }
 .real-session-hint { margin: 0; color: var(--muted); font-size: 10px; }
 .real-session-error { margin: 0; color: var(--red, #d64545); font-size: 11px; font-weight: 600; }
+.session-expiry-warning { margin-top: 8px; padding: 6px 10px; border: 1px solid #e0a800; border-radius: var(--r-sm); color: #8a6d00; background: rgba(224, 168, 0, 0.08); font-size: 11px; font-weight: 600; }
 
 /* 阶段九：质量待办 */
 .quality-todo-panel .quality-todo-hint { margin: 0; color: var(--muted); font-size: 12px; }

@@ -498,6 +498,33 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
     """跟单 Agent：读取真实 MES 工单数据，计算 ETA 和风险。"""
     mes = get_mes_adapter()
 
+    # 0. 严格探测 MES 可达性：不可达时如实返回 MES_UNREACHABLE，
+    #    绝不把"连不上"误报成"工单不存在"。
+    try:
+        await mes.get_work_orders_strict({"limit": 1})
+    except Exception as exc:
+        return {
+            "work_order_id": work_order_id,
+            "work_order_no": "",
+            "status": "MES_UNREACHABLE",
+            "quantity": "0",
+            "completed_qty": "0",
+            "completion_rate": 0.0,
+            "due_date": "",
+            "eta": None,
+            "eta_status": "DATA_MISSING",
+            "eta_basis": "mes_unreachable",
+            "observed_rate": None,
+            "eta_data_gaps": [{"field": "mes", "detail": f"OpenMES 不可达：{exc}"}],
+            "risks": [{"level": "high", "message": "MES 不可达，无法读取生产数据"}],
+            "progress": [],
+            "quality_issues": [],
+            "line_name": "",
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+            "calculated_at": _utc_now().isoformat(),
+        }
+
     # 1. 读取工单详情和进度
     progress = await mes.get_operation_progress(work_order_id)
     work_orders = await mes.get_work_orders({"limit": 100})
@@ -525,7 +552,7 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
             "eta_status": "DATA_MISSING",
             "eta_basis": "work_order_not_found",
             "observed_rate": None,
-            "eta_data_gaps": [{"field": "work_order", "detail": "工单不存在，无法读取实际生产速率"}],
+            "eta_data_gaps": [{"field": "work_order", "detail": "工单在 MES 中不存在（MES 可达），无法读取实际生产速率"}],
             "risks": [{"level": "high", "message": "工单不存在"}],
             "progress": [],
             "authority": "OpenMES",
@@ -761,9 +788,27 @@ async def quality_package(work_order_id: str) -> dict[str, Any]:
     # 1. 质量问题（真实记录）
     quality_records = await mes.get_quality_records({"work_order_id": work_order_id})
 
-    # 2. 工程文档与检验记录（接口真实存在，数据可能为空）
+    # 2. 工程文档与检验记录（检验按工单批次 lot 关联，避免全局计数失真）
     documents = await mes.get_work_order_documents(work_order_id)
-    inspections = await mes.get_inspections({"limit": 50})
+    inspections_all = await mes.get_inspections({"limit": 50})
+    try:
+        batch_rows = await mes.get_work_order_batches(work_order_id)
+        batch_lots = {str(b.get("lot_number") or "") for b in batch_rows if isinstance(b, dict)}
+        inspections_scope = "work_order_batch_lots"
+    except Exception as exc:
+        logger.warning("读取工单批次失败，检验维度无法按 lot 关联 (wo=%s): %s", work_order_id, exc)
+        batch_lots = set()
+        inspections_scope = "unavailable"
+    if batch_lots:
+        # 检验 lot 与批次 lot 可能精确相等，也可能是批次 lot 的前缀扩展
+        # （如 TEST_LOT_PAGE_9-IQC-01）；两种都算关联。
+        def _lot_related(lot: str) -> bool:
+            return any(lot == bl or lot.startswith(bl + "-") for bl in batch_lots if bl)
+
+        inspections = [i for i in inspections_all if _lot_related(str(i.get("lot_number") or ""))]
+    else:
+        # 批次不可得时不猜关联：如实返回空集，由上层标注缺口
+        inspections = []
 
     # 3. SOP / Control Plan 完整性：基于真实工程文档记录判断
     required_docs = ["SOP", "Control Plan"]
@@ -800,6 +845,8 @@ async def quality_package(work_order_id: str) -> dict[str, Any]:
         "missing_documents": missing_docs,
         "engineering_document_count": len(documents),
         "inspection_count": len(inspections),
+        "inspections_total": len(inspections_all),
+        "inspections_scope": inspections_scope,
         "unsupported_capabilities": [u["capability"] for u in unsupported_capabilities if u["status"] == "NOT_SUPPORTED"],
         "passed": quality_gate_passed,
         "reason": "" if quality_gate_passed else (
@@ -1201,6 +1248,50 @@ async def close_quality_issue_with_approval(
         "authority": "OpenMES",
         "data_source": "openmes_api",
     }
+
+
+def get_quality_issue_workflow_states(*, limit: int = 50) -> dict[str, dict[str, Any]]:
+    """按 issue 聚合最近的处置/关闭审批（只读，供前端刷新后恢复面板进度）。
+
+    每类审批只取该 issue 最新一条；审批载荷里的 work_order_id/disposition
+    一并返回，前端据此恢复表单与按钮状态，避免重复建立审批。
+    """
+    with SessionLocal() as session:
+        rows = (
+            session.query(RealApprovalRow)
+            .filter(
+                RealApprovalRow.reference_type.in_(
+                    ["quality_issue_disposition", "quality_issue_close"]
+                )
+            )
+            .order_by(RealApprovalRow.created_at.desc())
+            .limit(max(1, min(limit, 200)))
+            .all()
+        )
+    states: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entry = states.setdefault(str(row.reference_id), {})
+        key = "disposition" if row.reference_type == "quality_issue_disposition" else "close"
+        if key in entry:
+            continue  # 已是该类型最新一条
+        work_order_id = ""
+        disposition = ""
+        try:
+            payload = json.loads(row.notes or "{}")
+            if isinstance(payload, dict):
+                work_order_id = str(payload.get("work_order_id") or "")
+                disposition = str(payload.get("disposition") or "")
+        except ValueError:
+            pass
+        entry[key] = {
+            "approval_id": row.approval_id,
+            "approved": bool(row.approved),
+            "approved_by": row.approved_by,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "work_order_id": work_order_id,
+            "disposition": disposition,
+        }
+    return states
 
 
 # ========== 质量待办队列（阶段九：跨工单 MRB 待办视角） ==========

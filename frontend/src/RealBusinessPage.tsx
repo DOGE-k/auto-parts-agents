@@ -7,7 +7,9 @@ import {
   approveQuotation as approveQuotationApi,
   createPoFromPlan,
   getQualityTodo,
+  getQualityWorkflowStates,
   getRealIdentity,
+  getSessionIssuedAt,
   getRealSessionToken,
   getRealWriteToken,
   loginRealSession,
@@ -29,6 +31,7 @@ import type {
   ProposalSupplierOption,
   QualityTodoItem,
   RealIdentity,
+  QualityWorkflowStates,
   RealQualityIssue,
   QualityClosureCheck,
 } from "./api";
@@ -329,6 +332,7 @@ export default function RealBusinessPage() {
   const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
   const [qualityTodoError, setQualityTodoError] = useState("");
   const [todoFocusIssueId, setTodoFocusIssueId] = useState("");
+  const [sessionExpiringSoon, setSessionExpiringSoon] = useState(false);
   const [ncrWorkflows, setNcrWorkflows] = useState<Record<string, NcrWorkflow>>({});
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -666,6 +670,44 @@ export default function RealBusinessPage() {
     }
   }, [plan, identity]);
 
+
+  // 阶段十：刷新后按后端审批记录恢复 NCR 在途工作流（不覆盖进行中的状态）
+  const restoreNcrWorkflowStates = useCallback(async (qualityData: QualityInfo | null) => {
+    if (!qualityData?.quality_records?.length) return;
+    try {
+      const result: QualityWorkflowStates = await getQualityWorkflowStates();
+      setNcrWorkflows((prev) => {
+        const next = { ...prev };
+        for (const record of qualityData.quality_records) {
+          const issueId = String(record.record_id ?? "");
+          const state = result.states?.[issueId];
+          if (!issueId || !state) continue;
+          const existing = next[issueId] ?? {};
+          const restored: NcrWorkflow = { ...existing, form: existing.form ?? { disposition: "", non_conforming_qty: "", root_cause: "", containment_action: "", nc_source: "" } };
+          if (state.disposition && !restored.dispositionApprovalId) {
+            restored.dispositionApprovalId = state.disposition.approval_id;
+            restored.dispositionApproved = state.disposition.approved;
+            restored.form = {
+              disposition: state.disposition.disposition || restored.form.disposition,
+              non_conforming_qty: restored.form.non_conforming_qty,
+              root_cause: restored.form.root_cause,
+              containment_action: restored.form.containment_action,
+              nc_source: restored.form.nc_source,
+            };
+          }
+          if (state.close && !restored.closeApprovalId) {
+            restored.closeApprovalId = state.close.approval_id;
+            restored.closeApproved = state.close.approved;
+          }
+          if (restored.dispositionApprovalId || restored.closeApprovalId) next[issueId] = restored;
+        }
+        return next;
+      });
+    } catch {
+      // 恢复失败不阻塞面板；数据层幂等保护仍然生效
+    }
+  }, []);
+
   // 步骤7: 跟单 + 质量 + 发运门禁
   const loadTracking = useCallback(async () => {
     if (!workOrderId) return;
@@ -688,16 +730,33 @@ export default function RealBusinessPage() {
       setQuality(qual);
       setShipGate(ship);
       setStep(8);
+      void restoreNcrWorkflowStates(qual);
       notify("跟单与质量数据已加载");
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载跟单数据失败");
     } finally {
       setLoading(false);
     }
-  }, [workOrderId, quotation, workOrders]);
+  }, [workOrderId, quotation, workOrders, restoreNcrWorkflowStates]);
 
   // ========== 阶段九：跨工单质量待办 ==========
   const hasOpenmesSession = identity?.provider === "openmes";
+
+  // 阶段十：OpenMES 会话 15 分钟 TTL，过期前 90 秒提醒重新登录，避免演示中断
+  useEffect(() => {
+    if (!hasOpenmesSession) {
+      setSessionExpiringSoon(false);
+      return;
+    }
+    const check = () => {
+      const issued = getSessionIssuedAt();
+      // 无签发时间的历史会话按保守口径立即提醒（重新登录总是安全的）
+      setSessionExpiringSoon(issued === 0 || Date.now() - issued > 13.5 * 60 * 1000);
+    };
+    check();
+    const timer = window.setInterval(check, 20000);
+    return () => window.clearInterval(timer);
+  }, [hasOpenmesSession]);
 
   const loadQualityTodo = useCallback(async () => {
     if (identity?.provider !== "openmes") return;
@@ -751,6 +810,7 @@ export default function RealBusinessPage() {
       setWorkOrderId(String(item.work_order_id));
       setStep(8);
       setTodoFocusIssueId(String(item.issue_id));
+      void restoreNcrWorkflowStates(qual);
       notify(`已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "打开质量处置面板失败");
@@ -769,6 +829,7 @@ export default function RealBusinessPage() {
       return () => window.clearTimeout(timer);
     }
   }, [todoFocusIssueId, quality, step]);
+
 
   const refreshQualityAndGate = useCallback(async () => {
     if (!workOrderId) return;
@@ -975,6 +1036,11 @@ export default function RealBusinessPage() {
                 : "正在从 ERPNext/OpenMES 解析当前登录用户…"}
             </span>
           </div>
+          {hasOpenmesSession && sessionExpiringSoon && (
+            <div className="session-expiry-warning">
+              OpenMES 会话即将过期（15 分钟 TTL）——请在"会话设置"中重新登录，以继续审批与处置操作。
+            </div>
+          )}
           <div className="real-session-toolbar">
             <button className="button ghost session-toggle" onClick={() => setSessionSettingsOpen((open) => !open)}>
               {sessionSettingsOpen ? "收起会话设置 ▲" : "会话设置 ▼"}

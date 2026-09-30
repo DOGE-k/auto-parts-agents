@@ -1,5 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9001/api";
 const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
+const REAL_SESSION_ISSUED_KEY = "real_business_session_issued_at";
 const REAL_WRITE_TOKEN_KEY = "real_business_write_token";
 
 /**
@@ -14,8 +15,19 @@ export function getRealSessionToken(): string {
 export function setRealSessionToken(token: string): void {
   if (typeof window === "undefined") return;
   const value = token.trim();
-  if (value) window.sessionStorage.setItem(REAL_SESSION_TOKEN_KEY, value);
-  else window.sessionStorage.removeItem(REAL_SESSION_TOKEN_KEY);
+  if (value) {
+    window.sessionStorage.setItem(REAL_SESSION_TOKEN_KEY, value);
+    // OpenMES Sanctum token 默认 15 分钟 TTL；记录签发时间供前端过期提醒
+    window.sessionStorage.setItem(REAL_SESSION_ISSUED_KEY, String(Date.now()));
+  } else {
+    window.sessionStorage.removeItem(REAL_SESSION_TOKEN_KEY);
+    window.sessionStorage.removeItem(REAL_SESSION_ISSUED_KEY);
+  }
+}
+
+export function getSessionIssuedAt(): number {
+  if (typeof window === "undefined") return 0;
+  return Number(window.sessionStorage.getItem(REAL_SESSION_ISSUED_KEY) || 0);
 }
 
 export function getRealWriteToken(): string {
@@ -435,6 +447,25 @@ export type QualityTodoList = {
 
 export async function getQualityTodo(): Promise<QualityTodoList> {
   return api<QualityTodoList>("/real-orders/quality/todo");
+}
+
+export type QualityWorkflowState = {
+  approval_id: string;
+  approved: boolean;
+  approved_by: string;
+  created_at?: string | null;
+  work_order_id: string;
+  disposition: string;
+};
+
+export type QualityWorkflowStates = {
+  states: Record<string, { disposition?: QualityWorkflowState; close?: QualityWorkflowState }>;
+  authority: string;
+  data_source: string;
+};
+
+export async function getQualityWorkflowStates(): Promise<QualityWorkflowStates> {
+  return api<QualityWorkflowStates>("/real-orders/quality/workflow-states");
 }
 
 export type RealLoginResult = {

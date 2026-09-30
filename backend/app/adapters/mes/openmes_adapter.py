@@ -375,6 +375,7 @@ class OpenMESAdapter:
         return [
             {
                 "inspection_id": str(r.get("id", "")),
+                "lot_number": str(r.get("lot_number", "")),
                 "inspection_no": r.get("inspection_no", ""),
                 "status": r.get("status", ""),
                 "disposition": r.get("disposition") or "",

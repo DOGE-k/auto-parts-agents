@@ -133,6 +133,56 @@ class QualityLifecycleServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["read_back_verified"])
         self.assertEqual(result["status"], "DISPOSITION_RECORDED")
 
+    async def test_quality_package_scopes_inspections_to_work_order_batch_lots(self):
+        """检验维度按工单批次 lot 关联（前缀扩展也算），不做全局计数。"""
+        from app.services import real_order as ro
+
+        captured = {}
+
+        class FakeMES:
+            async def get_quality_records(self, scope):
+                return []
+
+            async def get_work_order_documents(self, work_order_id):
+                return [{"doc_type": "SOP"}]
+
+            async def get_inspections(self, scope):
+                return [
+                    {"inspection_id": "1", "lot_number": "TEST_LOT_PAGE_9-IQC-01"},
+                    {"inspection_id": "2", "lot_number": "TEST_LOT_PAGE_9"},
+                    {"inspection_id": "3", "lot_number": "OTHER-LOT"},
+                ]
+
+            async def get_work_order_batches(self, work_order_id):
+                captured["wo"] = work_order_id
+                return [{"batch_id": "3", "lot_number": "TEST_LOT_PAGE_9", "steps": []}]
+
+        with patch.object(ro, "get_mes_adapter", return_value=FakeMES()):
+            result = await ro.quality_package("9")
+        lots = [i["lot_number"] for i in result["inspections"]]
+        self.assertEqual(captured["wo"], "9")
+        self.assertEqual(sorted(lots), ["TEST_LOT_PAGE_9", "TEST_LOT_PAGE_9-IQC-01"])
+        self.assertEqual(result["gate_details"]["inspections_total"], 3)
+        self.assertEqual(result["gate_details"]["inspection_count"], 2)
+        self.assertEqual(result["gate_details"]["inspections_scope"], "work_order_batch_lots")
+
+    async def test_workflow_states_restore_disposition_progress(self):
+        """刷新恢复：按 issue 返回最近的处置/关闭审批与载荷。"""
+        requested = real_order.request_quality_issue_disposition(
+            "42", "2", "requester", disposition="rework",
+            non_conforming_qty=3, root_cause="根因", containment_action="遏制",
+        )
+        approval_id = requested["approval"]["approval_id"]
+        real_order.approve_quality_issue_disposition(approval_id, "quality-manager")
+
+        states = real_order.get_quality_issue_workflow_states()
+        entry = states["42"]
+        self.assertEqual(entry["disposition"]["approval_id"], approval_id)
+        self.assertTrue(entry["disposition"]["approved"])
+        self.assertEqual(entry["disposition"]["work_order_id"], "2")
+        self.assertEqual(entry["disposition"]["disposition"], "rework")
+        self.assertNotIn("close", entry)
+
     async def test_closure_check_requires_verified_actions(self):
         issue = {
             "record_id": "7", "status": "RESOLVED", "disposition": "rework",
