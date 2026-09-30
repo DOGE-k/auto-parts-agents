@@ -30,6 +30,9 @@ class OpenMESClient:
         self._erp_api_key = erp_api_key.strip() if erp_api_key else ""
         self._http = JsonHttpClient(
             base_url,
+            # Laravel 只在 Accept: application/json 时把认证/校验失败渲染成
+            # JSON（401/422）；否则 302 回登录页 HTML，错误信息会失真。
+            headers={"Accept": "application/json"},
             timeout_seconds=timeout_seconds,
             client=client,
         )
@@ -50,6 +53,28 @@ class OpenMESClient:
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 用户接口返回格式不符合其 API 文档")
+        return result
+
+    async def list_issues(self, *, status: str, page: int = 1) -> dict[str, Any]:
+        """跨工单质量问题列表（Andon issues，`GET /api/v1/issues`）。
+
+        契约（源码 routes/api.php + Api/V1/IssueController::index 实测确认）：
+        status 取 OPEN/ACKNOWLEDGED/RESOLVED/CLOSED，分页固定 20/页，
+        响应为 ``{"data": [...], "meta": {current_page, per_page, total, last_page}}``。
+        """
+        self._require_user_token()
+        if status not in ("OPEN", "ACKNOWLEDGED", "RESOLVED", "CLOSED"):
+            raise ValueError(f"OpenMES issue status 未在 API 文档确认：{status}")
+        if not 1 <= page <= 100:
+            raise ValueError("OpenMES issues page 必须在 1-100 之间")
+        result = await self._http.request_json(
+            "GET",
+            "api/v1/issues",
+            params={"status": status, "page": page},
+            headers={"Authorization": f"Bearer {self._user_token}"},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+            raise ValueError("OpenMES 质量问题列表返回格式不符合其 API 文档")
         return result
 
     async def list_work_orders(self, filters: dict[str, str | int] | None = None) -> dict[str, Any]:

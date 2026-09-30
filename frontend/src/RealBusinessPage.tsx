@@ -6,6 +6,7 @@ import {
   approveProcurementPlan,
   approveQuotation as approveQuotationApi,
   createPoFromPlan,
+  getQualityTodo,
   getRealIdentity,
   getRealSessionToken,
   getRealWriteToken,
@@ -26,6 +27,7 @@ import type {
   AgentRunEvidenceItem,
   AssistantAnswer,
   ProposalSupplierOption,
+  QualityTodoItem,
   RealIdentity,
   RealQualityIssue,
   QualityClosureCheck,
@@ -322,6 +324,11 @@ export default function RealBusinessPage() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
+  // 阶段九：跨工单质量待办（仅 OpenMES 登录会话可见）
+  const [qualityTodo, setQualityTodo] = useState<QualityTodoItem[] | null>(null);
+  const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
+  const [qualityTodoError, setQualityTodoError] = useState("");
+  const [todoFocusIssueId, setTodoFocusIssueId] = useState("");
   const [ncrWorkflows, setNcrWorkflows] = useState<Record<string, NcrWorkflow>>({});
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -688,6 +695,80 @@ export default function RealBusinessPage() {
       setLoading(false);
     }
   }, [workOrderId, quotation, workOrders]);
+
+  // ========== 阶段九：跨工单质量待办 ==========
+  const hasOpenmesSession = identity?.provider === "openmes";
+
+  const loadQualityTodo = useCallback(async () => {
+    if (identity?.provider !== "openmes") return;
+    setQualityTodoLoading(true);
+    setQualityTodoError("");
+    try {
+      const result = await getQualityTodo();
+      setQualityTodo(result.items ?? []);
+    } catch (e) {
+      setQualityTodoError(e instanceof Error ? e.message : "质量待办加载失败");
+    } finally {
+      setQualityTodoLoading(false);
+    }
+  }, [identity?.provider]);
+
+  // 登录会话建立后自动加载一次质量待办
+  useEffect(() => {
+    if (hasOpenmesSession) void loadQualityTodo();
+  }, [hasOpenmesSession, loadQualityTodo]);
+
+  // "去处置"：切到该工单的跟单质量视图并展开既有 NCR 操作面板（处置流程零改动）
+  const goToQualityDispose = useCallback(async (item: QualityTodoItem) => {
+    setLoading(true);
+    setError("");
+    try {
+      // 跨工单跳转不猜报价审批状态：先反查工单关联的 ERP 订单与已持久化报价
+      let quotationApproved = false;
+      try {
+        const orders = await api<WorkOrder[]>("/mes/work-orders?limit=100");
+        setWorkOrders(orders);
+        const linkedOrder = orders
+          .find((wo) => String(wo.work_order_id) === String(item.work_order_id))
+          ?.customer_order_no?.trim();
+        if (linkedOrder) {
+          const quotations = await api<Quotation[]>("/real-orders/quotations");
+          quotationApproved = quotations.some(
+            (q) => q.erp_draft_id?.trim() === linkedOrder && q.status === "APPROVED",
+          );
+        }
+      } catch {
+        // 反查失败时发运门禁按"未审批"口径显示；NCR 处置面板不受影响
+      }
+      const [track, qual, ship] = await Promise.all([
+        api<TrackingInfo>(`/real-orders/mes/track/${item.work_order_id}`),
+        api<QualityInfo>(`/real-orders/quality/package/${item.work_order_id}`),
+        api<ShipGateInfo>(`/real-orders/ship-gate/${item.work_order_id}?quotation_approved=${quotationApproved}`),
+      ]);
+      setTracking(track);
+      setQuality(qual);
+      setShipGate(ship);
+      setWorkOrderId(String(item.work_order_id));
+      setStep(8);
+      setTodoFocusIssueId(String(item.issue_id));
+      notify(`已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "打开质量处置面板失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 跳转后滚动并高亮目标 NCR 卡片
+  useEffect(() => {
+    if (!todoFocusIssueId) return;
+    const el = document.getElementById(`ncr-issue-${todoFocusIssueId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const timer = window.setTimeout(() => setTodoFocusIssueId(""), 5000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [todoFocusIssueId, quality, step]);
 
   const refreshQualityAndGate = useCallback(async () => {
     if (!workOrderId) return;
@@ -1216,6 +1297,69 @@ export default function RealBusinessPage() {
             </div>
             <p className="field-hint">数据来源：{assistantAnswer.authority}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
           </div>
+        )}
+      </section>
+
+      {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见） */}
+      <section className="panel quality-todo-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>质量待办</h2>
+            <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"进入该工单既有的 NCR 审批处置面板。</p>
+          </div>
+          {hasOpenmesSession && (
+            <button className="button ghost" onClick={() => void loadQualityTodo()} disabled={qualityTodoLoading}>
+              {qualityTodoLoading ? "加载中…" : "↻ 刷新待办"}
+            </button>
+          )}
+        </div>
+        {!hasOpenmesSession && (
+          <p className="quality-todo-hint">
+            登录后查看质量待办——请展开上方"会话设置"，用 OpenMES 账号建立短期会话（仅当前浏览器会话生效）。
+          </p>
+        )}
+        {hasOpenmesSession && qualityTodoError && (
+          <div className="quality-todo-error">
+            <strong>加载失败</strong> {qualityTodoError}
+            <button className="button ghost" onClick={() => void loadQualityTodo()}>重试</button>
+          </div>
+        )}
+        {hasOpenmesSession && !qualityTodoError && qualityTodo && qualityTodo.length === 0 && (
+          <p className="quality-todo-hint">当前没有未关闭质量问题。</p>
+        )}
+        {hasOpenmesSession && qualityTodo && qualityTodo.length > 0 && (
+          <table className="quality-todo-table">
+            <thead>
+              <tr>
+                <th>工单号</th>
+                <th>标题</th>
+                <th>严重度</th>
+                <th>状态</th>
+                <th>处置</th>
+                <th>已报告</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {qualityTodo.map((item) => (
+                <tr key={item.issue_id}>
+                  <td>{item.work_order_no || `#${item.work_order_id}`}</td>
+                  <td>{item.title}</td>
+                  <td>{item.severity || "—"}</td>
+                  <td>{item.status}</td>
+                  <td>{item.disposition || "未处置"}</td>
+                  <td className={typeof item.reported_days === "number" && item.reported_days > 3 ? "todo-overdue" : ""}>
+                    {typeof item.reported_days === "number" ? `${item.reported_days} 天` : "—"}
+                  </td>
+                  <td>
+                    <button className="button ghost" onClick={() => void goToQualityDispose(item)} disabled={loading}>
+                      去处置 →
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </section>
 
@@ -1931,7 +2075,7 @@ export default function RealBusinessPage() {
                     const isClosed = String(issue.status ?? "").toUpperCase() === "CLOSED";
                     const dispositionRecorded = ["scrap", "rework", "return_to_supplier", "use_as_is"].includes(String(issue.disposition ?? "").toLowerCase());
                     return (
-                      <div key={issueId} className="ncr-workflow-card">
+                      <div key={issueId} id={`ncr-issue-${issueId}`} className={`ncr-workflow-card ${todoFocusIssueId === issueId ? "ncr-issue-focus" : ""}`}>
                         <div className="ncr-workflow-title">
                           <div>
                             <strong>{issue.title || issue.record_type || `质量问题 ${issueId}`}</strong>

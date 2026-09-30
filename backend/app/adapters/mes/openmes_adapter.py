@@ -279,6 +279,56 @@ class OpenMESAdapter:
                     existing_ids.add(issue_id)
         return records
 
+    async def list_open_issues(
+        self,
+        *,
+        statuses: tuple[str, ...] = ("OPEN", "ACKNOWLEDGED", "RESOLVED"),
+    ) -> list[dict[str, Any]]:
+        """跨工单未关闭质量问题队列（MRB 待办视角，只读）。
+
+        三态分别拉取（CLOSED 不进待办），翻页跟随 ``meta.last_page``（封顶
+        10 页防失控）。任何一态读取失败直接抛出——绝不把失败伪装成空待办。
+        字段映射以 2026-09-30 实测 payload 为准：``work_order.order_no``、
+        ``issue_type.severity``（severity 在类型上，不在 issue 上）、
+        ``assigned_to`` 为用户对象或 null。
+        """
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for status in statuses:
+            page = 1
+            while True:
+                result = await self._client.list_issues(status=status, page=page)
+                meta = result.get("meta") or {}
+                for raw in result.get("data", []):
+                    issue_id = str(raw.get("id", ""))
+                    if not issue_id or issue_id in seen:
+                        continue
+                    seen.add(issue_id)
+                    work_order = raw.get("work_order") or {}
+                    issue_type = raw.get("issue_type") or {}
+                    assigned = raw.get("assigned_to") or {}
+                    items.append({
+                        "issue_id": issue_id,
+                        "work_order_id": str(raw.get("work_order_id", "")),
+                        "work_order_no": str(work_order.get("order_no", "")),
+                        "title": str(raw.get("title", "")),
+                        "severity": str(issue_type.get("severity", "")),
+                        "status": str(raw.get("status", "")),
+                        "disposition": str(raw.get("disposition") or ""),
+                        "reported_at": str(raw.get("reported_at", "")),
+                        "assigned_to": str(
+                            assigned.get("username") or assigned.get("name") or ""
+                        ),
+                        "authority": self.authority,
+                        "data_source": "openmes_issues",
+                    })
+                last_page = int(meta.get("last_page") or 1)
+                if page >= min(last_page, 10):
+                    break
+                page += 1
+        items.sort(key=lambda row: row.get("reported_at") or "", reverse=True)
+        return items
+
     async def get_work_order_documents(self, work_order_id: str) -> list[dict[str, Any]]:
         """获取工单关联工程文档（SOP/Control Plan 类载体的真实记录）。
 

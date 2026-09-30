@@ -1090,3 +1090,28 @@ ERP 物料需求
 - 用户批准按演示故事线补录 `TEST_` 标记的检验记录与带实际耗时的报工数据（解锁质量检验维度展示与速率 ETA）；
 - 执行方式由用户决定为**外部执行**，本项目不代跑；完整执行提示词（四条故事线设计、幂等要求、验收标准、文档收尾要求）已固化到 `docs/prompt_seed_test_data.md`；
 - 本节为占位记录：外部执行完成后，由执行者在下方追加实际写入的表/接口、验收返回、测试结果与截图；在此之前检验维度仍如实显示"无数据"、ETA 保持 `DATA_MISSING`。
+
+### 3.33 阶段九：质量待办面板（2026-09-30）
+
+**实现内容**：
+
+1. OpenMES 客户端新增 `list_issues(status, page)`（`GET /api/v1/issues`，契约以 vendored 源码 `routes/api.php:663` + `Api/V1/IssueController::index` 与 2026-09-30 实测 payload 为准：status 过滤、固定 20/页分页、`work_order.order_no`/`issue_type.severity`/`assigned_to` 用户对象或 null）；同时给 OpenMES 客户端全部请求补上 `Accept: application/json`（Laravel 认证/校验失败仅在带该头时返回 401/422 JSON，否则 302 HTML 使错误信息失真——与 §3.32 登录路径同根因，本次在只读路径一并修复）。
+2. 适配器新增 `list_open_issues()`：OPEN/ACKNOWLEDGED/RESOLVED 三态聚合（CLOSED 不进待办），跟随 `meta.last_page` 翻页（封顶 10 页），按 reported_at 倒序、跨态去重；任一态读取失败直接抛出，不回退空列表。
+3. `real_order.quality_todo_list()`：聚合 + 每条附 `reported_days`（按 reported_at 与当前时间差；缺失/无法解析如实返回 null）。
+4. 新端点 `GET /api/real-orders/quality/todo`（只读，走 `require_real_identity`；集成错误按 `_integration_status_error` 映射，payload 无效 502 `openmes_issues_invalid`）。
+5. 前端"质量待办"面板（智能协同问答下方）：工单号/标题/严重度/状态/处置/已报告天数（>3 天红色）/去处置；仅 OpenMES 登录会话（identity.provider=openmes）可见数据，否则显示"登录后查看质量待办"；空列表如实显示"当前没有未关闭质量问题"；失败显示原因 + 重试。
+6. "去处置"：先反查工单关联 ERP 订单与持久化报价拿真实报价审批状态（不猜），再加载该工单 track/quality/ship-gate 并跳到第 8 步，滚动高亮该 issue 的既有 NCR 卡片（`ncr-issue-focus`）；NCR 审批处置流程零改动。
+
+**验证**：
+
+- `pytest tests -q`：**125 passed**（新增 test_quality_todo.py 8 例：三态聚合与字段映射、分页跟随、失败传播、reported_days 计算、端点接线与错误映射）；`compileall`、`npm run build`、`git diff --check` 通过。
+- 真实接口验收：`GET /api/real-orders/quality/todo` 返回 2 条 OpenMES 真实 issue——issue 2（WO-2026-002，铸铁毛坯库存不足，CRITICAL，OPEN）与 issue 1（WO-2026-001，制动盘外径尺寸超差，MEDIUM，RESOLVED，disposition=pending，按验收要求出现在待办中）；`authority=OpenMES`、`data_source=openmes_issues`、`reported_days=2`。
+- 页面验收（登录会话 admin/OpenMES）：待办表格两条真实记录渲染正常（截图 `gui-test-screenshots/2026-09-30_phase9_quality_todo_panel.png`）；点击"去处置"跳到第 8 步并高亮 issue 1 的 NCR 卡片，处置表单与"① 建立处置审批/读取关闭前置条件"按钮原样（截图 `2026-09-30_phase9_todo_go_dispose_ncr_focused.png`）。
+- 无会话/过期会话不泄露数据：过期令牌下 identity 解析 503、面板仅显示登录提示，无数据渲染。
+- 本阶段无任何 ERPNext/OpenMES 写入。
+
+**遗留与下一步**：
+
+- OpenMES 登录会话 15 分钟 TTL 过期后需重新登录（refresh 刻意不代理，见 §3.32）；过期时面板表现符合"如实报错"要求。
+- 质量待办的"去处置"仍不代选处置方案；真实 disposition 写入验收仍等待业务决策（执行计划第 2 项）。
+- issues 列表分页封顶 10 页（200 条/状态），超出时不再向后翻页（当前部署 2 条，余量充足）。

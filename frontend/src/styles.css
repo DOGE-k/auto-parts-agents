@@ -2352,6 +2352,16 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .real-session-login-row input { flex: 1 1 140px; min-width: 120px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); font-size: 11px; }
 .real-session-hint { margin: 0; color: var(--muted); font-size: 10px; }
 .real-session-error { margin: 0; color: var(--red, #d64545); font-size: 11px; font-weight: 600; }
+
+/* 阶段九：质量待办 */
+.quality-todo-panel .quality-todo-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.quality-todo-error { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--red, #d64545); border-radius: var(--r-sm); color: var(--red, #d64545); font-size: 12px; font-weight: 600; }
+.quality-todo-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.quality-todo-table th, .quality-todo-table td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.quality-todo-table th { color: var(--muted); font-weight: 700; font-size: 11px; white-space: nowrap; }
+.quality-todo-table .todo-overdue { color: var(--red, #d64545); font-weight: 700; }
+.quality-todo-table .button { font-size: 11px; padding: 5px 8px; white-space: nowrap; }
+.ncr-workflow-card.ncr-issue-focus { outline: 2px solid var(--red, #d64545); outline-offset: 2px; }
 .ncr-workflows { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .ncr-workflow-heading { display: flex; flex-direction: column; gap: 3px; }
 .ncr-workflow-heading strong { color: var(--ink-1); font-size: 13px; }

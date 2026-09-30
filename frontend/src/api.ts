@@ -411,6 +411,32 @@ export async function getRealIdentity(): Promise<RealIdentity> {
   return api<RealIdentity>("/real-orders/identity/me");
 }
 
+export type QualityTodoItem = {
+  issue_id: string;
+  work_order_id: string;
+  work_order_no: string;
+  title: string;
+  severity: string;
+  status: string;
+  disposition: string;
+  reported_at: string;
+  assigned_to: string;
+  reported_days?: number | null;
+  authority?: string;
+  data_source?: string;
+};
+
+export type QualityTodoList = {
+  items: QualityTodoItem[];
+  authority: string;
+  data_source: string;
+  authenticated_identity?: RealIdentity;
+};
+
+export async function getQualityTodo(): Promise<QualityTodoList> {
+  return api<QualityTodoList>("/real-orders/quality/todo");
+}
+
 export type RealLoginResult = {
   provider: string;
   token_type: string;

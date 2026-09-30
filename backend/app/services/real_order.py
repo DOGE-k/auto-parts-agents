@@ -1192,6 +1192,43 @@ async def close_quality_issue_with_approval(
     }
 
 
+# ========== 质量待办队列（阶段九：跨工单 MRB 待办视角） ==========
+
+_TODO_ISSUE_STATUSES = ("OPEN", "ACKNOWLEDGED", "RESOLVED")
+
+
+def _reported_days_since(reported_at: str, now: datetime) -> int | None:
+    """按 reported_at 计算已报告天数；缺失或无法解析时如实返回 None。"""
+    value = (reported_at or "").strip()
+    if not value:
+        return None
+    try:
+        reported = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if reported.tzinfo is None:
+        reported = reported.replace(tzinfo=timezone.utc)
+    return max(0, int((now - reported).total_seconds() // 86400))
+
+
+async def quality_todo_list() -> dict[str, Any]:
+    """跨工单未关闭质量问题队列（只读，真实 OpenMES）。
+
+    OPEN/ACKNOWLEDGED/RESOLVED 三态聚合（CLOSED 不进待办）。任何一态
+    读取失败直接抛出，不回退空列表冒充"没有待办"。
+    """
+    mes = get_mes_adapter()
+    items = await mes.list_open_issues(statuses=_TODO_ISSUE_STATUSES)
+    now = datetime.now(timezone.utc)
+    for item in items:
+        item["reported_days"] = _reported_days_since(str(item.get("reported_at", "")), now)
+    return {
+        "items": items,
+        "authority": "OpenMES",
+        "data_source": "openmes_issues",
+    }
+
+
 # ========== 发运门禁 ==========
 
 @_agent_run("shipping", "gate_check")

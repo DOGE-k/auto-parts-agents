@@ -1227,6 +1227,28 @@ async def real_order_auth_login(body: RealOrderLoginRequest) -> dict:
         raise HTTPException(status_code=422, detail={"code": "invalid_login_input", "message": str(exc)}) from exc
 
 
+@app.get("/api/real-orders/quality/todo", tags=["real-orders"])
+async def real_order_quality_todo(identity=Depends(require_real_identity)) -> dict:
+    """跨工单未关闭质量问题队列（阶段九，只读，MRB 待办视角）。
+
+    身份解析失败（如会话令牌无效）先于数据返回；数据读取失败按集成
+    错误映射，不回退空列表冒充"没有待办"。
+    """
+    from app.services.real_order import quality_todo_list
+
+    try:
+        result = await quality_todo_list()
+    except IntegrationError as exc:
+        raise _integration_status_error(exc) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "openmes_issues_invalid", "message": str(exc)},
+        ) from exc
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
 @app.get("/api/real-orders/quotations", tags=["real-orders"])
 async def real_order_list_quotations() -> list[dict]:
     """列出所有报价分析记录。"""

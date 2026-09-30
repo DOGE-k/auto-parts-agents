@@ -299,13 +299,13 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 1 | OpenMES 客户端/适配器新增 `list_open_issues(status?)`：调用 `GET /api/v1/issues`（建议一次取 `OPEN,ACKNOWLEDGED,RESOLVED` 三态，CLOSED 不进待办）；字段映射为统一 issue 结构（issue_id、work_order_id、work_order_no、title、severity、status、disposition、reported_at、assigned_to）；读取失败如实报错，不回退空列表冒充"没有待办" | ⬜ |
-| 2 | `real_order.py` 新增 `quality_todo_list()` 聚合函数：列表 + 每条附 `closure_ready` 捷径信息（复用 closure-check 逻辑可选，避免 N+1 可先只给状态）+ 数据缺口如实标注 | ⬜ |
-| 3 | 新端点 `GET /api/real-orders/quality/todo`：只读，走 `require_real_identity`，返回 `{items, authority, data_source}` | ⬜ |
-| 4 | 前端"质量待办"面板：真实业务页新增区块（或侧栏入口），表格列：工单号、问题标题、严重度、状态、已报告天数（超 3 天标红）、操作按钮"去处置"→ 跳转/展开既有 NCR 操作面板并预选该 issue；仅登录用户可见该入口（无会话时显示"登录后查看质量待办"） | ⬜ |
-| 5 | 测试：适配器假数据测试（三态过滤、失败传播）、聚合函数测试、端点接线测试；全量回归不下降 | ⬜ |
-| 6 | 真实验收：`GET /api/real-orders/quality/todo` 返回 OpenMES 真实 issue（当前已知 issue 1 为 RESOLVED+disposition=pending，必须出现在待办里）；页面截图存证 `gui-test-screenshots/` | ⬜ |
-| 7 | 文档：`current_status_and_fix_plan.md` 追加验收记录（接口、状态码、authority、是否写入、回读）+ 本表勾稽 | ⬜ |
+| 1 | OpenMES 客户端/适配器新增 `list_open_issues(status?)`：调用 `GET /api/v1/issues`（建议一次取 `OPEN,ACKNOWLEDGED,RESOLVED` 三态，CLOSED 不进待办）；字段映射为统一 issue 结构（issue_id、work_order_id、work_order_no、title、severity、status、disposition、reported_at、assigned_to）；读取失败如实报错，不回退空列表冒充"没有待办" | ✅ 完成（契约按 2026-09-30 实测 payload 映射；附带修复 OpenMES 客户端 Accept 头） |
+| 2 | `real_order.py` 新增 `quality_todo_list()` 聚合函数：列表 + 每条附 `closure_ready` 捷径信息（复用 closure-check 逻辑可选，避免 N+1 可先只给状态）+ 数据缺口如实标注 | ✅ 完成（先只给状态与 disposition，reported_days 按天计算；避免 N+1） |
+| 3 | 新端点 `GET /api/real-orders/quality/todo`：只读，走 `require_real_identity`，返回 `{items, authority, data_source}` | ✅ 完成（含 authenticated_identity 审计字段） |
+| 4 | 前端"质量待办"面板：真实业务页新增区块（或侧栏入口），表格列：工单号、问题标题、严重度、状态、已报告天数（超 3 天标红）、操作按钮"去处置"→ 跳转/展开既有 NCR 操作面板并预选该 issue；仅登录用户可见该入口（无会话时显示"登录后查看质量待办"） | ✅ 完成（面板位于智能协同问答下方；去处置按真实报价状态加载工单视图并高亮 NCR 卡片） |
+| 5 | 测试：适配器假数据测试（三态过滤、失败传播）、聚合函数测试、端点接线测试；全量回归不下降 | ✅ 完成（test_quality_todo.py 8 例；全量 125 passed，117 基线未下降） |
+| 6 | 真实验收：`GET /api/real-orders/quality/todo` 返回 OpenMES 真实 issue（当前已知 issue 1 为 RESOLVED+disposition=pending，必须出现在待办里）；页面截图存证 `gui-test-screenshots/` | ✅ 完成（真实返回 issue 1 + issue 2 两条；截图 2026-09-30_phase9_quality_todo_panel.png 与 2026-09-30_phase9_todo_go_dispose_ncr_focused.png） |
+| 7 | 文档：`current_status_and_fix_plan.md` 追加验收记录（接口、状态码、authority、是否写入、回读）+ 本表勾稽 | ✅ 完成（§3.33） |
 
 ### 验收标准
 
@@ -342,6 +342,6 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
 | 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
 | 5 | 检验/报工数据补录 | ✅ 用户已批准（2026-09-30）；执行提示词已固化到 [prompt_seed_test_data.md](prompt_seed_test_data.md)，交由外部执行；完成后在 current_status_and_fix_plan.md §3.33 记录验收结果 |
-| 5 | 质量待办面板（阶段九） | ⬜ 已立项：跨工单未关闭质量问题队列 + 去处置入口，契约与任务清单见上方阶段九章节 |
+| 5 | 质量待办面板（阶段九） | ✅ 已完成（见 current_status_and_fix_plan.md §3.33）：真实三态待办 + 去处置直达既有 NCR 面板，125 passed；真实 disposition 写入验收仍等业务决策 |
 
 每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。
