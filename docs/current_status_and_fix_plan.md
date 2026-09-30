@@ -1488,3 +1488,36 @@ ERP 物料需求
 **修改文件**：`backend/app/adapters/mes/openmes.py`（batch×3/issue-types/create_issue/get_issue）、`backend/app/adapters/mes/openmes_adapter.py`（透传 + list_product_types）、`backend/app/services/real_order.py`（RPT/QISS 三步 + 下达 product_type 映射）、`backend/app/main.py`（7 个端点：报工 3 + 登记 3 + issue-types 只读）、`backend/tests/test_real_order_realdata.py`（+15 例）、`frontend/src/api.ts`、`frontend/src/components/flow/TrackingFlow.tsx`（报工/登记两区块，自包含状态）、`docs/demo_script.md`（故事线 B/D + 记录速查）。
 
 **遗留与下一步**：① 页面级冒烟（待用户登录演示时复核两个新区块）；② BD-2402 等物料的 OpenMES 工艺模板属主数据工程，补模板后新订单即可报工；③ CI 首跑验证仍待 push。
+
+### 3.45 可部署性整改：别人 clone 后能跑起来（2026-10-01）
+
+**背景**：用户问"别人从 GitHub 下载下来能直接部署吗？怕 ERP/MES 连接出问题"。调研结论：代码/测试/种子脚本完整、真实模式连接失败必然明确报错（不回退 Mock，有故障注入测试锁定），但存在 5 个部署卡点——无部署文档、services/ 上游仓库不在 git（.gitignore 有注释但无指引）、`.env.example` 过期（缺 REAL_WRITE_API_TOKEN、VITE_API_BASE_URL 写 8000）、OPENMES_TOKEN 无干净获取路径、start_demo.ps1 硬编码本地 .conda-env。用户批准全部整改。
+
+#### 一、本地部署拓扑调研（编排文件的事实依据）
+
+- **OpenMES**：compose project `openmes`，官方镜像 `ghcr.io/mes-open/openmes:latest` + 其仓库自带 `docker-compose.yml`（postgres/backend/caddy/reverb 4 服务，端口 80/443）；管理员与 APP_KEY 由容器入口脚本首启自动创建/生成（docker-entrypoint.sh:35 生成 APP_KEY）。
+- **ERPNext**：compose project `erpnext`，frappe_docker 官方 `compose.yaml` + mariadb/redis/noproxy 三个 override（10 服务，frappe/erpnext:v16.36.0，HTTP_PUBLISH_PORT=8080，站点名 `localhost`，FRAPPE_SITE_NAME_HEADER=localhost）。
+- **关键发现：不能做单 include 编排文件**——OpenMES 与 frappe_docker 的 compose 都有叫 `backend` 的服务，compose include 会把同名服务静默合并成一个（实测 `docker compose config` 合并后只剩 12+1 个服务、OpenMES backend 被覆盖）。因此改为**双 project 部署脚本**，与本机验证拓扑完全一致。
+- 种子脚本凭据来源：`seed_erpnext/seed_supplier_data` 读根目录 .env；`seed_openmes*.py` 读 `services/OpenMes/.env` 的管理员凭据登录取 token；`seed_inspection_eta.py` 直写库补录（TEST_ 前缀、幂等）。
+- `backend/get_openmes_token.py`（此前未提交）核验无硬编码凭据：读 services/OpenMes/.env 登录 `/api/auth/login`、验证 `/api/auth/me`、缺失时经官方 `/api/v1/api-keys` 创建 ERP 集成 key、写回根目录 .env——正是"干净取 token"路径，纳入版本管理。
+
+#### 二、交付物
+
+1. **根目录 `README.md`（新建）**：从零部署指南——前置要求 → 克隆本仓库 + 两个上游仓库 → `scripts/deploy_services` 一键起双系统 → OpenMES 自动初始化/ERPNext 建站（`bench new-site localhost`，站点名必须 localhost）→ `.env` 逐项配置表（含 token 获取路径）→ 种子脚本顺序与幂等性说明 → 启动 + 验证清单 → 测试与 CI → **排障表**（401 换 token/403 写入令牌/15 分钟会话/EVALUATION_BLOCKED 属诚实设计/无工艺模板不可报工等）→ 第 10 节"诚实声明"（编排与本地验证环境逐项一致，但全新机器端到端未完整重放过）。
+2. **`.env.example` 重写**：补 `REAL_WRITE_API_TOKEN`（含生成方式与 403 行为说明）、`VITE_API_BASE_URL` 修正为 9000、`APP_ADAPTER_MODE=real` 为默认并注明 real/auto 差异（auto 会回退 Mock 的误导风险）、补 ERPNext/OpenMES 双系统默认地址、compose 专用变量注释（ERPNEXT_VERSION/DB_PASSWORD 等）。
+3. **`scripts/deploy_services.ps1` + `deploy_services.sh`（新建）**：检查 Docker 与上游仓库克隆 → 自动生成两份 .env（OpenMES 用上游模板、ERPNext 用本仓库 `scripts/templates/erpnext.env.example`）→ 分两个 compose project 启动（`--project-name openmes/erpnext`，与本地验证一致）→ 打印首次初始化待办。bash 版经 `bash -n`、PowerShell 版经 PSParser 语法校验。
+4. **`scripts/templates/erpnext.env.example`（新建）**：frappe_docker .env 模板（v16.36.0、HTTP_PUBLISH_PORT=8080、FRAPPE_SITE_NAME_HEADER=localhost，与本地验证环境一致）。
+5. **`scripts/start_demo.ps1` 增强**：Python 解释器探测（.conda-env → backend/.venv → .venv → 系统 python）+ 后端依赖预检（缺 uvicorn 给出 `pip install -e backend` 指引而非启动后报错）+ 预检新增 `APP_ADAPTER_MODE=real` 检查（非 real 明确警告"会静默回退 Mock"）。**实测全流程通过**（现有环境 8 项预检全绿，新模式检查生效）。
+6. **`backend/get_openmes_token.py` 纳入 git**（README 第 4 节引用）。
+
+#### 三、验证
+
+- `docker compose --project-name X -f … config` 两个 project 分别通过（OpenMES 4 服务 / ERPNext 10 服务；APP_KEY 未设仅为 warning，入口脚本首启自动生成）；单 include 合并方案的静默服务名冲突已实测并规避。
+- `start_demo.ps1` 真实运行全绿（Python 探测 → .conda-env；real 模式检查通过）。
+- bash -n / PSParser 语法校验通过。
+- 未运行 `up -d`（本机同名容器已在运行会端口冲突；新机器行为由 compose config + 与本地一致的项目结构保证）。
+
+#### 四、写入与遗留
+
+- 无任何 ERPNext/OpenMES/业务库写入；无业务代码改动（README/示例配置/脚本三件套）。
+- 遗留：① 全新机器端到端重放（需一台干净环境，属外部动作）；② ERPNext API Key 生成仍是 UI 手工步骤（可写脚本但涉账密，暂不做）；③ CI 首跑仍待 push。
