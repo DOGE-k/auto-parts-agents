@@ -332,7 +332,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 2 | 会话过期提醒：登录时记录 issued-at，过期前 90 秒横幅提醒；会话过期后身份区明确提示"会话已过期请重新登录" | ✅ | 13.5 分钟阈值 + 20s 轮询；历史无签发时间的会话保守立即提醒 |
 | 3 | 错误码统一（OpenMES 停机时 quality/package 500 → 502）+ track 不可达措辞修正 | ✅ | package 走 `_integration_status_error`；track 新增 `get_work_orders_strict` 可达性探测，不可达返回 `MES_UNREACHABLE` + 如实缺口 |
 | 4 | 检验维度按工单批次 lot 关联过滤（消除"全局检验计数"失真）+ seed 补录对齐批次 lot | ✅ | 精确相等或前缀扩展均算关联；`gate_details` 新增 inspections_total/scope；seed lot 改为批次前缀；回归测试锁定 |
-| 5 | 前端组件拆分：RealBusinessPage（2300+ 行）按面板抽出组件 | 🟡 第一批完成（lib/markdown.ts + components/QualityTodoPanel.tsx），剩余面板按同模式跟进 | 可维护性 |
+| 5 | 前端组件拆分：RealBusinessPage（2300+ 行）按面板抽出组件 | ✅ 全部完成：共享类型 `types/realBusiness.ts`；面板 `AgentRunsPanel` / `AssistantPanel` / `NcrWorkflowCard`；NCR 状态机 `hooks/useNcrWorkflows.ts`；8 步流程 `components/flow/{Quotation,Procurement,Tracking}Flow.tsx`；主文件 2368 → 772 行，每步 vitest+build 验证 + 页面冒烟 | 可维护性 |
 | 6 | 前端关键行为 vitest 测试（会话注入/markdown 渲染/写入头） | ✅ 6 passed | 工程信号 |
 | 7 | 业务库迁移 PostgreSQL（生产级数据库信号，最后做，保留 SQLite 回退） | ✅ 17 表 2765 行迁入 autoparts-db，alembic stamp，应用全链验证 | 工程信号 |
 
@@ -356,8 +356,8 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 
 | 优先级 | 任务 | 状态与交接点 |
 |---|---|---|
-| 1 | 完成 10.5 剩余前端组件拆分 | 🟡 进行中：已抽 markdown/QualityTodoPanel，剩问答/NCR/8 步/运行记录四个面板，按同模式 |
-| 2 | CI 配置（pytest/vitest/build） | ⬜ 未开始；前端两项纯 Node 最易先行 |
+| 1 | 完成 10.5 剩余前端组件拆分 | ✅ 已完成（2026-09-30，见 §3.39）：类型/面板/NCR hook/8 步流程三环节全部抽出，主文件 2368 → 772 行；顺带修复身份解析死循环 |
+| 2 | CI 配置（pytest/vitest/build） | ✅ 已完成（2026-09-30，见 §3.39）：`.github/workflows/ci.yml` 双 job——backend（pip install -e backend + pytest + compileall）、frontend（npm ci + vitest + build） |
 | 3 | 问答流式输出（SSE，可选） | ⬜ 未开始；不阻塞演示 |
 | 4 | Wutong 写路径 / OIDC / close 真实执行 | ⏸️ 均有外部依赖或有意保留，勿擅自推进（见 §3.38 第三节第 4 条） |
 

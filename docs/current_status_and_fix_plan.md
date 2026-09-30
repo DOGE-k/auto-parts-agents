@@ -1256,3 +1256,45 @@ ERP 物料需求
 - 不输出/提交 `.env` 中的任何密钥（ERPNEXT_*/OPENMES_*/DEEPSEEK_API_KEY/REAL_WRITE_API_TOKEN/DATABASE_URL 等）。
 - 后端重启模式：杀 9000 监听进程 → `cd backend && ../.conda-env/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 9000`。
 - 业务库现为 PostgreSQL（autoparts-db 容器）：若容器未启动，`docker start autoparts-db`；数据迁移历史见 §3.37。
+
+### 3.39 阶段十收尾：10.5 组件拆分全部完成 + 身份解析死循环修复 + CI（2026-09-30）
+
+**范围**：接手 §3.38 交接清单第 1、2 项。纯前端重构 + 本地 bug 修复 + CI 配置；零 ERPNext/OpenMES 业务写入（页面只读浏览与问答）。
+
+#### 一、10.5 组件拆分（全部完成，主文件 2368 → 772 行）
+
+按"props 化、纯函数进 lib/、每抽一个跑 vitest+build"模式推进，最终结构：
+
+- `src/types/realBusiness.ts`：14 个共享业务类型（Quotation/ProcurementPlan/TrackingInfo/QualityInfo/NcrWorkflow 等）从主文件抽出，主文件与各面板统一引用。
+- `src/components/AgentRunsPanel.tsx`：Agent 运行记录面板，状态自包含（查询/筛选/详情展开逻辑整体搬入，零 props）。
+- `src/components/AssistantPanel.tsx`：智能协同问答面板（含方案卡片批准执行闭环），props：identity/currentErpDraftId/currentWorkOrderId/notify/onError。
+- `src/hooks/useNcrWorkflows.ts`：NCR 处置/关闭状态机（restore/updateForm/处置三步/关闭三步共 10 个动作）+ `src/components/NcrWorkflowCard.tsx` 单卡展示组件。
+- `src/components/flow/QuotationFlow.tsx`（步骤 1-3）、`flow/ProcurementFlow.tsx`（步骤 4-6）、`flow/TrackingFlow.tsx`（步骤 7-8，内嵌 NcrWorkflowCard）。
+- 每步验证：`npx vitest run`（6 passed）+ `npm run build`（tsc -b 严格类型检查 + vite build）通过后才进入下一步。
+
+#### 二、冒烟发现并修复身份解析死循环（既有 bug，非拆分引入）
+
+- **现象**：页面打开后 `GET /api/real-orders/identity/me` 每秒 2-3 次持续请求（日志 94 万行），页面主线程被打满，浏览器自动化 click 全部 3 秒超时。
+- **根因**：主组件身份解析 effect 的依赖数组是 `[identity]`，而后端无会话时 identity/me 返回 200 匿名身份对象，每次新引用触发 setIdentity → effect 重跑 → 无限循环。git diff 确认该段代码为原有未动（拆分前就存在，此前未被发现是因为始终有 ERPNext 会话或未做长时观察）。
+- **修复**：依赖数组改为 `[]`（仅初始解析一次）；登录成功、"保存并重新解析身份"、"清除会话"三条路径本就各自显式调用 `getRealIdentity().then(setIdentity)` 刷新，行为无损失。修复后 8 秒日志零增长确认循环停止。
+- **页面冒烟（修复后）**：问 1"SAL-ORD-2026-00023 什么时候能做完？"→ 6 秒返回真实回答（ERP 订单 SAL-ORD-2026-00023 ↔ MES 工单 TEST_WO_PAGE_00023 id=9、完成率 90%（1800/2000）、速率 ETA 2026-09-30 09:39 UTC、口径 RATE_BASED 720 件/小时），调用链 2 步可视化（tracking.lookup_order_link 216ms → tracking.track_real 205ms，记录 RUN-COORD-F18E5884E69B），LLM 主动指出 PENDING 状态与 90% 完成率口径不一致。客户/物料下拉加载真实 ERPNext 数据（上汽集团等 3 客户、BD-2401 等 9 物料）。质量待办未登录提示正常。截图 `gui-test-screenshots/2026-09-30_assistant_smoke_after_split.png`。
+
+#### 三、CI 配置（GitHub Actions）
+
+- 新增 `.github/workflows/ci.yml`，双 job：
+  - backend：Python 3.12 → `pip install -e backend`（pyproject 依赖清单已具备）+ `pip install pytest==9.1.1 pytest-asyncio==1.4.0`（与本机 conda-env 版本对齐）→ `compileall -q app` → `pytest tests -q`（conftest 自包含临时 SQLite + 全部 env 默认值，无需外部服务与 .env）。
+  - frontend：Node 20 + npm cache → `npm ci` → `npx vitest run` → `npm run build`（含 tsc -b 类型检查）。
+- 触发：push main / codex/real-integration-layer + 全部 PR。尚未 push，首次运行结果待推送后确认。
+
+#### 四、验证与记录
+
+- 测试：后端 `pytest tests -q` **128 passed**（基线不下降）；前端 vitest **6 passed** + `npm run build` 通过。
+- 写入：无任何 ERPNext/OpenMES 写入；无业务库 schema 变更（组件拆分）。
+- 修改文件：`frontend/src/RealBusinessPage.tsx`（2368→772 行）、新增 `frontend/src/types/realBusiness.ts`、`frontend/src/components/{AgentRunsPanel,AssistantPanel,NcrWorkflowCard}.tsx`、`frontend/src/components/flow/{Quotation,Procurement,Tracking}Flow.tsx`、`frontend/src/hooks/useNcrWorkflows.ts`、`.github/workflows/ci.yml`；文档两份同步更新。
+
+#### 五、遗留与下一步
+
+1. 问答流式输出（SSE，可选，不阻塞演示）——交接清单第 3 项，未开始。
+2. CI 首次真实运行验证：推送到 GitHub 后确认两 job 绿。
+3. 演示前检查（若要再次演示）：跑 start_demo.ps1 预检；登录会话用 OpenMES 账号 admin（密码询问用户，勿记录）。
+4. 长期遗留不变（§3.38 第三节第 4 条）：Wutong 写路径 / 完整 OIDC / NCR close 真实执行（有意保留 issue 1 做演示）/ 订单级质量放行，均有外部依赖或有意保留，勿擅自推进。
