@@ -1425,3 +1425,45 @@ ERP 物料需求
 
 1. 真实报工（批次 + batch-step complete 带 actual_elapsed_minutes）：任意新工单的速率 ETA 用真实 API 产生，替代 seed 直写；
 2. 质量问题登记（POST /api/v1/issues）：任意工单现场创建质量问题后立即走既有 NCR 处置闭环。
+
+### 3.44 通用能力补强两项写入（2026-10-01，接手 handoff_2026-09-30_report_and_issue.md）
+
+**状态（本节先记计划与前置调研，实现与验证结果随后续小节补记）**：用户批准开工（"可以，先写文档，然后开始"）。任务定义、API 契约、铁律、验收标准以 `docs/handoff_2026-09-30_report_and_issue.md` 为准。
+
+#### 一、开工前调研发现（影响设计，已按源码 + 真实系统确认）
+
+1. **报工链路依赖"批次步骤"**：`POST /work-orders/{id}/batches` 创建批次时，`WorkOrderService::createBatch` 只在工单 `process_snapshot` 非空时才从快照生成批次步骤（`createBatchStepsFromSnapshot`）；无快照步骤的工单建出的批次没有可 start/complete 的步骤，官方报工 API 走不通。
+2. **快照由 `product_type_id` + BOM 工艺模板生成**（`WorkOrderService::createWorkOrder` → `buildProcessSnapshot`，取该产品类型激活模板）。§3.43 下达的工单 id=10（WO-SO-2026-00024，BD-2402）创建时未传 product_type_id，且真实系统确认 **BD-2402（product_type id=3）没有任何工艺模板**——因此 id=10 无法通过官方 API 报工，只能如实标注（不做任何伪造补数）。
+3. **product_types.code 与 ERP item_code 同码**（真实系统：id=2 code=BD-2401、id=3 code=BD-2402），BD-2401 有激活模板 `TEST_BD2401_QUALITY_FLOW`（1 道工序）——工单下达补 product_type 映射（只读查 product-types 列表按 code 精确匹配）即可让新订单的批次有步骤；这同时完成 §3.43 遗留小待办（工单 product_name 为空）。
+4. **速率 ETA 无需改动**：`get_work_order_batches` 已映射步骤 `passed_qty/actual_elapsed_minutes`，`_rate_sample`（§3.25）读同字段——真实报工完成后 track 自动转 `RATE_BASED`。
+5. **批次完成回写**：`BatchService::finishBatchIfComplete` → `completeBatch` 同时回写批次 `produced_qty` 与工单 `produced_qty`（=各批次之和，BatchService.php:632-648）——回读验证两个层面都有真实数据可对。
+6. **issue-types 真实现状**：`GET /api/v1/issue-types` 返回 11 类（Material Defect/Material Shortage/In-process Quality — Control Failed 等），前端下拉直接用，无需先建类型。
+
+#### 二、实现设计（沿用 §3.43 工单下达三步审批范本）
+
+**任务 1 真实报工（审批前缀 `RPT-`）**：
+
+- 适配器/client 层透传三端点：`create_batch(work_order_id, payload)` → `start_batch_step(step_id)` → `complete_batch_step(step_id, payload)`（照 `create_work_order` 透传写法，Sanctum 用户会话）。
+- 服务层三步（`real_order.py`）：
+  - ① `request_production_report`：预检（工单存在且批次步骤可用——读 raw 工单 `process_snapshot.steps`，为空则**写前如实拒绝**"该工单无工艺快照步骤，无法报工"，不产生孤儿批次；批次 target_qty 合计不超 planned_qty 预检）→ 建 `RPT-` 审批，登记 work_order_id/target_qty/lot_number/produced_qty/actual_elapsed_minutes（可选 setup/run），不写入。
+  - ② `approve_production_report`：人工批准，审批人来自真实身份。
+  - ③ `execute_production_report`：审批校验 → **幂等**（`get_work_order_batches` 按 lot_number 精确匹配，已存在直接返回既有，零写入）→ 建批次 → 从响应 `data.steps[0].id` 取步骤 → start → complete（produced_qty + actual_elapsed_minutes）→ **回读验证**（批次步骤 status=完成且数量/耗时与审批一致、工单 produced_qty 相应增加），不匹配如实报错。
+- API（`main.py`）三端点挂 `require_real_write_access` + `require_real_identity`（照 dispatch 端点，注意 await）。
+- 前端：Step 8 跟单面板（`TrackingFlow.tsx` 的 `TrackingQualityGatePanels`）加"报工（需人工审批）"区块：数量 + 实际耗时（+批次号）→ 确认面板 → ①→②→③ 串行执行留痕（照 WorkOrderSelectPanel 下达区块抄）→ 成功后自动刷新进度/ETA。
+- **顺带（任务 1 的前置）**：`request_work_order_dispatch` 补 product_type 映射——按 item_code 在 `product-types` 列表精确匹配 code，命中则 create payload 带 `product_type_id`（快照有步骤、product_name 有值）；未命中如实记录不阻断下达（主数据缺失是真实状态）。
+
+**任务 2 质量问题登记（审批前缀 `QISS-`）**：
+
+- 适配器/client 透传 `create_issue`（POST /api/v1/issues）+ 只读 `list_issue_types`；新增只读端点给前端下拉。
+- 服务层三步：① `request_issue_registration`（QISS- 审批，登记 work_order_id/issue_type_id/title/description）→ ② 人工批准 → ③ 审批校验 → **幂等**（同工单同 title 的未关闭 issue 已存在则返回既有）→ 创建 → 回读验证（work_order_id + title 匹配）。
+- 前端：Step 8 质量面板加"登记质量问题（需人工审批）"区块（issue type 下拉用真实 11 类）；登记成功刷新质量包后新 issue 即出现 NCR 卡片，可直接走既有处置三步。
+
+#### 三、真实验证计划（全部真实系统，审批门禁内）
+
+- 任务 1：**BD-2401 全新订单**走全链路（报价→审批→ERP 草稿→下达[含 product_type 映射→快照步骤]→真实报工）→ track 该新工单 ETA 变 `RATE_BASED`；重复报工幂等。工单 id=10 的 ETA 缺数保持如实标注（补数属主数据工程：BD-2402 需先建工艺模板，超出本轮范围）。
+- 任务 2：对上述工单真实登记质量问题 → `quality/package` 与全厂待办出现新条目 → NCR 卡片可处置（处置闭环演示可复用既有链路）。
+- 铁律不变：写入=人工审批→写回→回读→幂等；审批依据记入返回；每步跑测试；文档先更新再提交（逐个 add）。
+
+#### 四、验证结果（实现完成后补记）
+
+（待补）

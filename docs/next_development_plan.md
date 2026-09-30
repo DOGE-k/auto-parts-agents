@@ -378,4 +378,14 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 5 | 检验/报工数据补录 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.34）：`backend/seed_inspection_eta.py` 幂等补录 TEST_ 检验 3 条 + 批次实际耗时 150 分钟；track/9 已 RATE_BASED（720 件/小时）、quality/package/9 检验维度有数据、id=2 阻断线不受影响、125 passed |
 | 6 | 质量待办面板（阶段九） | ✅ 已完成（见 current_status_and_fix_plan.md §3.33）：真实三态待办 + 去处置直达既有 NCR 面板，125 passed；真实 disposition 写入验收仍等业务决策 |
 
+## 当前执行计划（2026-10-01 更新）：通用能力补强两项写入
+
+> 接手 `docs/handoff_2026-09-30_report_and_issue.md`；用户已批准开工。计划与前置调研见 `current_status_and_fix_plan.md` §3.44。
+
+| 优先级 | 任务 | 状态与边界 |
+|---|---|---|
+| 1 | 真实报工（RPT- 三步审批：建批次→开工→完工带实际耗时） | 🟨 进行中（2026-10-01）：含工单下达补 product_type 映射（报工前置——无快照步骤的工单官方 API 不可报工）；工单 id=10 因 BD-2402 无工艺模板保持 ETA 如实缺数 |
+| 2 | 质量问题登记（QISS- 三步审批：POST /api/v1/issues） | 🟨 进行中（2026-10-01）：issue types 真实 11 类已确认，前端下拉直接用 |
+| 3 | 演示剧本更新（故事线 B 补现场报工 / D 补现场登记质量问题） | ⬜ 待两项验证通过后做 |
+
 每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。
