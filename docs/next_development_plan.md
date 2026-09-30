@@ -332,9 +332,9 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 2 | 会话过期提醒：登录时记录 issued-at，过期前 90 秒横幅提醒；会话过期后身份区明确提示"会话已过期请重新登录" | ✅ | 13.5 分钟阈值 + 20s 轮询；历史无签发时间的会话保守立即提醒 |
 | 3 | 错误码统一（OpenMES 停机时 quality/package 500 → 502）+ track 不可达措辞修正 | ✅ | package 走 `_integration_status_error`；track 新增 `get_work_orders_strict` 可达性探测，不可达返回 `MES_UNREACHABLE` + 如实缺口 |
 | 4 | 检验维度按工单批次 lot 关联过滤（消除"全局检验计数"失真）+ seed 补录对齐批次 lot | ✅ | 精确相等或前缀扩展均算关联；`gate_details` 新增 inspections_total/scope；seed lot 改为批次前缀；回归测试锁定 |
-| 5 | 前端组件拆分：RealBusinessPage（2300+ 行）按面板抽出组件 | ⬜ | 可维护性 |
-| 6 | 前端关键行为 vitest 测试（会话注入/待办门禁等） | ⬜ | 工程信号 |
-| 7 | 业务库迁移 PostgreSQL（生产级数据库信号，最后做，保留 SQLite 回退） | ⬜ | 工程信号 |
+| 5 | 前端组件拆分：RealBusinessPage（2300+ 行）按面板抽出组件 | 🟡 第一批完成（lib/markdown.ts + components/QualityTodoPanel.tsx），剩余面板按同模式跟进 | 可维护性 |
+| 6 | 前端关键行为 vitest 测试（会话注入/markdown 渲染/写入头） | ✅ 6 passed | 工程信号 |
+| 7 | 业务库迁移 PostgreSQL（生产级数据库信号，最后做，保留 SQLite 回退） | ✅ 17 表 2765 行迁入 autoparts-db，alembic stamp，应用全链验证 | 工程信号 |
 
 ### 验收标准
 

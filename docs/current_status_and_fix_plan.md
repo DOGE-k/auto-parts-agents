@@ -1191,3 +1191,25 @@ ERP 物料需求
 4. 测试过程新增 1 条 NCR 处置审批记录（QDISP-95702E8DA994，幂等写回），审计留痕属正常业务数据。
 
 **结论**：全部功能在本地真实环境重测通过；两条演示线（id=2 阻断 / id=9 通过）、治理门禁、诚实性故障行为均符合设计。
+
+### 3.37 阶段十：工厂级工程质感（2026-09-30，比赛定位）
+
+**定位**：仅为比赛——目标是让系统在评委审视下站得住"工厂级"标准，不做真实试点部署（HTTPS/真实账号/监控告警等生产部署项按定位跳过）。
+
+**10.1 NCR 工作流状态刷新后恢复**：新只读端点 `GET /api/real-orders/quality/workflow-states`（按 issue 聚合最近的处置/关闭审批，含载荷里的 work_order_id/disposition）；前端在质量面板加载（loadTracking / 去处置）后自动合并恢复审批号、批准态与表单处置值，不覆盖进行中的状态。页面刷新后处置进度不再丢失，配合数据层幂等不会重复建立审批。实测：issue 1 正确恢复 `QDISP-95702E8DA994`。
+
+**10.2 会话过期提醒**：登录时在 sessionStorage 记录签发时间；会话有效且超过 13.5 分钟（15 分钟 TTL 前 90 秒）显示黄色提醒横幅，20 秒轮询；无签发时间的历史会话保守立即提醒。过期后既有兜底（面板回退登录提示）不变。
+
+**10.3 错误码统一与措辞修正**：`quality/package` 增加 IntegrationError 映射（OpenMES 停机 500 → 502）；`track_order` 前置 `get_work_orders_strict` 可达性探测——MES 不可达时返回 `status=MES_UNREACHABLE`、`eta_basis=mes_unreachable` + 如实缺口，不再把"连不上"误报成"工单不存在"（真不存在的工单仍报 NOT_FOUND）。
+
+**10.4 检验维度按批次 lot 关联**：`quality_package` 拉取工单批次 lot，检验记录按"精确相等或前缀扩展"过滤（全局计数保留在 `gate_details.inspections_total`），`inspections_scope` 标注口径；批次读取失败时如实返回空集。adapter 的 inspections 映射补 `lot_number`。seed 补录 lot 改为批次前缀（`TEST_LOT_PAGE_9-IQC/…`）。实测 package/9：`inspection_count=3 / total=3 / scope=work_order_batch_lots`；package/2（无批次）如实为 0。开发中发现并修复自建过滤器的"精确相等漏掉前缀扩展"缺陷，以单元测试锁定。
+
+**10.5 组件拆分（第一批）**：纯函数 `formatAssistantAnswer` 抽出至 `src/lib/markdown.ts`；质量待办面板抽出为 `src/components/QualityTodoPanel.tsx`（props 化），主文件瘦身并建立 lib/ + components/ 结构，后续面板按同模式继续。
+
+**10.6 前端关键行为测试（vitest，6 例）**：markdown 渲染（HTML 转义防注入/加粗/表格）、会话令牌（sessionStorage 隔离/空白清除/签发时间）、写入头注入（X-Real-Write-Token + 幂等键）。`npm test` 脚本可用。
+
+**10.7 业务库迁移 PostgreSQL**：专用容器 `autoparts-db`（postgres:17-alpine，15432）；一次性迁移脚本 `backend/migrate_sqlite_to_postgres.py`（按外键拓扑排序、pg 列类型驱动的布尔强转、幂等跳过非空表），17 表 2765 行迁入；alembic stamp head 后应用启动校验通过。实测：报价 52 / 方案 27 / 协调者运行 50 / 工作流恢复，全部从 PG 读取。SQLite 文件保留作回退（.env 的 DATABASE_URL 一行切换）。测试套件仍使用独立临时库，不受影响。
+
+**验证**：后端 **128 passed**（新增 2 例：工作流恢复、检验关联过滤）、`compileall` 通过；前端 vitest **6 passed** + `npm run build` 通过。本阶段无 ERPNext/OpenMES 业务写入（仅本地业务库迁移）。
+
+**遗留（阶段十未完成项）**：主文件剩余面板（问答/NCR/8 步流程）继续按 10.5 模式拆分；CI 配置；问答流式输出（可选）。
