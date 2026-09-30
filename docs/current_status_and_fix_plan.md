@@ -1520,4 +1520,11 @@ ERP 物料需求
 #### 四、写入与遗留
 
 - 无任何 ERPNext/OpenMES/业务库写入；无业务代码改动（README/示例配置/脚本三件套）。
-- 遗留：① 全新机器端到端重放（需一台干净环境，属外部动作）；② ERPNext API Key 生成仍是 UI 手工步骤（可写脚本但涉账密，暂不做）；③ CI 首跑仍待 push。
+- 遗留：① 全新机器端到端重放（需一台干净环境，属外部动作）；② ERPNext API Key 生成仍是 UI 手工步骤（可写脚本但涉账密，暂不做）。
+
+#### 五、推送与 CI 首跑验证（2026-10-01，销账 §3.39/§3.45 遗留③）
+
+- 分支 `codex/real-integration-layer` 已推送 GitHub（`DOGE-k/auto-parts-agents`，84da16b → 4c4119a 共 42 个提交，随后 CI 修复 `8a04fa4`）。
+- **CI 首跑失败并修复**：backend job 在 pytest 收集阶段全量 `ModuleNotFoundError: No module named 'acps_sdk'`——vendored 的 ACPs SDK（`acps-sdk-src/acps-sdk`，本地以 editable 方式导入）未进 CI 环境；frontend job 首跑即绿。修复：ci.yml 在 `pip install -e backend` 前加 `pip install -e acps-sdk-src/acps-sdk`（后端仅用 SDK 核心 acs/aip 模块，可选 extra amp-sign 的 jcs/cryptography 本地亦未装，无需安装）。
+- **修复后 CI 双 job 全绿**：Backend (pytest + compileall) ✅ / Frontend (vitest + build) ✅（run on 8a04fa4）。
+- 注：仓库为私有，CI 状态经 git 凭据（未输出密钥）调用 GitHub API 核验。
