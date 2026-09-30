@@ -69,6 +69,17 @@ def _canonical_role(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().casefold()).strip("_")
 
 
+# ERPNext 的 User 文档上残留着一批随机生成的角色 docname（如 hn3orhl918）。
+# 它们不是业务角色：10 位小写字母数字且含数字。按名字规则剔除，
+# 只影响展示与噪音，不影响角色门禁（这些名字本就映射不到业务角色）。
+_NOISE_ROLE_PATTERN = re.compile(r"^[a-z0-9]{10}$")
+
+
+def _is_noise_role(value: str) -> bool:
+    name = value.strip()
+    return bool(_NOISE_ROLE_PATTERN.match(name)) and any(ch.isdigit() for ch in name)
+
+
 def _role_names(value: Any) -> set[str]:
     """从 ERPNext/OpenMES 的常见角色字段形状中提取角色名。"""
     result: set[str] = set()
@@ -137,7 +148,9 @@ async def _from_erpnext(settings: IntegrationSettings) -> RealIdentity:
             # get_logged_user 已完成认证；用户没有 User 详情权限时仍可返回
             # 认证主体，角色由 REAL_IDENTITY_ROLE_MAP 或管理员角色提供。
             profile = {}
-        roles = _apply_role_map(subject, _roles_from_payload(profile), settings)
+        raw_roles = _roles_from_payload(profile)
+        roles = {role for role in raw_roles if not _is_noise_role(role)}
+        roles = _apply_role_map(subject, roles, settings)
         if subject.casefold() == "administrator":
             roles.add("Administrator")
         return RealIdentity(
@@ -192,6 +205,15 @@ async def _from_openmes(
         )
     finally:
         await client.aclose()
+
+
+async def resolve_openmes_identity(
+    settings: IntegrationSettings | None = None,
+    *,
+    token: str,
+) -> RealIdentity:
+    """用给定会话令牌解析 OpenMES 身份（登录与请求级会话共用同一路径）。"""
+    return await _from_openmes(settings or IntegrationSettings.from_environment(), request_token=token)
 
 
 async def resolve_real_identity(

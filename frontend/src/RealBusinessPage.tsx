@@ -9,6 +9,7 @@ import {
   getRealIdentity,
   getRealSessionToken,
   getRealWriteToken,
+  loginRealSession,
   setRealSessionToken,
   setRealWriteToken,
   requestQualityIssueDisposition,
@@ -317,6 +318,9 @@ export default function RealBusinessPage() {
   const [sessionToken, setSessionToken] = useState(() => getRealSessionToken());
   const [writeToken, setWriteToken] = useState(() => getRealWriteToken());
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
   const [ncrWorkflows, setNcrWorkflows] = useState<Record<string, NcrWorkflow>>({});
   // Agent 运行记录（阶段三：可从页面查询，持久化于 real_agent_runs 表）
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -896,6 +900,51 @@ export default function RealBusinessPage() {
             {sessionSettingsOpen && (
               <div className="real-session-panel">
                 <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。</p>
+                <div className="real-session-login">
+                  <strong>OpenMES 账号登录（推荐）</strong>
+                  <div className="real-session-login-row">
+                    <input
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      placeholder="OpenMES 用户名"
+                      autoComplete="username"
+                    />
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="OpenMES 密码"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      className="button primary"
+                      disabled={loginBusy || !loginUsername.trim() || !loginPassword}
+                      onClick={() => {
+                        setLoginBusy(true);
+                        loginRealSession(loginUsername.trim(), loginPassword)
+                          .then((result) => {
+                            setRealSessionToken(result.access_token);
+                            setSessionToken(result.access_token);
+                            setLoginPassword("");
+                            if (result.identity) setIdentity(result.identity);
+                            else void getRealIdentity().then(setIdentity).catch(() => undefined);
+                            notify(
+                              result.force_password_change
+                                ? "登录成功，但上游要求先修改密码，该会话仅能改密"
+                                : `已登录为 ${result.identity?.display_name ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
+                            );
+                          })
+                          .catch((e) => setError(e instanceof Error ? e.message : "OpenMES 登录失败"))
+                          .finally(() => setLoginBusy(false));
+                      }}
+                    >
+                      {loginBusy ? "登录中…" : "登录"}
+                    </button>
+                  </div>
+                  <p className="real-session-hint">
+                    登录走真实 OpenMES 认证接口，返回默认 15 分钟 TTL 的短时会话；登出只清除本浏览器会话，不吊销上游令牌。
+                  </p>
+                </div>
                 <label>
                   Bearer 会话（可选）
                   <input

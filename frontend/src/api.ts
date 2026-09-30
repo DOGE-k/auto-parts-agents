@@ -411,6 +411,25 @@ export async function getRealIdentity(): Promise<RealIdentity> {
   return api<RealIdentity>("/real-orders/identity/me");
 }
 
+export type RealLoginResult = {
+  provider: string;
+  token_type: string;
+  access_token: string;
+  force_password_change: boolean;
+  session_scope?: string;
+  expires_hint?: string;
+  identity: RealIdentity;
+  authority?: string;
+  data_source?: string;
+};
+
+export async function loginRealSession(username: string, password: string): Promise<RealLoginResult> {
+  return api<RealLoginResult>("/real-orders/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
 export type ProposalOptions = {
   plan_id?: string;
   quotation_id?: string;

@@ -1192,6 +1192,41 @@ async def real_order_identity(identity=Depends(require_real_identity)) -> dict:
     return identity.as_dict()
 
 
+class RealOrderLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/real-orders/auth/login", tags=["real-orders"])
+async def real_order_auth_login(body: RealOrderLoginRequest) -> dict:
+    """用真实 OpenMES 登录契约换取短时会话令牌并回读身份。
+
+    凭据只转发给已配置的 OpenMES 认证端点，不落日志、不持久化。
+    刻意不代理 logout/refresh：OpenMES 的 logout/refresh 会吊销或轮换
+    该上游用户的全部 token，可能波及服务端集成令牌；本地登出仅清除
+    浏览器会话。
+    """
+    from app.integrations.errors import IntegrationError, IntegrationNotConfigured
+    from app.services.session_auth import login_openmes_session
+
+    try:
+        return await login_openmes_session(username=body.username, password=body.password)
+    except IntegrationNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except IntegrationError as exc:
+        if exc.status_code in {401, 403, 422}:
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "invalid_credentials", "message": str(exc)},
+            ) from exc
+        raise _integration_status_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "invalid_login_input", "message": str(exc)}) from exc
+
+
 @app.get("/api/real-orders/quotations", tags=["real-orders"])
 async def real_order_list_quotations() -> list[dict]:
     """列出所有报价分析记录。"""

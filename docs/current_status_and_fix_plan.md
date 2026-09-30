@@ -1059,3 +1059,27 @@ ERP 物料需求
 - 通过页面键盘交互展开“会话设置”，确认 Bearer 会话、本地写入令牌输入框、保存/清除按钮和“仅当前浏览器会话保存”提示均可见；检查过程中没有输入令牌、没有提交表单、没有调用任何写入接口。
 - NCR 操作控件已由 TypeScript 构建验证；真实工单 2 的 quality package 当前有 issue 1，页面进入跟单质量步骤后按该记录渲染处置/关闭门禁，处置下拉默认空值，不自动选择业务决策。
 ```
+
+### 3.32 OpenMES 短时会话登录与身份噪音过滤（2026-09-30）
+
+**实现内容**：
+
+1. 按 vendored OpenMES 认证契约（`POST /api/auth/login`，Sanctum token，默认 15 分钟 TTL）新增 `backend/app/services/session_auth.py`：转发用户名/密码换取短时会话，并用登录令牌回读 `GET /api/auth/me` 解析业务身份（与请求级 Bearer 会话同一路径，共用 `resolve_openmes_identity`）。
+2. 新增 `POST /api/real-orders/auth/login`：凭据只转发给已配置的 OpenMES 认证端点，不落日志、不持久化；上游 401/403/422 映射为 401 `invalid_credentials`，未配置 503 `not_configured`，空输入 422。刻意不代理 logout/refresh——OpenMES 的 logout 会吊销该上游用户全部 token、refresh 会轮换当前 token，都可能波及服务端集成令牌；本地登出只清除浏览器会话。
+3. Laravel 契约适配：校验失败仅在携带 `Accept: application/json` 时返回 422 JSON，否则 302 回登录页 HTML（真实部署实测：无头 302 text/html，带头 422 application/json）；登录请求已显式携带该头。
+4. 前端会话面板新增“OpenMES 账号登录（推荐）”表单：登录成功把短时令牌写入 `sessionStorage` 并重新解析身份；上游 `force_password_change` 约束如实提示；手工粘贴 Bearer 保留为后备入口。
+5. ERPNext 身份噪音过滤：`_from_erpnext` 剔除 User 文档上随机生成的 10 位字母数字角色 docname（如 hn3orhl918），只影响展示，角色门禁不受影响（Administrator 角色列表 85 → 45 条，`Translator` 等真实角色保留）。
+
+**验证**：
+
+- `pytest tests -q`：**117 passed**（新增 session_auth 6 例 + ERPNext 噪音角色过滤 1 例；身份回读断言使用登录会话令牌而非服务端集成令牌）。
+- `compileall`、`npm run build`、`git diff --check`：通过。
+- 真实错误链路（页面级）：假凭据 → 后端 401 `invalid_credentials`（透传上游真实报错 "The provided credentials are incorrect."）→ 前端错误横幅显示；截图 `gui-test-screenshots/2026-09-30_openmes_session_login_error_path.png`。
+- 真实身份接口：噪音剔除后 subject=Administrator、45 条角色、无随机 docname。
+- 未执行任何 ERPNext/OpenMES 业务写入；未使用真实账号执行成功路径登录（部署未提供业务账号凭据）。
+
+**边界与下一步**：
+
+- ERPNext 侧用户名/密码登录依赖 frappe 会话/OIDC 契约，部署未提供，保持服务端集成身份不变；
+- 成功路径端到端验收需要部署方提供一个 OpenMES 业务账号（预期 identity provider=openmes、角色门禁按 REAL_IDENTITY_ROLE_MAP 生效）；
+- NCR 真实写入最小范围验收仍等待业务处置决策 + 具备质量角色的会话 + 写入令牌。

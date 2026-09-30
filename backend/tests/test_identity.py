@@ -162,5 +162,29 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         ensure_role(identity, "procurement_approval")
 
 
+    async def test_erpnext_random_role_docnames_are_filtered(self):
+        class NoisyERPClient(FakeERPClient):
+            async def get_document(self, doctype, name):
+                return {
+                    "full_name": "Alice",
+                    "roles": [
+                        {"role": "Sales User"},
+                        {"role": "hn3orhl918"},
+                        {"role": "i2802am1gr"},
+                        "Quality Manager",
+                    ],
+                }
+
+        configured = settings(real_identity_provider="erpnext")
+        with patch("app.services.identity.ERPNextClient", NoisyERPClient):
+            identity = await resolve_real_identity(configured)
+
+        names = set(identity.roles)
+        self.assertIn("Sales User", names)
+        self.assertIn("Quality Manager", names)
+        self.assertNotIn("hn3orhl918", names)
+        self.assertNotIn("i2802am1gr", names)
+
+
 if __name__ == "__main__":
     unittest.main()
