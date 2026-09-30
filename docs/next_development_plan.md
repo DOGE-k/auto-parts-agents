@@ -352,7 +352,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 
 ## 交接执行计划（2026-09-30 更新，交由下一任 AI）
 
-> 详细交接状态见 `current_status_and_fix_plan.md` §3.38。
+> 详细交接状态见 `current_status_and_fix_plan.md` §3.38；剩余两项写入补强的完整交接文档（API 契约/铁律/步骤/验收）见 `docs/handoff_2026-09-30_report_and_issue.md`。
 
 | 优先级 | 任务 | 状态与交接点 |
 |---|---|---|
