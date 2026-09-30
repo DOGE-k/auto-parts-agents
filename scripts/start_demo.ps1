@@ -6,7 +6,28 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $backend = Join-Path $root "backend"
 $frontend = Join-Path $root "frontend"
-$python = Join-Path $root ".conda-env\python.exe"
+
+# Python 解释器探测：优先项目自带 .conda-env，其次 venv，最后系统 python。
+# （.conda-env 不在 git 里；新机器用系统 Python 时先 `pip install -e backend`。）
+$pythonCandidates = @(
+    (Join-Path $root ".conda-env\python.exe"),
+    (Join-Path $backend ".venv\Scripts\python.exe"),
+    (Join-Path $root ".venv\Scripts\python.exe")
+)
+$python = $null
+foreach ($candidate in $pythonCandidates) {
+    if (Test-Path $candidate) { $python = $candidate; break }
+}
+if (-not $python) { $python = "python" }
+Write-Host "[环境] Python: $python"
+
+# 后端依赖预检：uvicorn 缺失时给出明确指引，而不是启动后报一堆 404。
+& $python -c "import uvicorn, fastapi" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[失败] 当前 Python 缺少后端依赖（uvicorn/fastapi）。请先执行：" -ForegroundColor Red
+    Write-Host "       $python -m pip install -e backend" -ForegroundColor Yellow
+    exit 1
+}
 
 function Test-PortListening([int]$Port) {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
@@ -91,6 +112,11 @@ if ($envContent -match "REAL_WRITE_API_TOKEN=\S") {
     Write-Host "[通过] 真实写入门禁令牌已配置（NCR 处置/关闭可写回）" -ForegroundColor Green
 } else {
     Write-Host "[警告] REAL_WRITE_API_TOKEN 未配置：写回接口会返回 503" -ForegroundColor Yellow
+}
+if ($envContent -match "APP_ADAPTER_MODE=real") {
+    Write-Host "[通过] 适配器模式 real（连不上真实系统会明确报错，不回退 Mock）" -ForegroundColor Green
+} else {
+    Write-Host "[警告] APP_ADAPTER_MODE 不是 real：连不上 ERP/MES 时会静默回退 Mock，页面显示假数据。演示请设为 real" -ForegroundColor Yellow
 }
 
 Write-Host "`n=== 演示入口 ===" -ForegroundColor Cyan
