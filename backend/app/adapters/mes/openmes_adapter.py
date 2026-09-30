@@ -141,6 +141,15 @@ class OpenMESAdapter:
         data = result.get("data", [])
         return [self._map_work_order(wo) for wo in data]
 
+    async def create_work_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """创建 OpenMES 工单（写操作，Sanctum 用户会话；仅限审批门禁后调用）。"""
+        return await self._client.create_work_order(payload)
+
+    async def get_work_order_raw(self, work_order_id: str | int) -> dict[str, Any]:
+        """按 id 回读工单原始记录（customer_order_no/planned_qty 验证用，不做映射）。"""
+        result = await self._client.get_work_order(work_order_id)
+        return result.get("data", {}) or {}
+
     async def import_erp_work_orders(
         self, orders: list[dict[str, Any]], strategy: str = "update_or_create"
     ) -> dict[str, Any]:

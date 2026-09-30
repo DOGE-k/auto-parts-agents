@@ -136,11 +136,22 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "work_order_id": {"type": "string", "description": "MES 工单数字 id"},
+                "work_order_id": {"type": "string", "description": "OpenMES 质量问题/NCR id"},
                 "issue_id": {"type": "string", "description": "OpenMES 质量问题/NCR id"},
             },
             "required": ["work_order_id", "issue_id"],
         },
+    },
+    {
+        "agent_type": "quality",
+        "aip_agent": "quality-document",
+        "skill_id": "quality.list_open_issues",
+        "description": (
+            "列出全厂所有未关闭质量问题（跨工单队列：工单号/标题/严重度/状态/处置/已报告天数）。"
+            "用户问\"现在有哪些质量问题/最紧急的质量问题/全厂质量状况\"时使用，无需指定工单；"
+            "按已报告天数从长到短展示。"
+        ),
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "agent_type": "tracking",

@@ -1040,7 +1040,6 @@ def approve_quality_issue_disposition(approval_id: str, approved_by: str) -> dic
     return {"success": True, "approval": get_approval(approval_id), "written": False}
 
 
-@_agent_run("quality", "set_disposition")
 def _same_quantity(a: Any, b: Any) -> bool:
     """按数值比较数量（1800.0 / "1800" / "1800.00" 视为相等），解析失败退回字符串。"""
     try:
@@ -2199,6 +2198,178 @@ async def create_erp_sales_order_from_quotation(
         "approval_id": approval_id,
         "draft": result,
         "authority": result.get("authority", "ERPNext"),
+    }
+
+
+# ==================== 工单下达（ERP 销售订单草稿 → OpenMES 工单） ====================
+# 人工审批门禁三步（与 NCR 处置同构）：① 建立审批（不写入）→ ② 人工批准 → ③
+# 审批校验通过后创建 OpenMES 工单并严格回读。幂等键为 customer_order_no：
+# 该 ERP 订单已有正式关联工单时直接返回既有工单，绝不重复下达。
+
+
+def _dispatch_work_order_no(erp_draft_id: str) -> str:
+    """工单编号由 ERP 订单号派生（唯一且可追溯），超长时截断保唯一后缀。"""
+    suffix = erp_draft_id.replace("SAL-ORD-", "SO-")
+    return f"WO-{suffix}"[:100]
+
+
+async def request_work_order_dispatch(
+    quotation_id: str,
+    requested_by: str,
+) -> dict[str, Any]:
+    """① 建立"工单下达"审批：只登记审批记录与将执行内容，不写 OpenMES。"""
+    if not quotation_id.strip() or not requested_by.strip():
+        return {"success": False, "error": "缺少 quotation_id 或 requested_by"}
+    quotation = get_quotation(quotation_id)
+    if not quotation:
+        return {"success": False, "error": f"报价单 {quotation_id} 不存在"}
+    erp_draft_id = str(quotation.get("erp_draft_id") or "").strip()
+    if not erp_draft_id:
+        return {"success": False, "error": "报价尚未创建 ERP 销售订单草稿，不能下达工单"}
+    item = quotation.get("item") or {}
+    plan = {
+        "quotation_id": quotation_id,
+        "erp_draft_id": erp_draft_id,
+        "order_no": _dispatch_work_order_no(erp_draft_id),
+        "customer_order_no": erp_draft_id,
+        "product_id": item.get("item_id", item.get("item_code", "")),
+        "planned_qty": quotation.get("quantity"),
+        "due_date": quotation.get("delivery_date") or "",
+        "customer_name": (quotation.get("customer") or {}).get("customer_name", ""),
+    }
+    approval_id = _gen_id("WOD")
+    approval = _register_approval(
+        approval_id=approval_id,
+        approved=False,
+        approved_by=requested_by,
+        reference_type="work_order_dispatch",
+        reference_id=quotation_id,
+        notes=json.dumps(plan, ensure_ascii=False, default=str),
+    )
+    return {"success": True, "approval": approval, "dispatch_plan": plan, "written": False}
+
+
+def approve_work_order_dispatch(approval_id: str, approved_by: str) -> dict[str, Any]:
+    """② 人工批准工单下达审批；审批人由真实身份依赖在 API 层解析。"""
+    with SessionLocal() as session:
+        row = session.get(RealApprovalRow, approval_id)
+        if row is None or row.reference_type != "work_order_dispatch":
+            return {"success": False, "error": "工单下达审批记录不存在"}
+        row.approved = True
+        row.approved_by = approved_by
+        session.commit()
+    return {"success": True, "approval": get_approval(approval_id), "written": False}
+
+
+async def dispatch_work_order_to_openmes(
+    quotation_id: str,
+    approval_id: str,
+    approved_by: str,
+) -> dict[str, Any]:
+    """③ 审批校验通过后创建 OpenMES 工单并回读验证（customer_order_no 幂等）。"""
+    approval = get_approval(approval_id)
+    plan: dict[str, Any] = {}
+    if approval and approval.get("reference_type") == "work_order_dispatch":
+        try:
+            plan = json.loads(approval.get("notes") or "{}")
+        except ValueError:
+            plan = {}
+    if (
+        not plan
+        or str(plan.get("quotation_id")) != str(quotation_id)
+        or not plan.get("customer_order_no")
+    ):
+        return {"success": False, "error": "工单下达审批不存在、对象不匹配或缺少下达计划"}
+    if not await _approval_verifier(approval_id, approved_by):
+        return {"success": False, "error": "工单下达审批未通过，拒绝写入 OpenMES"}
+
+    erp_draft_id = str(plan["customer_order_no"])
+    mes = get_mes_adapter()
+
+    # 幂等：该 ERP 订单已有正式关联工单时直接返回既有工单，不重复下达。
+    # 列表 API 不确认支持 customer_order_no 服务端过滤，拉取后本地精确匹配
+    # （get_work_orders_strict 区分"连接失败"与"确实没有"）。
+    wo_list = await mes.get_work_orders_strict({"limit": 100})
+    existing = [
+        wo for wo in wo_list
+        if str(wo.get("customer_order_no") or "").strip() == erp_draft_id
+    ]
+    if existing:
+        wo = existing[0]
+        return {
+            "success": True,
+            "status": "DISPATCHED",
+            "written": False,
+            "idempotent": True,
+            "work_order": wo,
+            "work_order_id": wo.get("work_order_id"),
+            "read_back_verified": True,
+            "approval": approval,
+            "authority": "OpenMES",
+            "data_source": "openmes_api",
+        }
+
+    payload: dict[str, Any] = {
+        "order_no": str(plan["order_no"]),
+        "customer_order_no": erp_draft_id,
+        "planned_qty": plan.get("planned_qty"),
+        "description": (
+            f"工单下达（人工审批 {approval_id}）· ERP 销售订单 {erp_draft_id} · "
+            f"客户 {plan.get('customer_name', '')} · 物料 {plan.get('product_id', '')}"
+        ),
+    }
+    if plan.get("due_date"):
+        payload["due_date"] = plan["due_date"]
+    try:
+        result = await mes.create_work_order(payload)
+    except Exception as e:
+        return {"success": False, "error": f"OpenMES 工单创建失败: {e}", "authority": "OpenMES"}
+    created = result.get("data") or {}
+    work_order_id = created.get("id") or created.get("work_order_id")
+
+    # 回读验证：customer_order_no 必须精确等于 ERP 订单号（关联是门禁，不是展示）
+    read_back_verified = False
+    read_back: dict[str, Any] | None = None
+    if work_order_id:
+        try:
+            read_back = await mes.get_work_order_raw(work_order_id)
+            read_back_verified = bool(
+                read_back
+                and str(read_back.get("customer_order_no") or "").strip() == erp_draft_id
+                and _same_quantity(read_back.get("planned_qty"), plan.get("planned_qty"))
+            )
+        except Exception as e:
+            result["read_back_error"] = str(e)
+    if not read_back_verified:
+        return {
+            "success": False,
+            "error": "OpenMES 工单已创建但回读验证未通过（customer_order_no 或数量不匹配），请人工核对",
+            "create_result": result,
+            "read_back": read_back,
+            "authority": "OpenMES",
+        }
+
+    _save_agent_run(
+        f"RUN-WODIS-{uuid4().hex[:12].upper()}",
+        "procurement",
+        "dispatch_work_order",
+        {"args": [quotation_id, approval_id], "kwargs": {"customer_order_no": erp_draft_id}},
+        "ok",
+        {"work_order": read_back, "approval_id": approval_id},
+        None,
+        _utc_now(),
+    )
+    return {
+        "success": True,
+        "status": "DISPATCHED",
+        "written": True,
+        "idempotent": False,
+        "work_order": read_back,
+        "work_order_id": work_order_id,
+        "read_back_verified": True,
+        "approval": approval,
+        "authority": "OpenMES",
+        "data_source": "openmes_api",
     }
 
 

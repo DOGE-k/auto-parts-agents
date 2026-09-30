@@ -1389,3 +1389,39 @@ ERP 物料需求
 | 任意工单无报工数据→ETA 如实缺数 | 可补能力（写入） | OpenMES 报工 API 已确认；**等用户批准**后做"批次+报工"审批门禁能力（真实 API 替代 seed 直写） |
 | 现场无质量问题可演示处置 | 可补能力（写入） | OpenMES issues API 已确认；**等用户批准**后做"质量问题登记"能力 |
 | 工单状态 PENDING vs 完成率 90% 口径不一致 | 数据口径 | 建议保留（LLM 主动发现=诚实卖点）；如需推进工单状态走真实报工 API |
+
+### 3.43 工单下达（ERP 草稿 → OpenMES 真实创建）与全厂质量待办技能（2026-09-30）
+
+**背景**：§3.42 断点总账中，"新订单 step 7 依赖人工在 OpenMES 手工建单"是任意新订单走通全链路的最大断点。OpenMES 官方 `POST /api/v1/work-orders`（customer_order_no 为官方字段）已确认。本轮按既有铁律实现"工单下达"审批门禁能力（用户方向性要求"无论什么情况都能实现"；写入全部走 人工审批→写回→回读→幂等）。
+
+#### 一、全厂质量待办只读技能（修复 §3.42 问答缺口）
+
+- AIP 注册 `quality.list_open_issues`（`quality_document_aip.py`，透传 `real_order.quality_todo_list`）；协调者能力目录加条目（问"现在有哪些质量问题/最紧急的质量问题"无需指定工单）；ACS json 同步（test_acs_sync 锁定）。协调者测试 12 passed（含能力目录-AIP 注册一致性）。
+
+#### 二、工单下达（三步审批门禁，与 NCR 处置同构）
+
+- **后端**（`real_order.py`）：`request_work_order_dispatch`（① 建审批 WOD-xxx，记录将创建的工单内容：order_no 由 ERP 订单号派生 `WO-SO-YYYY-NNNNN`、customer_order_no、数量、交期，不写入）→ `approve_work_order_dispatch`（② 人工批准，审批人来自真实身份）→ `dispatch_work_order_to_openmes`（③ 审批校验 → **幂等**：get_work_orders_strict 拉取后按 customer_order_no 精确匹配，已有关联工单直接返回既有工单（idempotent=true 零写入）→ OpenMES create_work_order → **回读验证** customer_order_no 精确相等 + 数量相等，不匹配如实报错）。
+- **适配器**（`openmes_adapter.py`）：新增 `create_work_order`（Sanctum 会话写操作）与 `get_work_order_raw`（回读原始记录，不做映射）透传；幂等检索复用既有 `get_work_orders_strict`（不猜列表 API 的服务端过滤能力，本地精确匹配）。
+- **API**（`main.py`）：`POST /real-orders/work-orders/dispatch-request` / `dispatch-approvals/{id}/approve` / `dispatch`，全部挂写入门禁（require_real_write_access）与真实身份依赖。
+- **前端**：`WorkOrderSelectPanel` 在"无关联工单"提示下新增下达区块——确认面板展示三步将执行内容 → 一次确认自动串行执行（审批号/批准/创建+回读全程留痕显示）→ 成功后刷新工单列表并自动选中新工单；api.ts 新增三个函数与类型。
+- **顺带修复既有 bug**：`_same_quantity` 工具函数被误贴 `@_agent_run` 装饰器（返回 coroutine 恒真），导致 NCR 处置回读的数量比对形同虚设且污染运行记录——已去除装饰器，数量比对恢复真实语义。
+
+#### 三、真实链路验证（全部真实系统，审批门禁内）
+
+以通用性实测创建的报价 QUO-3DD73A37B674（BD-2402 · 长城汽车 · 800 件）走完整链路：
+1. 报价审批 `APPR-80C4E238759C` → ERP 销售订单草稿 `SAL-ORD-2026-00024` 创建并回读验证（docstatus=0）；
+2. 工单下达：审批 `WOD-66A9397EDE8E`（首次 500 发现端点漏 await，修复）→ 审批 `WOD-AA9E1833517A` → 批准 → **真实创建 OpenMES 工单 id=10（WO-SO-2026-00024）**，customer_order_no=SAL-ORD-2026-00024 回读验证通过，status=PENDING；
+3. 幂等复测：再次下达返回 idempotent=true、written=false、零新写入；
+4. `/mes/work-orders` 列表可见新工单且关联正确（step 7 下拉可选中）。
+- **新订单全链路自此打通**：任意客户+物料 → 报价（真实价格）→ 审批 → ERP 草稿 → 采购分析（无 BOM 如实阻断，有缺料走方案审批）→ 工单下达（审批门禁真实创建+自动关联）→ 跟单/质量/发运门禁。
+- 小待办：工单 product_name 为空（未映射 OpenMES product_type；物料信息在 description 留痕）——后续可用 product_type external_code 映射。
+
+#### 四、测试与文件
+
+- 后端 **139 passed**（新增 4 例：审批前拒绝/创建+回读+幂等/回读不匹配拒绝/无 ERP 草稿拒绝）；前端 vitest 14 passed + build 通过。
+- 文件：`backend/app/services/real_order.py`（工单下达三步 + _same_quantity 修复）、`backend/app/adapters/mes/openmes_adapter.py`（create/raw 透传）、`backend/app/aip/agents/quality_document_aip.py`、`backend/app/services/coordinator.py`、`backend/acs/quality_document_acs.json`、`backend/app/main.py`（三个端点 + await 修复）、`backend/tests/test_real_order_realdata.py`、`frontend/src/api.ts`、`frontend/src/RealBusinessPage.tsx`、`frontend/src/components/flow/TrackingFlow.tsx`、`frontend/src/styles.css`。
+
+#### 五、待用户确认的剩余补强（写入类，未开工）
+
+1. 真实报工（批次 + batch-step complete 带 actual_elapsed_minutes）：任意新工单的速率 ETA 用真实 API 产生，替代 seed 直写；
+2. 质量问题登记（POST /api/v1/issues）：任意工单现场创建质量问题后立即走既有 NCR 处置闭环。

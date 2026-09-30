@@ -1,7 +1,15 @@
 // 跟单质量环节面板（步骤 7-8：工单选择 / 跟单 + 质量 NCR + 发运门禁；阶段十 10.5 从 RealBusinessPage 抽出）
 import NcrWorkflowCard from "../NcrWorkflowCard";
 import type { NcrForm, NcrWorkflow, QualityInfo, Quotation, ShipGateInfo, TrackingInfo, WorkOrder } from "../../types/realBusiness";
-import type { RealIdentity, RealQualityIssue } from "../../api";
+import type { RealIdentity, RealQualityIssue, WorkOrderDispatchPlan, WorkOrderDispatchResult } from "../../api";
+
+// 工单下达流程状态（主组件持有，面板展示；三步审批一次确认、过程透明）
+export type DispatchFlowState = {
+  stage: "confirm" | "executing" | "done";
+  approvalId?: string;
+  plan?: WorkOrderDispatchPlan;
+  result?: WorkOrderDispatchResult;
+};
 
 export function WorkOrderSelectPanel({
   step,
@@ -12,6 +20,10 @@ export function WorkOrderSelectPanel({
   loading,
   onRefreshWorkOrders,
   onLoadTracking,
+  dispatchFlow,
+  onOpenDispatch,
+  onConfirmDispatch,
+  onDismissDispatch,
 }: {
   step: number;
   quotation: Quotation | null;
@@ -21,7 +33,15 @@ export function WorkOrderSelectPanel({
   loading: boolean;
   onRefreshWorkOrders: () => void;
   onLoadTracking: () => void;
+  dispatchFlow: DispatchFlowState | null;
+  onOpenDispatch: () => void;
+  onConfirmDispatch: () => void;
+  onDismissDispatch: () => void;
 }) {
+  const noLinkedOrder = Boolean(
+    quotation?.erp_draft_id
+    && workOrders.filter((wo) => wo.customer_order_no?.trim() === quotation?.erp_draft_id?.trim()).length === 0,
+  );
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -50,8 +70,8 @@ export function WorkOrderSelectPanel({
                 </option>
               ))}
             </select>
-            {quotation?.erp_draft_id && workOrders.filter((wo) => wo.customer_order_no?.trim() === quotation.erp_draft_id?.trim()).length === 0 && (
-              <p className="field-hint">ERP 订单 {quotation.erp_draft_id} 当前没有正式关联的 OpenMES 工单。系统不会用其他订单的工单代替。</p>
+            {noLinkedOrder && (
+              <p className="field-hint">ERP 订单 {quotation?.erp_draft_id} 当前没有正式关联的 OpenMES 工单。系统不会用其他订单的工单代替。</p>
             )}
             <button
               className="button ghost"
@@ -60,6 +80,52 @@ export function WorkOrderSelectPanel({
               ↻ 刷新工单列表（在 OpenMES 建立关联后点击）
             </button>
           </div>
+        </div>
+      )}
+      {/* 工单下达（阶段十通用链路补强）：任意新订单不再依赖人工在 OpenMES 手工建单 */}
+      {step === 7 && noLinkedOrder && (
+        <div className="dispatch-block">
+          {!dispatchFlow && (
+            <>
+              <small>没有关联工单？可以在审批门禁内向 OpenMES 下达工单（真实创建 + customer_order_no 自动关联 + 回读验证）</small>
+              <button className="button primary" onClick={onOpenDispatch} disabled={loading}>
+                下达工单到 OpenMES（需人工审批）→
+              </button>
+            </>
+          )}
+          {dispatchFlow?.stage === "confirm" && (
+            <div className="dispatch-confirm">
+              <small>将执行（真实写入 OpenMES，需逐级审批）：</small>
+              <code>① 建立"工单下达"审批（记录将创建的工单内容，不写入）</code>
+              <code>② 人工批准该审批（审批人 = 当前登录身份）</code>
+              <code>③ 按审批创建 OpenMES 工单（order_no 由 ERP 订单号派生，customer_order_no 精确关联）→ 回读验证</code>
+              <div className="proposal-confirm-row">
+                <button className="button primary" onClick={onConfirmDispatch} disabled={loading}>
+                  确认下达（①→②→③ 自动执行，过程留痕）
+                </button>
+                <button className="button ghost" onClick={onDismissDispatch}>取消</button>
+              </div>
+            </div>
+          )}
+          {dispatchFlow?.stage === "executing" && (
+            <div className="dispatch-executing">
+              执行中：① 建立审批{dispatchFlow.approvalId ? `（${dispatchFlow.approvalId}）✓` : "…"} → ② 人工批准 → ③ 创建工单 + 回读…
+            </div>
+          )}
+          {dispatchFlow?.stage === "done" && dispatchFlow.result && (
+            dispatchFlow.result.success ? (
+              <div className={`dispatch-result ${dispatchFlow.result.idempotent ? "" : "ok"}`}>
+                ✓ 工单已下达：{dispatchFlow.result.work_order?.order_no ?? "—"}
+                （id {dispatchFlow.result.work_order_id ?? "—"} · customer_order_no 关联已回读验证
+                {dispatchFlow.result.idempotent ? " · 幂等命中既有工单" : ""}）
+                请从上方工单下拉选择该工单继续。
+              </div>
+            ) : (
+              <div className="dispatch-result error">
+                工单下达失败：{dispatchFlow.result.error}
+              </div>
+            )
+          )}
         </div>
       )}
       {step === 7 && (

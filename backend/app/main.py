@@ -898,6 +898,75 @@ class RealOrderQualityCloseWriteRequest(BaseModel):
     approved_by: str | None = None
 
 
+class RealOrderWorkOrderDispatchRequest(BaseModel):
+    quotation_id: str
+    requested_by: str | None = None
+
+
+class RealOrderWorkOrderDispatchApproveRequest(BaseModel):
+    approved_by: str | None = None
+
+
+class RealOrderWorkOrderDispatchWriteRequest(BaseModel):
+    quotation_id: str
+    approval_id: str
+    approved_by: str | None = None
+
+
+# ==================== 工单下达（ERP 草稿 → OpenMES 工单，人工审批门禁） ====================
+
+
+@app.post("/api/real-orders/work-orders/dispatch-request", tags=["real-orders"])
+async def real_order_request_work_order_dispatch(
+    body: RealOrderWorkOrderDispatchRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    """① 建立"工单下达"审批：只登记将执行内容，不写 OpenMES。"""
+    from app.services.real_order import request_work_order_dispatch
+    requested_by = _actor_for_request(body.requested_by, identity, "work_order_dispatch_request")
+    result = await request_work_order_dispatch(body.quotation_id, requested_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "创建工单下达审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/work-orders/dispatch-approvals/{approval_id}/approve", tags=["real-orders"])
+async def real_order_approve_work_order_dispatch(
+    approval_id: str,
+    body: RealOrderWorkOrderDispatchApproveRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    """② 人工批准工单下达审批。"""
+    from app.services.real_order import approve_work_order_dispatch
+    approved_by = _actor_for_request(body.approved_by, identity, "work_order_dispatch_approval")
+    result = approve_work_order_dispatch(approval_id, approved_by)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "审批失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.post("/api/real-orders/work-orders/dispatch", tags=["real-orders"])
+async def real_order_dispatch_work_order(
+    body: RealOrderWorkOrderDispatchWriteRequest,
+    _write_access: bool = Depends(require_real_write_access),
+    identity=Depends(require_real_identity),
+) -> dict:
+    """③ 审批通过后创建 OpenMES 工单并回读验证（customer_order_no 幂等）。"""
+    from app.services.real_order import dispatch_work_order_to_openmes
+    approved_by = _actor_for_request(body.approved_by, identity, "work_order_dispatch_write")
+    result = await dispatch_work_order_to_openmes(body.quotation_id, body.approval_id, approved_by)
+    if not result.get("success") and result.get("written"):
+        raise HTTPException(status_code=502, detail=result)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "工单下达失败"))
+    result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
 @app.post("/api/real-orders/quality/issues/{issue_id}/resolve", tags=["real-orders"])
 async def real_order_resolve_quality_issue(
     issue_id: str,

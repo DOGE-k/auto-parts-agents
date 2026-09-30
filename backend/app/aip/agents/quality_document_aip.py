@@ -58,6 +58,16 @@ def create_quality_document_aip_service(aic: str = "local-quality-doc-001") -> A
         handler=real_check_issue_closure,
     )
 
+    async def real_list_open_issues(inputs: dict) -> dict:
+        """全厂未关闭质量问题队列（跨工单，真实 OpenMES，只读）。"""
+        return await real_order.quality_todo_list()
+
+    service.register_skill(
+        skill_id="quality.list_open_issues",
+        skill_name="全厂未关闭质量问题队列",
+        handler=real_list_open_issues,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 资料清单生成

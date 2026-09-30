@@ -1534,6 +1534,46 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 /* ═══════════════════════════════════════════════════════════════════
    Real Business Page
    ═══════════════════════════════════════════════════════════════════ */
+/* 工单下达（ERP 草稿 → OpenMES，审批门禁内） */
+.dispatch-block {
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  margin: 4px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dispatch-block > small { color: var(--muted); }
+.dispatch-confirm code, .dispatch-executing {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  margin-bottom: 4px;
+}
+.dispatch-confirm .proposal-confirm-row { margin-top: 6px; }
+.dispatch-result {
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.dispatch-result.ok {
+  color: #0a6b46;
+  background: rgba(10, 125, 116, 0.08);
+  border: 1px solid #9fd6c8;
+}
+.dispatch-result.error {
+  color: #8a3030;
+  background: rgba(226, 90, 90, 0.07);
+  border: 1px solid #e3b3b3;
+}
+
 /* 采购分析阻断卡片：BOM 缺失时如实提示，不放行流程 */
 .evaluation-blocked {
   border: 1px solid #e0c8a0;

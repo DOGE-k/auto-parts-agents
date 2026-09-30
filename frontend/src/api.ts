@@ -555,6 +555,69 @@ export async function createPoFromPlan(
   });
 }
 
+// ==================== 工单下达（ERP 草稿 → OpenMES 工单，三步审批门禁） ====================
+
+export type WorkOrderDispatchPlan = {
+  quotation_id: string;
+  erp_draft_id: string;
+  order_no: string;
+  customer_order_no: string;
+  product_id: string;
+  planned_qty: number | string;
+  due_date: string;
+  customer_name: string;
+};
+
+export type WorkOrderDispatchResult = {
+  success: boolean;
+  status?: string;
+  written?: boolean;
+  idempotent?: boolean;
+  work_order?: Record<string, any>;
+  work_order_id?: string | number;
+  read_back_verified?: boolean;
+  approval?: { approval_id: string; approved_by: string; approved: boolean };
+  dispatch_plan?: WorkOrderDispatchPlan;
+  error?: string;
+};
+
+export async function requestWorkOrderDispatch(
+  quotationId: string,
+  requestedBy?: string,
+): Promise<WorkOrderDispatchResult> {
+  return api<WorkOrderDispatchResult>("/real-orders/work-orders/dispatch-request", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ quotation_id: quotationId, requested_by: requestedBy }),
+  });
+}
+
+export async function approveWorkOrderDispatch(
+  approvalId: string,
+  approvedBy?: string,
+): Promise<WorkOrderDispatchResult> {
+  return api<WorkOrderDispatchResult>(
+    "/real-orders/work-orders/dispatch-approvals/" + encodeURIComponent(approvalId) + "/approve",
+    {
+      method: "POST",
+      headers: writeHeaders(),
+      body: JSON.stringify({ approved_by: approvedBy }),
+    },
+  );
+}
+
+export async function dispatchWorkOrder(
+  quotationId: string,
+  approvalId: string,
+  approvedBy?: string,
+): Promise<WorkOrderDispatchResult> {
+  return api<WorkOrderDispatchResult>("/real-orders/work-orders/dispatch", {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({ quotation_id: quotationId, approval_id: approvalId, approved_by: approvedBy }),
+  });
+}
+
 export async function askAssistant(
   question: string,
   context: Record<string, unknown> = {},

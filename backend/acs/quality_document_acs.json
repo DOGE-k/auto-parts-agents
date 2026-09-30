@@ -105,6 +105,24 @@
       "outputModes": [
         "application/json"
       ]
+    },
+    {
+      "id": "quality.list_open_issues",
+      "name": "真实list_open_issues",
+      "description": "列出全厂所有未关闭质量问题（跨工单队列：工单号/标题/严重度/状态/处置/已报告天数）。用户问\"现在有哪些质量问题/最紧急的质量问题/全厂质量状况\"时使用，无需指定工单；按已报告天数从长到短展示。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
     }
   ]
 }

@@ -331,5 +331,118 @@ class ProcurementRealDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("缺少真实价格", result["error"])
 
 
+class _FakeMESForDispatch:
+    """工单下达测试用假 OpenMES 适配器（记录创建调用，可注入回读篡改）。"""
+
+    authority = "OpenMES"
+
+    def __init__(self, corrupt_read_back: bool = False):
+        self.created: list[dict] = []
+        self._orders: list[dict] = []
+        self._corrupt = corrupt_read_back
+
+    async def get_work_orders_strict(self, scope):
+        limit = int((scope or {}).get("limit", 50))
+        return self._orders[:limit]
+
+    async def create_work_order(self, payload):
+        self.created.append(payload)
+        wo = {
+            "id": 100 + len(self._orders),
+            "order_no": payload.get("order_no"),
+            "customer_order_no": payload.get("customer_order_no"),
+            "planned_qty": payload.get("planned_qty"),
+            "status": "PENDING",
+        }
+        if self._corrupt:
+            wo["customer_order_no"] = "SAL-ORD-WRONG"
+        self._orders.append(wo)
+        return {"data": wo}
+
+    async def get_work_order_raw(self, work_order_id):
+        for wo in self._orders:
+            if str(wo.get("id")) == str(work_order_id):
+                return wo
+        return {}
+
+
+class WorkOrderDispatchTests(unittest.IsolatedAsyncioTestCase):
+    """工单下达（ERP 草稿 → OpenMES）：三步审批门禁 + customer_order_no 幂等 + 回读验证。"""
+
+    def _quotation_with_draft(self, erp_draft_id="SAL-ORD-2026-90001", qty=800):
+        q = {
+            "quotation_id": "QUO-WOD", "item": {"item_id": "BD-2401"}, "quantity": qty,
+            "unit_price": "85", "currency": "CNY", "status": "APPROVED",
+            "delivery_date": "2026-11-20", "erp_draft_id": erp_draft_id,
+            "customer": {"customer_id": "长城汽车", "customer_name": "长城汽车"},
+        }
+        real_order.save_quotation(q)
+        return q
+
+    async def test_dispatch_requires_approval_before_writing(self):
+        """审批未批准时写入被拒绝，OpenMES 零写入。"""
+        self._quotation_with_draft()
+        mes = _FakeMESForDispatch()
+        requested = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        self.assertTrue(requested["success"])
+        self.assertFalse(requested["written"])
+        self.assertEqual(requested["dispatch_plan"]["customer_order_no"], "SAL-ORD-2026-90001")
+        self.assertTrue(requested["dispatch_plan"]["order_no"].startswith("WO-SO-"))
+
+        approval_id = requested["approval"]["approval_id"]
+        denied = await real_order.dispatch_work_order_to_openmes("QUO-WOD", approval_id, "user-a")
+        self.assertFalse(denied["success"])
+        self.assertEqual(mes.created, [])
+
+    async def test_dispatch_creates_work_order_with_read_back_and_idempotency(self):
+        """批准后创建工单并回读验证；重复下达幂等返回既有工单。"""
+        self._quotation_with_draft()
+        mes = _FakeMESForDispatch()
+        requested = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        approval_id = requested["approval"]["approval_id"]
+        approved = real_order.approve_work_order_dispatch(approval_id, "user-a")
+        self.assertTrue(approved["success"])
+
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            result = await real_order.dispatch_work_order_to_openmes("QUO-WOD", approval_id, "user-a")
+            self.assertTrue(result["success"])
+            self.assertTrue(result["written"])
+            self.assertTrue(result["read_back_verified"])
+            self.assertEqual(result["work_order"]["customer_order_no"], "SAL-ORD-2026-90001")
+            self.assertEqual(len(mes.created), 1)
+            payload = mes.created[0]
+            self.assertEqual(payload["customer_order_no"], "SAL-ORD-2026-90001")
+            self.assertEqual(payload["planned_qty"], 800)
+            self.assertTrue(payload["description"].startswith("工单下达（人工审批"))
+
+            # 幂等：同 ERP 订单再次下达，返回既有工单且零新写入
+            again = await real_order.dispatch_work_order_to_openmes("QUO-WOD", approval_id, "user-a")
+        self.assertTrue(again["success"])
+        self.assertTrue(again["idempotent"])
+        self.assertFalse(again["written"])
+        self.assertEqual(len(mes.created), 1)
+
+    async def test_dispatch_fails_when_read_back_mismatch(self):
+        """创建成功但回读 customer_order_no 不匹配时如实报错（不伪装成功）。"""
+        self._quotation_with_draft()
+        mes = _FakeMESForDispatch(corrupt_read_back=True)
+        requested = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        approval_id = requested["approval"]["approval_id"]
+        real_order.approve_work_order_dispatch(approval_id, "user-a")
+        with patch.object(real_order, "get_mes_adapter", return_value=mes):
+            result = await real_order.dispatch_work_order_to_openmes("QUO-WOD", approval_id, "user-a")
+        self.assertFalse(result["success"])
+        self.assertIn("回读验证未通过", result["error"])
+
+    async def test_dispatch_rejected_without_erp_draft(self):
+        """报价没有 ERP 销售订单草稿时不允许下达工单。"""
+        q = self._quotation_with_draft()
+        q["erp_draft_id"] = None
+        real_order.save_quotation(q)
+        result = await real_order.request_work_order_dispatch("QUO-WOD", "user-a")
+        self.assertFalse(result["success"])
+        self.assertIn("ERP 销售订单草稿", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

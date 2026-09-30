@@ -20,18 +20,23 @@ import {
 } from "./components/flow/TrackingFlow";
 import {
   api,
+  approveWorkOrderDispatch,
+  dispatchWorkOrder,
   getQualityTodo,
   getRealIdentity,
   getSessionIssuedAt,
   getRealSessionToken,
   getRealWriteToken,
   loginRealSession,
+  requestWorkOrderDispatch,
   setRealSessionToken,
   setRealWriteToken,
 } from "./api";
 import type {
   QualityTodoItem,
   RealIdentity,
+  WorkOrderDispatchPlan,
+  WorkOrderDispatchResult,
 } from "./api";
 import type {
   Approval,
@@ -356,6 +361,41 @@ export default function RealBusinessPage() {
       setError(e instanceof Error ? e.message : "刷新工单列表失败");
     }
   }, []);
+
+  // 工单下达（ERP 草稿 → OpenMES 工单，阶段十通用链路补强）：三步审批一次确认、过程透明展示
+  const [dispatchFlow, setDispatchFlow] = useState<{
+    stage: "confirm" | "executing" | "done";
+    approvalId?: string;
+    approvalDisplayed?: boolean;
+    plan?: WorkOrderDispatchPlan;
+    result?: WorkOrderDispatchResult;
+  } | null>(null);
+
+  const runWorkOrderDispatch = useCallback(async () => {
+    if (!quotation) return;
+    setDispatchFlow((prev) => (prev ? { ...prev, stage: "executing" } : prev));
+    setError("");
+    try {
+      const requested = await requestWorkOrderDispatch(quotation.quotation_id, identity?.actor_id);
+      if (!requested.success || !requested.approval) throw new Error(requested.error ?? "建立工单下达审批失败");
+      setDispatchFlow((prev) => (prev ? { ...prev, approvalId: requested.approval!.approval_id, approvalDisplayed: true, plan: requested.dispatch_plan } : prev));
+      const approved = await approveWorkOrderDispatch(requested.approval.approval_id, identity?.actor_id);
+      if (!approved.success) throw new Error(approved.error ?? "工单下达审批失败");
+      setDispatchFlow((prev) => (prev ? { ...prev, approvalId: requested.approval!.approval_id } : prev));
+      const dispatched = await dispatchWorkOrder(quotation.quotation_id, requested.approval.approval_id, identity?.actor_id);
+      if (!dispatched.success) throw new Error(dispatched.error ?? "工单下达失败");
+      setDispatchFlow((prev) => (prev ? { ...prev, stage: "done", result: dispatched } : prev));
+      notify(`工单 ${dispatched.work_order?.order_no ?? ""} 已下达（customer_order_no 关联已回读验证）`);
+      // 下达成功后刷新工单列表并自动选中新建工单
+      const refreshed = await api<WorkOrder[]>("/mes/work-orders?limit=100");
+      setWorkOrders(refreshed);
+      const newId = dispatched.work_order_id != null ? String(dispatched.work_order_id) : "";
+      if (newId && refreshed.some((wo) => String(wo.work_order_id) === newId)) setWorkOrderId(newId);
+    } catch (e) {
+      setDispatchFlow((prev) => (prev ? { ...prev, stage: "done", result: { success: false, error: e instanceof Error ? e.message : "工单下达失败" } } : prev));
+      setError(e instanceof Error ? e.message : "工单下达失败");
+    }
+  }, [quotation, identity]);
 
   // 步骤7: 跟单 + 质量 + 发运门禁
   const loadTracking = useCallback(async () => {
@@ -787,6 +827,10 @@ export default function RealBusinessPage() {
           loading={loading}
           onRefreshWorkOrders={() => void refreshWorkOrders()}
           onLoadTracking={() => void loadTracking()}
+          dispatchFlow={dispatchFlow}
+          onOpenDispatch={() => setDispatchFlow({ stage: "confirm" })}
+          onConfirmDispatch={() => void runWorkOrderDispatch()}
+          onDismissDispatch={() => setDispatchFlow(null)}
         />
       )}
       {/* Step 8: 跟单 + 质量 + 发运门禁（面板级降级：NCR 卡片渲染异常不影响流程其余部分） */}
