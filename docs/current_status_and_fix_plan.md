@@ -1081,5 +1081,6 @@ ERP 物料需求
 **边界与下一步**：
 
 - ERPNext 侧用户名/密码登录依赖 frappe 会话/OIDC 契约，部署未提供，保持服务端集成身份不变；
-- **成功路径已于本日完成端到端验收**：部署只有 `admin` 一个 OpenMES 账号，经用户同意后通过 artisan 重置其密码，随后 `POST /api/real-orders/auth/login` 返回 provider=openmes、subject=admin、roles=[Admin]、force_password_change=false（真实 OpenMES Sanctum 令牌）；登录失败提示已改为会话面板内联显示（`fba5609`）；ERPNext 密码登录/OIDC 仍待部署契约；
+- **成功路径已于本日完成 API 与页面双重验收**：部署只有 `admin` 一个 OpenMES 账号，经用户同意后通过 artisan 重置其密码；`POST /api/real-orders/auth/login` 返回 provider=openmes、subject=admin、roles=[Admin]、force_password_change=false（真实 OpenMES Sanctum 令牌）；页面上用该凭据登录成功，审批身份行变为 `Administrator（admin，OpenMES，角色：…）`，截图 `gui-test-screenshots/2026-09-30_openmes_session_login_success_page.png`；登录失败提示已改为会话面板内联显示（`fba5609`）；ERPNext 密码登录/OIDC 仍待部署契约；
+- **登录会话的角色门禁配套**：OpenMES admin 会话原生只有 `Admin` 角色，会话下执行审批会被 403 拦截；已在部署 `.env` 配置 `REAL_IDENTITY_ROLE_MAP={"admin": ["sales_manager", "purchase_manager", "quality_manager"]}`（仅显式授予部署管理员业务审批角色，不提交仓库），重启后页面身份行显示 `Admin、purchase_manager、quality_manager、sales_manager`，会话内审批可用；
 - NCR 真实写入最小范围验收仍等待业务处置决策 + 具备质量角色的会话 + 写入令牌。
