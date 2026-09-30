@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import { formatAssistantAnswer } from "./lib/markdown";
+import QualityTodoPanel from "./components/QualityTodoPanel";
 import {
   api,
   agentRunTypeNames,
@@ -262,44 +264,6 @@ type ProcurementApproval = {
 };
 
 // ========== 页面组件 ==========
-// 轻量 Markdown 渲染（协调者回答）：先转义 HTML，再恢复标题/加粗/表格结构。
-// 内容来源是本系统协调者与真实工具结果，无用户富文本输入面。
-function formatAssistantAnswer(text: string): string {
-  const esc = text
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const lines = esc.split("\n");
-  const out: string[] = [];
-  let tableRows: string[][] = [];
-  const bold = (s: string) => s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-
-  const flushTable = () => {
-    if (tableRows.length === 0) return;
-    // 第二行是分隔行（---），跳过
-    const body = tableRows.filter((cells, i) => !(i === 1 && cells.every((c) => /^:?-{2,}:?$/.test(c.trim()))));
-    const rows = body.map((cells) => `<tr>${cells.map((c) => `<td>${bold(c.trim())}</td>`).join("")}</tr>`).join("");
-    out.push(`<table class="md-table">${rows}</table>`);
-    tableRows = [];
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
-      tableRows.push(trimmed.slice(1, -1).split("|"));
-      continue;
-    }
-    flushTable();
-    if (/^#{1,4}\s/.test(trimmed)) {
-      out.push(`<div class="md-heading">${bold(trimmed.replace(/^#{1,4}\s/, ""))}</div>`);
-    } else if (trimmed === "") {
-      out.push('<div class="md-gap"></div>');
-    } else {
-      out.push(`<div class="md-line">${bold(trimmed)}</div>`);
-    }
-  }
-  flushTable();
-  return out.join("");
-}
-
 export default function RealBusinessPage() {
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1366,68 +1330,16 @@ export default function RealBusinessPage() {
         )}
       </section>
 
-      {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见） */}
-      <section className="panel quality-todo-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>质量待办</h2>
-            <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"进入该工单既有的 NCR 审批处置面板。</p>
-          </div>
-          {hasOpenmesSession && (
-            <button className="button ghost" onClick={() => void loadQualityTodo()} disabled={qualityTodoLoading}>
-              {qualityTodoLoading ? "加载中…" : "↻ 刷新待办"}
-            </button>
-          )}
-        </div>
-        {!hasOpenmesSession && (
-          <p className="quality-todo-hint">
-            登录后查看质量待办——请展开上方"会话设置"，用 OpenMES 账号建立短期会话（仅当前浏览器会话生效）。
-          </p>
-        )}
-        {hasOpenmesSession && qualityTodoError && (
-          <div className="quality-todo-error">
-            <strong>加载失败</strong> {qualityTodoError}
-            <button className="button ghost" onClick={() => void loadQualityTodo()}>重试</button>
-          </div>
-        )}
-        {hasOpenmesSession && !qualityTodoError && qualityTodo && qualityTodo.length === 0 && (
-          <p className="quality-todo-hint">当前没有未关闭质量问题。</p>
-        )}
-        {hasOpenmesSession && qualityTodo && qualityTodo.length > 0 && (
-          <table className="quality-todo-table">
-            <thead>
-              <tr>
-                <th>工单号</th>
-                <th>标题</th>
-                <th>严重度</th>
-                <th>状态</th>
-                <th>处置</th>
-                <th>已报告</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {qualityTodo.map((item) => (
-                <tr key={item.issue_id}>
-                  <td>{item.work_order_no || `#${item.work_order_id}`}</td>
-                  <td>{item.title}</td>
-                  <td>{item.severity || "—"}</td>
-                  <td>{item.status}</td>
-                  <td>{item.disposition || "未处置"}</td>
-                  <td className={typeof item.reported_days === "number" && item.reported_days > 3 ? "todo-overdue" : ""}>
-                    {typeof item.reported_days === "number" ? `${item.reported_days} 天` : "—"}
-                  </td>
-                  <td>
-                    <button className="button ghost" onClick={() => void goToQualityDispose(item)} disabled={loading}>
-                      去处置 →
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见；10.5 抽出组件） */}
+      <QualityTodoPanel
+        hasOpenmesSession={hasOpenmesSession}
+        qualityTodo={qualityTodo}
+        qualityTodoLoading={qualityTodoLoading}
+        qualityTodoError={qualityTodoError}
+        busy={loading}
+        onRefresh={() => void loadQualityTodo()}
+        onGoDispose={(item) => void goToQualityDispose(item)}
+      />
 
       {/* 步骤指示器 */}
       <div className="stepper">
