@@ -17,6 +17,9 @@ jobs:
       - name: Install backend and test dependencies
         run: |
           python -m pip install --upgrade pip
+          # vendored ACPs SDK（acps-sdk-src/acps-sdk）：本地环境即从该路径 editable
+          # 导入，后端 aip/ 模块与多个测试依赖它，必须先于后端本体安装。
+          pip install -e acps-sdk-src/acps-sdk
           pip install -e backend
           pip install pytest==9.1.1 pytest-asyncio==1.4.0
       - name: Compile check (app/)
