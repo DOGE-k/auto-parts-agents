@@ -221,3 +221,128 @@ class CollaborationEndpointTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShortageEventTests(unittest.IsolatedAsyncioTestCase):
+    """缺料事件：采购分析发现真实缺料时触发（事实触发，无阈值）。"""
+
+    def _shortage_plan(self, *, recommended="OPT-1", quotation_id="QUO-COSTTEST0001"):
+        # quotation_id 参与去重键：各测试独立报价号，避免 unittest 字母序执行时互相去重
+        return {
+            "plan_id": "PROC-SHORTTEST01",
+            "quotation_id": quotation_id,
+            "quotation_status": "APPROVED",
+            "recommended_option_id": recommended,
+            "net_requirement": {
+                "has_shortage": True,
+                "shortage_count": 2,
+                "shortage_items": [
+                    {"item_id": "CI-RAW", "net_requirement": "1200", "warehouse_qty": "800", "purchase_qty": "1200", "price_status": "real_buying_price"},
+                    {"item_id": "M10-BOLT", "net_requirement": "3000", "warehouse_qty": "5000", "purchase_qty": "3000", "price_status": "real_buying_price"},
+                ],
+            },
+            "supplier_options": [
+                {"option_id": "OPT-1", "supplier_name": "上海铸锻厂", "lead_time_days": 15, "coverage": "2/2", "total_cost": 39080, "currency": "CNY"},
+            ],
+        }
+
+    async def test_shortage_event_with_cost_and_delivery(self):
+        # 每个测试独立报价号：去重键 = 报价 + 缺料签名，unittest 按方法名字母序
+        # 执行，共用报价号会触发去重互相污染（d < g < w）。
+        with patch.object(collaboration.real_order, "get_quotation", return_value={"erp_draft_id": "SAL-ORD-2026-00023"}), \
+             patch("app.services.order_linkage.get_order_mes_link", AsyncMock(return_value={
+                 "status": "LINKED",
+                 "association": {"links": [{"mes_record": {"record_id": "9"}}]},
+             })), \
+             patch.object(collaboration.real_order, "assess_cost_impact", AsyncMock(return_value={
+                 "plan_id": "PROC-SHORTTEST01", "option_id": "OPT-1", "supplier_name": "上海铸锻厂",
+                 "material_cost_delta": "2220.00", "currency": "CNY",
+                 "calculation_basis": "supplier_specific_price_vs_standard",
+             })), \
+             patch.object(collaboration.real_order, "assess_delivery_impact", AsyncMock(return_value={
+                 "work_order_id": "9", "work_order_no": "TEST_WO", "due_date": "2026-10-31",
+                 "material_ready_date": "2026-10-16", "buffer_days": 15, "verdict": "arrival_in_time",
+                 "conclusion": "物料 2026-10-16 到位，早于交期 15 天，不延期",
+                 "completion_rate": 90.0,
+             })):
+            event = await collaboration.trigger_shortage_event(self._shortage_plan(quotation_id="QUO-COSTTEST0001"))
+        self.assertTrue(event["event_id"].startswith("EVT-"))
+        self.assertEqual(event["status"], "COMPLETED")
+        detail = collaboration.get_event(event["event_id"])
+        result = detail["result"]
+        self.assertEqual(result["cost_assessment"]["material_cost_delta"], "2220.00")
+        self.assertEqual(result["delivery_assessment"]["verdict"], "arrival_in_time")
+        conclusions = " ".join(result["conclusions"])
+        self.assertIn("缺料 2 项", conclusions)
+        self.assertIn("成本维度", conclusions)
+        self.assertIn("交期维度", conclusions)
+        self.assertIn("审批门禁", conclusions)
+
+    async def test_shortage_event_dedup_on_same_signature(self):
+        with patch.object(collaboration.real_order, "get_quotation", return_value={}), \
+             patch("app.services.order_linkage.get_order_mes_link", AsyncMock(return_value={"status": "NOT_LINKED"})), \
+             patch.object(collaboration.real_order, "assess_cost_impact", AsyncMock(return_value={"status": "DATA_MISSING"})):
+            first = await collaboration.trigger_shortage_event(self._shortage_plan(quotation_id="QUO-DEDUPTEST001"))
+            second = await collaboration.trigger_shortage_event(self._shortage_plan(quotation_id="QUO-DEDUPTEST001"))
+        self.assertTrue(second["deduplicated"])
+        self.assertEqual(first["event_id"], second["event_id"])
+        # 数量变化 → 新签名 → 新事件
+        changed = self._shortage_plan(quotation_id="QUO-DEDUPTEST001")
+        changed["net_requirement"]["shortage_items"][0]["net_requirement"] = "1500"
+        third = await collaboration.trigger_shortage_event(changed)
+        self.assertNotEqual(first["event_id"], third["event_id"])
+
+    async def test_shortage_event_gaps_when_no_recommendation_and_no_link(self):
+        plan = self._shortage_plan(recommended="", quotation_id="QUO-GAPTEST00001")
+        with patch.object(collaboration.real_order, "get_quotation", return_value={}), \
+             patch("app.services.order_linkage.get_order_mes_link", AsyncMock(return_value={"status": "NOT_LINKED"})):
+            event = await collaboration.trigger_shortage_event(plan)
+        detail = collaboration.get_event(event["event_id"])
+        self.assertEqual(event["status"], "COMPLETED")
+        gaps = detail["result"]["data_gaps"]
+        self.assertTrue(any("未产出可推荐供应商" in g["detail"] for g in gaps))
+        # 报价无 erp_draft_id → 交期维度如实记缺口（无法反查关联工单）
+        self.assertTrue(any("尚未创建 ERP 销售订单草稿" in g["detail"] for g in gaps))
+        conclusions = " ".join(detail["result"]["conclusions"])
+        self.assertIn("推荐 无", conclusions)
+
+    async def test_no_shortage_plan_skipped(self):
+        plan = self._shortage_plan()
+        plan["net_requirement"]["has_shortage"] = False
+        result = await collaboration.trigger_shortage_event(plan)
+        self.assertIsNone(result)
+
+
+class OverdueEventTests(unittest.IsolatedAsyncioTestCase):
+    """延期事件：事实型触发（已过交期且未完成），无业务阈值。"""
+
+    def _overdue_track(self, *, due="2026-09-01T00:00:00.000000Z", completion=30.0, status="IN_PROGRESS"):
+        return {
+            "work_order_id": "2", "work_order_no": "WO-2026-001", "status": status,
+            "quantity": "500.00", "completed_qty": "150.00", "completion_rate": completion,
+            "due_date": due, "eta_status": "DATA_MISSING",
+        }
+
+    async def test_overdue_triggers_event_with_facts(self):
+        event = await collaboration.trigger_overdue_event_if_needed(self._overdue_track())
+        self.assertIsNotNone(event)
+        self.assertEqual(event["status"], "COMPLETED")
+        detail = collaboration.get_event(event["event_id"])
+        self.assertGreater(detail["result"]["overdue_days"], 0)
+        conclusions = " ".join(detail["result"]["conclusions"])
+        self.assertIn("已过交期", conclusions)
+        self.assertIn("30.0%", conclusions)
+        self.assertIn("不代承诺客户", conclusions)
+        # 同日去重
+        again = await collaboration.trigger_overdue_event_if_needed(self._overdue_track())
+        self.assertIsNone(again)
+
+    async def test_not_overdue_or_done_does_not_trigger(self):
+        self.assertIsNone(await collaboration.trigger_overdue_event_if_needed(
+            self._overdue_track(due="2099-01-01T00:00:00.000000Z")))  # 未到期
+        self.assertIsNone(await collaboration.trigger_overdue_event_if_needed(
+            self._overdue_track(status="DONE")))  # 已完成
+        self.assertIsNone(await collaboration.trigger_overdue_event_if_needed(
+            self._overdue_track(completion=100.0)))  # 完成率 100%
+        self.assertIsNone(await collaboration.trigger_overdue_event_if_needed(
+            self._overdue_track(due="")))  # 无交期数据如实跳过

@@ -544,6 +544,12 @@ export type CollaborationEventStatus =
   | "FAILED"
   | "MANUAL_HANDLED";
 
+export const collaborationEventTypeLabels: Record<string, string> = {
+  quality_issue_raised: "质量异常",
+  material_shortage: "物料短缺",
+  production_overdue: "生产延期",
+};
+
 export const collaborationEventStatusLabels: Record<string, string> = {
   PENDING: "待处理",
   PROCESSING: "协同中",

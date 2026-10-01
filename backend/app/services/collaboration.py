@@ -17,8 +17,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json as _json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -31,6 +33,14 @@ from app.services import real_order
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE_QUALITY_ISSUE = "quality_issue_raised"
+EVENT_TYPE_SHORTAGE = "material_shortage"
+EVENT_TYPE_OVERDUE = "production_overdue"
+
+_EVENT_TYPE_LABELS = {
+    EVENT_TYPE_QUALITY_ISSUE: "质量异常协同",
+    EVENT_TYPE_SHORTAGE: "关键物料短缺协同",
+    EVENT_TYPE_OVERDUE: "生产延期预警协同",
+}
 
 EVENT_STATUS_PENDING = "PENDING"
 EVENT_STATUS_PROCESSING = "PROCESSING"
@@ -53,6 +63,7 @@ def _event_summary(row: CollaborationEventRow) -> dict[str, Any]:
     return {
         "event_id": row.event_id,
         "event_type": row.event_type,
+        "event_type_label": _EVENT_TYPE_LABELS.get(row.event_type, row.event_type),
         "dedup_key": row.dedup_key,
         "status": row.status,
         "payload": row.payload_json or {},
@@ -143,7 +154,7 @@ async def trigger_quality_issue_event(
 
 
 async def process_event(event_id: str) -> dict[str, Any]:
-    """执行事件协同（只读三智能体），写回结果或失败记录。"""
+    """执行事件协同（按事件类型分发；全程只读），写回结果或失败记录。"""
     with SessionLocal() as session:
         row = session.get(CollaborationEventRow, event_id)
         if row is None:
@@ -153,9 +164,37 @@ async def process_event(event_id: str) -> dict[str, Any]:
             summary["error"] = {"message": "事件已人工接管，不再自动协同"}
             return summary
         payload = dict(row.payload_json or {})
+        event_type = row.event_type
         row.status = EVENT_STATUS_PROCESSING
         session.commit()
 
+    if event_type == EVENT_TYPE_SHORTAGE:
+        return await _finish_event(event_id, await _process_shortage(payload))
+    if event_type == EVENT_TYPE_OVERDUE:
+        return await _finish_event(event_id, await _process_overdue(payload))
+    return await _finish_event(event_id, await _process_quality_issue(payload))
+
+
+async def _finish_event(event_id: str, outcome: dict[str, Any]) -> dict[str, Any]:
+    """把处理器结果（或异常）写回事件行。outcome 含 result/error 二选一。"""
+    error = outcome.get("error")
+    with SessionLocal() as session:
+        row = session.get(CollaborationEventRow, event_id)
+        if error is not None:
+            row.failure_count = (row.failure_count or 0) + 1
+            row.status = EVENT_STATUS_FAILED
+            row.error_json = error
+        else:
+            row.status = EVENT_STATUS_COMPLETED
+            row.result_json = outcome.get("result") or {}
+            row.error_json = None
+        row.processed_at = _now()
+        session.commit()
+        return _event_summary(row)
+
+
+async def _process_quality_issue(payload: dict[str, Any]) -> dict[str, Any]:
+    """质量异常事件：质量影响 → 生产交期 → 供应商风险（三维度只读协同）。"""
     work_order_id = str(payload.get("work_order_id", ""))
     data_gaps: list[dict[str, str]] = []
     try:
@@ -192,23 +231,9 @@ async def process_event(event_id: str) -> dict[str, Any]:
             "generated_at": _now().isoformat(),
             "authority": "ERPNext + OpenMES（只读协同，未写入）",
         }
-        with SessionLocal() as session:
-            row = session.get(CollaborationEventRow, event_id)
-            row.status = EVENT_STATUS_COMPLETED
-            row.result_json = result
-            row.error_json = None
-            row.processed_at = _now()
-            session.commit()
-            return _event_summary(row)
+        return {"result": result}
     except Exception as exc:
-        with SessionLocal() as session:
-            row = session.get(CollaborationEventRow, event_id)
-            row.failure_count = (row.failure_count or 0) + 1
-            row.status = EVENT_STATUS_FAILED
-            row.error_json = {"message": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now().isoformat()}
-            row.processed_at = _now()
-            session.commit()
-            return _event_summary(row)
+        return {"error": {"message": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now().isoformat()}}
 
 
 async def retry_event(event_id: str, operator: str) -> dict[str, Any]:
@@ -348,3 +373,316 @@ def _build_conclusions(
             conclusions.append("采购维度：当前库存充足，无缺料")
     conclusions.append("本事件为只读协同结论；处置与写入仍需人工走审批门禁")
     return conclusions
+
+
+
+
+# ========== P1 扩展：关键物料短缺事件（事实触发：采购分析发现真实缺料） ==========
+
+def _shortage_signature(net_requirement: dict[str, Any]) -> str:
+    """缺料内容签名：同报价同缺料画面去重；数量变化产生新签名。"""
+    items = sorted(
+        (str(i.get("item_id", "")), str(i.get("net_requirement", "")))
+        for i in (net_requirement.get("shortage_items") or [])
+        if isinstance(i, dict)
+    )
+    raw = _json.dumps(items, ensure_ascii=False)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+
+
+async def trigger_shortage_event(plan: dict[str, Any]) -> dict[str, Any] | None:
+    """采购分析发现真实缺料时触发（analyze_procurement 钩子调用）。
+
+    去重：报价 + 缺料内容签名；同画面不重复协同，数量/物料变化才产生新事件。
+    无缺料时跳过（返回 None）。
+    """
+    net_req = plan.get("net_requirement") or {}
+    if not net_req.get("has_shortage"):
+        return None
+    quotation_id = str(plan.get("quotation_id", ""))
+    signature = _shortage_signature(net_req)
+    dedup_key = f"{EVENT_TYPE_SHORTAGE}:{quotation_id}:{signature}"
+
+    shortage_items = [
+        {
+            "item_id": si.get("item_id", ""),
+            "net_requirement": str(si.get("net_requirement", "")),
+            "warehouse_qty": str(si.get("warehouse_qty", "")),
+            "purchase_qty": str(si.get("purchase_qty", "")),
+            "price_status": si.get("price_status", ""),
+        }
+        for si in (net_req.get("shortage_items") or [])
+        if isinstance(si, dict)
+    ]
+    recommended = str(plan.get("recommended_option_id") or "")
+    options = [
+        {
+            "option_id": o.get("option_id", ""),
+            "supplier_name": o.get("supplier_name", ""),
+            "lead_time_days": o.get("lead_time_days"),
+            "coverage": o.get("coverage"),
+            "total_cost": o.get("total_cost"),
+            "currency": o.get("currency", ""),
+        }
+        for o in (plan.get("supplier_options") or [])
+        if isinstance(o, dict)
+    ]
+    payload = {
+        "plan_id": str(plan.get("plan_id", "")),
+        "quotation_id": quotation_id,
+        "recommended_option_id": recommended,
+        "shortage_items": shortage_items,
+        "supplier_options": options,
+        "quotation_status": plan.get("quotation_status", ""),
+        "source": "procurement_analyze",
+    }
+    with SessionLocal() as session:
+        existing = session.scalars(
+            select(CollaborationEventRow).where(
+                CollaborationEventRow.dedup_key == dedup_key,
+                CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
+            )
+        ).first()
+        if existing is not None:
+            summary = _event_summary(existing)
+            summary["deduplicated"] = True
+            return summary
+        row = CollaborationEventRow(
+            event_id=_new_event_id(),
+            event_type=EVENT_TYPE_SHORTAGE,
+            dedup_key=dedup_key,
+            status=EVENT_STATUS_PENDING,
+            payload_json=payload,
+            max_retries=DEFAULT_MAX_RETRIES,
+        )
+        session.add(row)
+        session.commit()
+        event_id = row.event_id
+    return await process_event(event_id)
+
+
+async def _find_work_order_for_quotation(quotation_id: str) -> tuple[str, list[dict[str, str]]]:
+    """报价 → ERP 订单 → MES 工单（正式关联只读反查；缺失/失败如实记缺口）。"""
+    from app.services.order_linkage import get_order_mes_link
+
+    quotation = real_order.get_quotation(quotation_id) or {}
+    erp_order_id = str(
+        quotation.get("erp_draft_id") or quotation.get("source_erp_order_id") or ""
+    ).strip()
+    if not erp_order_id:
+        return "", [{
+            "dimension": "delivery",
+            "detail": f"报价 {quotation_id} 尚未创建 ERP 销售订单草稿，无法反查关联工单",
+        }]
+    try:
+        link = await get_order_mes_link(erp_order_id)
+    except Exception as exc:
+        return "", [{
+            "dimension": "delivery",
+            "detail": f"订单 {erp_order_id} 关联查询失败：{exc}",
+        }]
+    if str(link.get("status", "")) != "LINKED":
+        return "", [{
+            "dimension": "delivery",
+            "detail": f"ERP 订单 {erp_order_id} 未建立 MES 工单正式关联（customer_order_no）",
+        }]
+    links = (link.get("association") or {}).get("links") or [{}]
+    wo_id = str((links[0].get("mes_record") or {}).get("record_id", ""))
+    return wo_id, []
+
+
+async def _process_shortage(payload: dict[str, Any]) -> dict[str, Any]:
+    """缺料事件协同：供应商方案（分析已产出）→ 推荐方案成本影响 → 交期影响。
+
+    全部只读技能；任一维度缺数据如实记缺口。
+    """
+    try:
+        plan_id = str(payload.get("plan_id", ""))
+        quotation_id = str(payload.get("quotation_id", ""))
+        recommended = str(payload.get("recommended_option_id") or "")
+        options = payload.get("supplier_options") or []
+        gaps: list[dict[str, str]] = []
+
+        cost_assessment = None
+        if recommended:
+            try:
+                cost = await real_order.assess_cost_impact(plan_id, recommended)
+                if isinstance(cost, dict) and cost.get("status") == "DATA_MISSING":
+                    gaps.append({
+                        "dimension": "cost",
+                        "detail": "推荐方案成本评估返回数据缺失（价格记录不全），不做估算",
+                    })
+                else:
+                    cost_assessment = _subset(cost, (
+                        "plan_id", "option_id", "supplier_name", "revenue", "currency",
+                        "material_cost_baseline", "material_cost_with_option",
+                        "material_cost_delta", "per_unit_surcharge",
+                        "material_margin_before", "material_margin_after",
+                        "calculation_basis",
+                    ))
+            except Exception as exc:
+                gaps.append({"dimension": "cost", "detail": f"成本影响评估失败：{exc}"})
+        else:
+            gaps.append({
+                "dimension": "cost",
+                "detail": "采购分析未产出可推荐供应商（价格不完整或无覆盖），成本影响评估跳过",
+            })
+
+        delivery_assessment = None
+        wo_id, wo_gaps = await _find_work_order_for_quotation(quotation_id)
+        gaps.extend(wo_gaps)
+        reco_option = next((o for o in options if o.get("option_id") == recommended), None)
+        lead_days = reco_option.get("lead_time_days") if reco_option else None
+        if wo_id and isinstance(lead_days, (int, float)) and lead_days > 0:
+            ready = (date.today() + timedelta(days=int(lead_days))).isoformat()
+            try:
+                delivery = await real_order.assess_delivery_impact(wo_id, ready)
+                delivery_assessment = _subset(delivery, (
+                    "work_order_id", "work_order_no", "due_date", "material_ready_date",
+                    "buffer_days", "verdict", "conclusion", "completion_rate",
+                ))
+            except Exception as exc:
+                gaps.append({"dimension": "delivery", "detail": f"交期影响评估失败：{exc}"})
+
+        conclusions = [
+            f"采购维度：缺料 {len(payload.get('shortage_items') or [])} 项，"
+            f"共 {len(options)} 个供应商选项（方案 {plan_id}），推荐 {recommended or '无（价格不完整）'}"
+        ]
+        if cost_assessment:
+            conclusions.append(
+                f"成本维度（报价智能体）：推荐方案材料成本变化 {cost_assessment.get('material_cost_delta')} "
+                f"{cost_assessment.get('currency', '')}（口径：{cost_assessment.get('calculation_basis', '')}）"
+            )
+        if delivery_assessment:
+            conclusions.append(f"交期维度（跟单智能体）：{delivery_assessment.get('conclusion', '')}")
+        conclusions.append(
+            "本事件为只读协同结论；是否采用方案、审批与 PO 草稿仍需人工在方案卡片走审批门禁"
+        )
+        result = {
+            "shortage": {
+                "quotation_id": quotation_id,
+                "plan_id": plan_id,
+                "recommended_option_id": recommended,
+                "shortage_items": payload.get("shortage_items") or [],
+                "supplier_options": options,
+            },
+            "cost_assessment": cost_assessment,
+            "delivery_assessment": delivery_assessment,
+            "conclusions": conclusions,
+            "data_gaps": gaps,
+            "generated_at": _now().isoformat(),
+            "authority": "ERPNext + OpenMES（只读协同，未写入）",
+        }
+        return {"result": result}
+    except Exception as exc:
+        return {"error": {"message": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now().isoformat()}}
+
+
+# ========== P1 扩展：生产延期事件（事实触发：工单已过交期且未完成） ==========
+
+_DONE_STATUSES = {"DONE", "COMPLETED", "CLOSED", "CANCELLED"}
+
+
+def _parse_due_date(raw: Any) -> date | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            datetime.strptime(text, fmt)
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+async def trigger_overdue_event_if_needed(track: dict[str, Any]) -> dict[str, Any] | None:
+    """跟单读取后的事实型延期检查（track_order 钩子调用）。
+
+    只在"工单已过交期且未完成"这一**事实**成立时触发；"提前 N 天预警"
+    类阈值属于业务规则，未获用户确认前不做。去重：每工单每天一条。
+    """
+    try:
+        status = str(track.get("status", "")).upper()
+        completion = float(track.get("completion_rate") or 0.0)
+        due = _parse_due_date(track.get("due_date"))
+        if due is None or status in _DONE_STATUSES or completion >= 100.0:
+            return None
+        if due >= date.today():
+            return None
+        wo_id = str(track.get("work_order_id", ""))
+        wo_no = str(track.get("work_order_no", ""))
+        dedup_key = f"{EVENT_TYPE_OVERDUE}:{wo_id or wo_no}:{date.today().isoformat()}"
+        with SessionLocal() as session:
+            existing = session.scalars(
+                select(CollaborationEventRow).where(
+                    CollaborationEventRow.dedup_key == dedup_key,
+                    CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
+                )
+            ).first()
+            if existing is not None:
+                return None
+            row = CollaborationEventRow(
+                event_id=_new_event_id(),
+                event_type=EVENT_TYPE_OVERDUE,
+                dedup_key=dedup_key,
+                status=EVENT_STATUS_PENDING,
+                payload_json={
+                    "work_order_id": wo_id,
+                    "work_order_no": wo_no,
+                    "status": track.get("status", ""),
+                    "completion_rate": track.get("completion_rate"),
+                    "completed_qty": track.get("completed_qty", ""),
+                    "quantity": track.get("quantity", ""),
+                    "due_date": track.get("due_date", ""),
+                    "eta_status": track.get("eta_status", ""),
+                    "source": "track_order",
+                },
+                max_retries=DEFAULT_MAX_RETRIES,
+            )
+            session.add(row)
+            session.commit()
+            event_id = row.event_id
+        return await process_event(event_id)
+    except Exception:
+        logger.exception("延期事件检查失败（不影响跟单查询）")
+        return None
+
+
+async def _process_overdue(payload: dict[str, Any]) -> dict[str, Any]:
+    """延期事件协同：事实汇总 + 如实边界（是否通知客户/如何追赶需人工决策）。"""
+    try:
+        due = _parse_due_date(payload.get("due_date"))
+        overdue_days = (date.today() - due).days if due else None
+        completion = payload.get("completion_rate")
+        conclusions = [
+            f"生产维度：工单 {payload.get('work_order_no') or payload.get('work_order_id')} "
+            f"已过交期 {overdue_days if overdue_days is not None else '?'} 天仍未完成"
+            f"（当前完成率 {completion}%，状态 {payload.get('status', '')}）"
+        ]
+        if payload.get("eta_status") == "DATA_MISSING":
+            conclusions.append("ETA 口径：DATA_MISSING（无实际速率记录，系统不做固定天数预测）")
+        conclusions.append(
+            "是否通知客户、如何追赶（加急/换供应商/调整排程）需人工决策；"
+            "相关写入（如加急采购）仍须走审批门禁，系统不代承诺客户"
+        )
+        result = {
+            "tracking": {
+                "work_order_id": payload.get("work_order_id", ""),
+                "work_order_no": payload.get("work_order_no", ""),
+                "status": payload.get("status", ""),
+                "completion_rate": completion,
+                "completed_qty": payload.get("completed_qty", ""),
+                "quantity": payload.get("quantity", ""),
+                "due_date": payload.get("due_date", ""),
+                "eta_status": payload.get("eta_status", ""),
+            },
+            "overdue_days": overdue_days,
+            "conclusions": conclusions,
+            "data_gaps": [],
+            "generated_at": _now().isoformat(),
+            "authority": "OpenMES（只读协同，未写入）",
+        }
+        return {"result": result}
+    except Exception as exc:
+        return {"error": {"message": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now().isoformat()}}

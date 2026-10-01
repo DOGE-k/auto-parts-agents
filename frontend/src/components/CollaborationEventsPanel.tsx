@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   collaborationEventStatusLabels,
+  collaborationEventTypeLabels,
   getCollaborationEvents,
   retryCollaborationEvent,
   takeoverCollaborationEvent,
@@ -84,6 +85,7 @@ export default function CollaborationEventsPanel({ notify, onError }: Props) {
           <div key={ev.event_id} className={`collab-event-card status-${ev.status.toLowerCase()}`}>
             <div className="collab-event-head">
               <code className="collab-event-id">{ev.event_id}</code>
+              <span className="badge type-badge">{collaborationEventTypeLabels[ev.event_type] ?? ev.event_type}</span>
               <span className={`badge status-badge-${ev.status.toLowerCase()}`}>
                 {collaborationEventStatusLabels[ev.status] ?? ev.status}
               </span>

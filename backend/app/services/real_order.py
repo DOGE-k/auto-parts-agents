@@ -617,7 +617,7 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
             "detail": f"OpenMES 批次执行记录读取失败：{batch_error}",
         })
 
-    return {
+    track_result = {
         "work_order_id": work_order_id,
         "work_order_no": wo.get("work_order_no", ""),
         "status": wo.get("status", ""),
@@ -638,6 +638,15 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
         "data_source": "openmes_api",
         "calculated_at": _utc_now().isoformat(),
     }
+    # P1 事件协作钩子：事实型延期检查（已过交期且未完成；每工单每天一条）。
+    # 检查失败不影响跟单查询本身。
+    try:
+        from app.services import collaboration
+
+        await collaboration.trigger_overdue_event_if_needed(track_result)
+    except Exception:
+        logger.exception("延期事件检查失败（不影响跟单查询）wo=%s", work_order_id)
+    return track_result
 
 
 def _parse_observed_time(value: Any) -> datetime | None:
@@ -3454,6 +3463,14 @@ async def analyze_procurement(
         "created_at": _utc_now().isoformat(),
     }
     save_procurement_plan(plan)
+    # P1 事件协作钩子：采购分析发现真实缺料时触发缺料协同事件。
+    # 触发失败不影响采购分析本身（事件留在 FAILED 供重试）。
+    try:
+        from app.services import collaboration
+
+        await collaboration.trigger_shortage_event(plan)
+    except Exception:
+        logger.exception("缺料协同事件触发失败（不影响采购分析）plan=%s", plan.get("plan_id"))
     return plan
 
 

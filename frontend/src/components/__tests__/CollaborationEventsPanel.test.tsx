@@ -13,6 +13,11 @@ const retryCollaborationEventMock = vi.fn();
 const takeoverCollaborationEventMock = vi.fn();
 
 vi.mock("../../api", () => ({
+  collaborationEventTypeLabels: {
+    quality_issue_raised: "质量异常",
+    material_shortage: "物料短缺",
+    production_overdue: "生产延期",
+  },
   collaborationEventStatusLabels: {
     PENDING: "待处理",
     PROCESSING: "协同中",
