@@ -102,7 +102,9 @@ python seed_inspection_eta.py   # 可选：TEST_ 检验记录与批次耗时补�
 
 ### 图形界面方式（推荐）
 
-**双击仓库根目录的 `启动演示.bat`**：与下面的脚本完全等价——自动拉起容器 → 起后端/前端 → 逐项预检 → 预检通过后自动打开浏览器；窗口底部会显示预检结果，看完可关闭（服务在后台继续运行）。可右键 →"发送到桌面快捷方式"当日常入口。
+**双击仓库根目录的 `启动演示.bat`**：与下面的脚本完全等价——自动拉起容器（含业务库 autoparts-db）→ 起后端/前端 → 逐项预检 → 预检通过后自动打开浏览器；窗口底部会显示预检结果，看完可关闭（服务在后台继续运行）。可右键 →"发送到桌面快捷方式"当日常入口。
+
+配套 **`关闭演示.bat`** 一键全部停止（后端/前端进程 + OpenMES/ERPNext 容器 + 业务库；容器只 stop 不删除，下次启动秒级拉起）。
 
 ### 命令行方式
 
@@ -142,6 +144,7 @@ cd frontend && npm ci && npx vitest run && npm run build
 |---|---|
 | 页面报"连不上 ERP/MES"或接口 502 | 确认容器健康：`docker ps` 看 `openmes-*` / `erpnext-*`；`APP_ADAPTER_MODE=real` 下连接失败**必然明确报错**（设计如此，不回退假数据） |
 | OpenMES 接口 401 | `OPENMES_TOKEN` 失效——重跑 `python backend/get_openmes_token.py` 换新 token 后重启后端 |
+| ERPNext 接口 500、数据库日志出现 `Access denied for user '_xxxx'@'IP'` | 旧版本建站把站点库用户授权绑死在容器 IP 上，容器重启换 IP 后认证失败。修复（保留密码）：进 `erpnext-db-1` 执行 `RENAME USER '_xxxx'@'<旧IP>' TO '_xxxx'@'%'; FLUSH PRIVILEGES;`（按 README 3.3 节带 `--mariadb-user-host-login-search=%` 新建的站点不会有此问题） |
 | 写接口 403 | 请求头 `X-Real-Write-Token` 与 `.env` 的 `REAL_WRITE_API_TOKEN` 不一致；页面"会话设置"里重新保存令牌 |
 | 登录会话 15 分钟断 | OpenMES Sanctum 会话 TTL（安全设计），重新登录即可 |
 | 报价/采购提示"EVALUATION_BLOCKED / 数据缺失" | 真实主数据未配置（如无 BOM、无价格表）——系统**故意**不编造，按提示补录 ERP 数据 |

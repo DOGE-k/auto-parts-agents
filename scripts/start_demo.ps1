@@ -54,7 +54,7 @@ if ($servicesNeeded) {
     }
     foreach ($probe in $serviceProbes) {
         $ready = $false
-        for ($i = 0; $i -lt 90; $i++) {
+        for ($i = 0; $i -lt 150; $i++) {
             try {
                 Invoke-WebRequest -Uri $probe.Url -UseBasicParsing -TimeoutSec 3 | Out-Null
                 $ready = $true
@@ -64,8 +64,27 @@ if ($servicesNeeded) {
         if ($ready) {
             Write-Host "[就绪] $($probe.Name)" -ForegroundColor Green
         } else {
-            Write-Host "[警告] $($probe.Name) 约 180 秒内未就绪（首次拉取镜像可能较慢），继续启动应用；稍后预检会再次报告" -ForegroundColor Yellow
+            Write-Host "[警告] $($probe.Name) 约 300 秒内未就绪（首次拉取镜像可能较慢），继续启动应用；稍后预检会再次报告" -ForegroundColor Yellow
         }
+    }
+}
+
+# 业务库容器（PostgreSQL）：后端 DATABASE_URL 指向它，存在但停止时先拉起，
+# 否则应用启动校验连不上库直接退出（实测教训：一键关闭后业务库未被拉起）。
+$dbExists = docker ps -a --format "{{.Names}}" | Select-String -Pattern "^autoparts-db$"
+if ($dbExists) {
+    $dbRunning = docker inspect -f "{{.State.Running}}" autoparts-db
+    if ($dbRunning -ne "true") {
+        Write-Host "[启动] 业务库容器 autoparts-db（后端启动前必须就绪）..." -ForegroundColor Cyan
+        docker start autoparts-db | Out-Null
+        for ($i = 0; $i -lt 30; $i++) {
+            docker exec autoparts-db pg_isready -U postgres 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 1
+        }
+        Write-Host "[就绪] 业务库 autoparts-db" -ForegroundColor Green
+    } else {
+        Write-Host "[通过] 业务库 autoparts-db 已在运行" -ForegroundColor DarkGray
     }
 }
 
