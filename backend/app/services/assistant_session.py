@@ -342,6 +342,13 @@ async def handle_ask(
         result["handled_by"] = handled_by
         if extra:
             result.update(extra)
+        # 契约保证：前端依赖 call_chain/rounds/tool_count 字段恒存在
+        # （2026-10-01 页面走查实测：确定性回答缺 call_chain 会让
+        # AssistantPanel 的 call_chain.map() 崩溃降级）。
+        result.setdefault("call_chain", [])
+        result.setdefault("rounds", 0)
+        result.setdefault("tool_count", 0)
+        result.setdefault("coordination_run_id", "")
         task.summary = f"最近问题：{question[:120]} | 沿用：{echo[:160]}"
         _save_task(task)
         _save_message(session_row.session_id, "user", question)

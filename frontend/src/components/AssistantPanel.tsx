@@ -401,9 +401,15 @@ export default function AssistantPanel({
           )}
           <div className="assistant-chain">
             <small>
-              调用链（{assistantAnswer.tool_count} 次智能体调用 · {assistantAnswer.rounds} 轮推理 · 记录 {assistantAnswer.coordination_run_id}）
+              调用链（{assistantAnswer.tool_count ?? 0} 次智能体调用 · {assistantAnswer.rounds ?? 0} 轮推理 · 记录 {assistantAnswer.coordination_run_id || "—"}）
+              {assistantAnswer.handled_by && assistantAnswer.handled_by !== "coordinator" && (
+                <>
+                  {" "}· <strong>确定性处理</strong>
+                  {assistantAnswer.handled_by === "clarify" ? "（信息不足，未调用大模型）" : "（未调用大模型）"}
+                </>
+              )}
             </small>
-            {assistantAnswer.call_chain.map((step) => (
+            {(assistantAnswer.call_chain ?? []).map((step) => (
               <div key={step.seq} className={`assistant-step ${step.status}`}>
                 <span className="assistant-step-seq">{step.seq}</span>
                 <span className="assistant-step-callee">{agentRunTypeNames[step.callee] ?? step.callee}</span>
