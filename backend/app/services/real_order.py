@@ -2957,6 +2957,20 @@ async def execute_issue_registration(
         None,
         _utc_now(),
     )
+    # P1 事件协作钩子：质量问题真实登记后触发只读协同事件。
+    # 事件触发/协同失败不影响登记结果本身（事件留在 FAILED 供重试）。
+    collaboration_event = None
+    try:
+        from app.services import collaboration
+
+        collaboration_event = await collaboration.trigger_quality_issue_event(
+            wo_id,
+            str(issue_id),
+            title=title,
+            severity=str((read_back or {}).get("severity") or ""),
+        )
+    except Exception:
+        logger.exception("质量协同事件触发失败（不影响登记结果）wo=%s issue=%s", wo_id, issue_id)
     return {
         "success": True,
         "status": "REGISTERED",
@@ -2966,6 +2980,7 @@ async def execute_issue_registration(
         "issue": read_back,
         "read_back_verified": True,
         "approval": approval,
+        "collaboration_event": collaboration_event,
         "authority": "OpenMES",
         "data_source": "openmes_api",
     }

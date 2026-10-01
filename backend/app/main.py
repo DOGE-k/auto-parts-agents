@@ -1789,6 +1789,55 @@ async def real_order_assistant_ask_stream(body: dict):
     )
 
 
+@app.get("/api/real-orders/collaboration/events", tags=["real-orders"])
+async def collaboration_events_list(limit: int = 20, status: str | None = None) -> dict:
+    """跨智能体协同事件列表（P1；只读）。"""
+    from app.services.collaboration import list_events
+
+    return list_events(limit=limit, status=status)
+
+
+@app.get("/api/real-orders/collaboration/events/{event_id}", tags=["real-orders"])
+async def collaboration_event_detail(event_id: str) -> dict:
+    """协同事件详情（含三维度只读协同结果与数据缺口）。"""
+    from app.services.collaboration import get_event
+
+    event = get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"协同事件 {event_id} 不存在")
+    return event
+
+
+@app.post("/api/real-orders/collaboration/events/{event_id}/retry", tags=["real-orders"])
+async def collaboration_event_retry(
+    event_id: str,
+    identity: dict = Depends(require_real_identity),
+) -> dict:
+    """人工重试失败的事件协同（重试上限内）。"""
+    from app.services.collaboration import retry_event
+
+    try:
+        return await retry_event(event_id, str(getattr(identity, "actor_id", "") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/real-orders/collaboration/events/{event_id}/takeover", tags=["real-orders"])
+async def collaboration_event_takeover(
+    event_id: str,
+    body: dict | None = None,
+    identity: dict = Depends(require_real_identity),
+) -> dict:
+    """人工接管：停止自动协同，记录操作者与备注（处置仍走 NCR 审批门禁）。"""
+    from app.services.collaboration import takeover_event
+
+    note = str(((body or {}).get("note")) or "")
+    try:
+        return takeover_event(event_id, str(getattr(identity, "actor_id", "") or ""), note)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/api/real-orders/erp/sales-orders", tags=["real-orders"])
 async def real_order_list_sales_orders(limit: int = 50) -> dict:
     """列出真实 ERP 销售订单（供用户选择）。连接失败时明确报错。"""

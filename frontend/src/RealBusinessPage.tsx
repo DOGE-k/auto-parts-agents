@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import QualityTodoPanel from "./components/QualityTodoPanel";
+import CollaborationEventsPanel from "./components/CollaborationEventsPanel";
 import AgentRunsPanel from "./components/AgentRunsPanel";
 import AssistantPanel from "./components/AssistantPanel";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -724,6 +725,7 @@ export default function RealBusinessPage() {
             void goToQualityDispose(item);
           }}
         />
+        <CollaborationEventsPanel notify={notify} onError={setError} />
         </ErrorBoundary>
       )}
 

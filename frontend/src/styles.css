@@ -2613,3 +2613,98 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   margin-bottom: 8px;
   font-size: 13px;
 }
+
+/* ===== P1 协同事件面板 ===== */
+.collab-events-panel {
+  margin-top: 16px;
+}
+
+.collab-event-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+
+.collab-event-card.status-failed {
+  border-color: #fca5a5;
+  background: #fffafa;
+}
+
+.collab-event-card.status-manual_handled {
+  border-color: #d4d4d8;
+  background: #fafafa;
+}
+
+.collab-event-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.collab-event-id {
+  font-weight: 600;
+}
+
+.collab-event-meta {
+  color: #64748b;
+  font-size: 12.5px;
+}
+
+.status-badge-failed { background: #fee2e2; color: #b91c1c; }
+.status-badge-completed { background: #dcfce7; color: #15803d; }
+.status-badge-pending { background: #fef3c7; color: #b45309; }
+.status-badge-processing { background: #dbeafe; color: #1d4ed8; }
+.status-badge-manual_handled { background: #e4e4e7; color: #52525b; }
+
+.collab-event-error {
+  margin-top: 8px;
+  color: #b91c1c;
+  font-size: 12.5px;
+  background: #fef2f2;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.collab-event-takenover {
+  margin-top: 8px;
+  color: #52525b;
+  font-size: 12.5px;
+}
+
+.collab-event-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.collab-event-detail {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border, #e2e8f0);
+  padding-top: 10px;
+}
+
+.collab-conclusion {
+  background: var(--surface-subtle, #f1f7f7);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+
+.collab-section {
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+
+.collab-section strong {
+  margin-right: 8px;
+}
+
+.collab-section.gaps ul {
+  margin: 4px 0 0 18px;
+  color: #92400e;
+}

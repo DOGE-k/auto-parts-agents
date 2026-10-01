@@ -302,3 +302,27 @@ class BusinessTaskRow(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CollaborationEventRow(Base):
+    """跨智能体协同事件（P1）：事件编号 + 去重键 + 失败记录 + 重试上限 + 人工接管。
+
+    事件由已批准的业务写入（如质量问题登记）触发，协同本身只读真实
+    ERP/MES；绝不代表已执行的写入，也不绕过任何审批门禁。
+    """
+
+    __tablename__ = "collaboration_events"
+
+    event_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(60), index=True)
+    dedup_key: Mapped[str] = mapped_column(String(200), unique=True)
+    status: Mapped[str] = mapped_column(String(30), index=True, default="PENDING")
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    taken_over_by: Mapped[str] = mapped_column(String(120), default="")
+    taken_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

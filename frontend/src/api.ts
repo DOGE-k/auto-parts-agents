@@ -536,6 +536,73 @@ export type ProposalOptions = {
   data_missing?: { source_skill: string; missing_fields: { field: string; detail: string }[]; need: string }[];
 };
 
+// ===== P1 跨智能体协同事件 =====
+export type CollaborationEventStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED"
+  | "MANUAL_HANDLED";
+
+export const collaborationEventStatusLabels: Record<string, string> = {
+  PENDING: "待处理",
+  PROCESSING: "协同中",
+  COMPLETED: "已完成",
+  FAILED: "失败",
+  MANUAL_HANDLED: "已人工接管",
+};
+
+export type CollaborationEventPayload = {
+  work_order_id?: string;
+  work_order_no?: string;
+  issue_id?: string;
+  title?: string;
+  severity?: string;
+  source?: string;
+};
+
+export type CollaborationEventResult = {
+  quality_impact?: {
+    open_issues_count?: number;
+    quality_gate_passed?: boolean;
+    missing_documents?: string[];
+  } | null;
+  tracking?: {
+    completion_rate?: number;
+    due_date?: string;
+    eta_status?: string;
+  } | null;
+  procurement_risk?: {
+    quotation_id?: string;
+    plan_id?: string;
+    has_shortage?: boolean;
+    shortage_count?: number;
+    shortage_evaluable?: boolean;
+    supplier_options: Array<Record<string, unknown>>;
+  } | null;
+  conclusions?: string[];
+  data_gaps?: Array<{ dimension: string; detail: string }>;
+  authority?: string;
+  manual_takeover?: { operator: string; at: string; note: string; hint: string };
+};
+
+export type CollaborationEvent = {
+  event_id: string;
+  event_type: string;
+  dedup_key: string;
+  status: CollaborationEventStatus;
+  payload: CollaborationEventPayload;
+  failure_count: number;
+  max_retries: number;
+  taken_over_by: string;
+  taken_over_at: string | null;
+  created_at: string | null;
+  processed_at: string | null;
+  error: { message?: string } | null;
+  has_result: boolean;
+  result?: CollaborationEventResult;
+};
+
 // 方案卡片执行闭环（阶段七）：批准方案 → 起草 PO → 回读
 export type PoDraftResult = {
   draft?: { draft_id?: string; read_back_verified?: boolean; supplier?: string; schedule_date?: string } | null;
@@ -800,6 +867,24 @@ export async function askAssistant(
   return api<AssistantAnswer>("/real-orders/assistant/ask", {
     method: "POST",
     body: JSON.stringify({ question, context, session_id: sessionId || undefined }),
+  });
+}
+
+export async function getCollaborationEvents(limit = 20): Promise<{ items: CollaborationEvent[]; count: number }> {
+  return api(`/real-orders/collaboration/events?limit=${limit}`);
+}
+
+export async function retryCollaborationEvent(eventId: string): Promise<CollaborationEvent> {
+  return api(`/real-orders/collaboration/events/${encodeURIComponent(eventId)}/retry`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function takeoverCollaborationEvent(eventId: string, note = ""): Promise<CollaborationEvent> {
+  return api(`/real-orders/collaboration/events/${encodeURIComponent(eventId)}/takeover`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
   });
 }
 

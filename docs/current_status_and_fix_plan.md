@@ -1668,3 +1668,43 @@ ERP 物料需求
 
 - 页面走查产生的真实问答链（Q1 协调者 16 步）与两轮确定性重报价（QUO-FD9684D4410C、QUO-25B8E04930D0 等）均为**本地报价记录**（与 8 步流程留痕口径一致），ERPNext/OpenMES 零写入、零审批。
 - 已知小冗余（非缺陷）：确定性数量变更回答中，红色结构化标记块与正文文字列举同样的下游清单——红块为结构化视图、正文为完整话术，暂保留双通道展示。
+
+### 3.50 P1 第一片：质量异常事件 → 跨智能体只读协同（2026-10-01，用户指令"开工"）
+
+**范围**：AI_HANDOFF_PLAN 第 6 节事件协作的最小闭环——质量问题经人工审批真实登记后，自动触发"质量影响 → 生产交期 → 供应商风险"只读协同，事件全程编号、去重、可重试、可人工接管。不含缺料/延期事件（后续扩展点）。
+
+#### 一、交付物
+
+| 件 | 说明 |
+|---|---|
+| `collaboration_events` 表 + 迁移 `c7e2f9a84d15` | 事件编号 `EVT-…`、`dedup_key` 唯一约束（`quality_issue_raised:{wo}:{issue}`）、status（PENDING/PROCESSING/COMPLETED/FAILED/MANUAL_HANDLED）、payload/result/error JSON、failure_count/max_retries（默认 3）、taken_over_by/at；已对 PostgreSQL 业务库执行 |
+| `app/services/collaboration.py` | `trigger_quality_issue_event`（幂等触发：同键未接管事件直接返回）→ `process_event`（只读三维度协同：`assess_quality_impact` → `track_order` → 采购维度经 `get_work_order_raw.customer_order_no` → `find_quotation_by_erp_order` → `analyze_procurement`；任一环缺失/失败记入 data_gaps，不猜测）；`retry_event`（FAILED 且未达上限）；`takeover_event`（人工接管 + 操作者/备注留痕）；确定性结论汇总（只复述真实数据） |
+| 钩子（`real_order.execute_issue_registration`） | ③ 登记写回验证成功后触发事件；事件失败不影响登记结果（留 FAILED 供重试） |
+| API（main.py） | `GET /real-orders/collaboration/events`（列表，含 result）、`GET …/{event_id}`、`POST …/{event_id}/retry`、`POST …/{event_id}/takeover`；retry/takeover 走真实身份 |
+| 前端 `CollaborationEventsPanel` | 质量中心页签新增面板：事件卡片（编号/状态徽标/工单·问题·标题/时间）、展开三维度结论条+明细+数据缺口（如实标注）；FAILED 显示失败原因与"重试协同"（达上限拒绝）；"人工接管"记录操作者。样式与页签视觉一致 |
+
+**铁律核对**：协同全程只读（零 ERPNext/OpenMES 写入）；事件不代表已执行写入；处置仍走既有 NCR 审批门禁；结论末条固定声明"处置与写入仍需人工走审批门禁"。
+
+#### 二、真实验证（真实 OpenMES/ERPNext，全部 TEST_ 标记）
+
+1. 三步登记：审批 `QISS-2C4D1245F52E` → 批准 → **OpenMES issue id=4**（工单 11，回读验证通过）→ **事件 `EVT-BC106E127BA2` 自动产生，COMPLETED**。
+2. 事件结论全部真实可溯：质量维度（未关闭问题、门禁未通过）；生产维度（完成率 100%（400/400）、ETA 口径 COMPLETED——工单 11 是 §3.44 全额报工的真实工单）；采购维度（真实反查 `QUO-E15130196052` → 采购分析 `PROC-5992CBCCE31E` → 库存充足无缺料）；数据缺口如实 3 条（检验 0 条/SN 无 API/不自动 NCR 写回）。
+3. 幂等去重：同一审批重放 execute → idempotent=true 零新写入、**零新事件**（dedup_key 计数 1）。
+4. 人工接管：`EVT-BC106E127BA2` → MANUAL_HANDLED，taken_over_by=Administrator。
+5. 第二条登记（issue id=5）→ `EVT-04B253B5193D` COMPLETED——列表同时呈现"已完成/已人工接管"两种状态（截图 `gui-test-screenshots/2026-10-01_p1_collab_events_panel.png`）。
+
+#### 三、验证中发现并修复两个集成 bug
+
+1. **接管端点 500**：`require_real_identity` 返回 `RealIdentity` 对象，端点误用 `.get("actor_id")` → 改 `getattr(identity, "actor_id", "")`（retry 同修）。
+2. **列表展开为空**：列表摘要未携带 `result`，前端"查看协同结论"按钮状态翻转但无内容 → `_event_summary` 恒含 `result`（单条体量小，免二次请求）。浏览器走查截图证实修复。
+
+#### 四、测试
+
+- 后端新增 `tests/test_collaboration_events.py` **7 例**（编号/去重/真实形状结论/采购缺口如实/失败+重试+上限/接管停协同/路由注册）；全量 **205 passed**。
+- 前端新增 `CollaborationEventsPanel.test.tsx` **4 例**（列表渲染+空提示/展开三维结论/失败重试链路/接管链路）；全量 vitest **21 passed** + `npm run build` 通过。
+
+#### 五、遗留与下一步（P1 后续）
+
+- 事件类型扩展：关键物料短缺（缺料分析发现 CRITICAL 短料触发）、生产延期（进度低于计划触发）——服务结构已预留 event_type 维度；
+- 事件协同目前同步执行（无 LLM，秒级）；后续可按事件量改异步队列；
+- 处置联动：面板"人工接管"后引导跳转 NCR 面板（复用质量待办的 goToQualityDispose 模式）。
