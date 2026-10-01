@@ -100,6 +100,12 @@ python seed_inspection_eta.py   # 可选：TEST_ 检验记录与批次耗时补�
 
 ## 6. 启动应用
 
+### 图形界面方式（推荐）
+
+**双击仓库根目录的 `启动演示.bat`**：与下面的脚本完全等价——自动拉起容器 → 起后端/前端 → 逐项预检 → 预检通过后自动打开浏览器；窗口底部会显示预检结果，看完可关闭（服务在后台继续运行）。可右键 →"发送到桌面快捷方式"当日常入口。
+
+### 命令行方式
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1
 ```
