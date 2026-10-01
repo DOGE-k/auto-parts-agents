@@ -104,9 +104,9 @@ python seed_inspection_eta.py   # 可选：TEST_ 检验记录与批次耗时补�
 powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1
 ```
 
-脚本幂等：Python 解释器自动探测（`.conda-env` → venv → 系统 python，缺依赖会提示 `pip install -e backend`）、后端 9000 + 前端 5173 启动、随后对真实系统逐项预检（ERPNext/OpenMES 连通性、身份解析、写入令牌、DeepSeek、适配器模式），**预检不通过会明确列出，不会静默继续**。
+**这一条命令就是全部启动入口**：Python 解释器自动探测（`.conda-env` → venv → 系统 python，缺依赖会提示 `pip install -e backend`）→ 检测到 ERPNext/OpenMES 容器未响应时**自动调用 deploy_services 脚本拉起**（含就绪等待）→ 后端 9000 + 前端 5173 启动 → 对真实系统逐项预检（连通性、身份解析、写入令牌、DeepSeek、适配器模式），**预检不通过会明确列出，不会静默继续**。幂等：重复运行安全，已启动的部分自动跳过。
 
-手动启动（等价）：
+手动启动（等价，一般不需要）：
 
 ```bash
 cd backend  && APP_ADAPTER_MODE=real python -m uvicorn app.main:app --host 127.0.0.1 --port 9000

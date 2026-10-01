@@ -29,6 +29,46 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# 真实系统容器预检：ERPNext(8080)/OpenMES(80) 未响应时自动调 deploy_services.ps1 拉起。
+# 这样本脚本就是唯一入口——电脑重启后也只需这一条命令。
+$serviceProbes = @(
+    @{ Name = "OpenMES";  Url = "http://127.0.0.1/api/health" },
+    @{ Name = "ERPNext";  Url = "http://127.0.0.1:8080/api/method/ping" }
+)
+$servicesNeeded = $false
+foreach ($probe in $serviceProbes) {
+    try {
+        Invoke-WebRequest -Uri $probe.Url -UseBasicParsing -TimeoutSec 3 | Out-Null
+        Write-Host "[通过] $($probe.Name) 容器已在运行" -ForegroundColor DarkGray
+    } catch {
+        $servicesNeeded = $true
+        Write-Host "[检测] $($probe.Name) 未响应，需要拉起容器" -ForegroundColor Yellow
+    }
+}
+if ($servicesNeeded) {
+    Write-Host "[启动] 调用 deploy_services.ps1 拉起真实系统容器 ..." -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "deploy_services.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[失败] 真实系统容器启动失败，见上方输出" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($probe in $serviceProbes) {
+        $ready = $false
+        for ($i = 0; $i -lt 90; $i++) {
+            try {
+                Invoke-WebRequest -Uri $probe.Url -UseBasicParsing -TimeoutSec 3 | Out-Null
+                $ready = $true
+                break
+            } catch { Start-Sleep -Seconds 2 }
+        }
+        if ($ready) {
+            Write-Host "[就绪] $($probe.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "[警告] $($probe.Name) 约 180 秒内未就绪（首次拉取镜像可能较慢），继续启动应用；稍后预检会再次报告" -ForegroundColor Yellow
+        }
+    }
+}
+
 function Test-PortListening([int]$Port) {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
