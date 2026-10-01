@@ -134,6 +134,26 @@ class ContextEchoTests(unittest.TestCase):
         self.assertIsNone(chosen)
         self.assertIn("已不存在", error)
 
+    def test_validate_ordinal_selection_lead_time_changed_requires_reselect(self):
+        """缺口②回归：交期/覆盖变化时快照校验必须要求重新选择。"""
+        base = {"option_id": "OPT-1", "supplier_name": "上海铸锻厂", "total_cost": 100,
+                "currency": "CNY", "lead_time_days": 15, "lead_time_source": "item_lead_time_days",
+                "coverage": "3/3"}
+        active = {"plan_id": "PROC-1", "supplier_options": [dict(base)]}
+        current_changed_lead = {"plan_id": "PROC-1", "supplier_options": [{**base, "lead_time_days": 7}]}
+        chosen, error = validate_ordinal_selection(1, active, current_changed_lead)
+        self.assertIsNone(chosen)
+        self.assertIn("不一致", error)
+        # 覆盖变化同样触发
+        current_changed_cov = {"plan_id": "PROC-1", "supplier_options": [{**base, "coverage": "2/3"}]}
+        chosen2, error2 = validate_ordinal_selection(1, active, current_changed_cov)
+        self.assertIsNone(chosen2)
+        self.assertIn("不一致", error2)
+        # 完全一致时通过
+        chosen3, error3 = validate_ordinal_selection(1, active, {"plan_id": "PROC-1", "supplier_options": [dict(base)]})
+        self.assertIsNotNone(chosen3)
+        self.assertIsNone(error3)
+
     def test_validate_ordinal_selection_out_of_range(self):
         active = {"plan_id": "PROC-1", "supplier_options": [{"option_id": "OPT-1"}]}
         chosen, error = validate_ordinal_selection(2, active, active)
@@ -248,9 +268,15 @@ class SelectionFlowTests(unittest.IsolatedAsyncioTestCase):
         """先跑一次带方案结果的协调问答，让任务持有 active_plan。"""
         coordinator = _FakeCoordinator({
             "answer": "方案如下",
-            "call_chain": [],
+            # 真实协调者链会经报价分析参数把客户/物料/数量带入任务上下文；
+            # 缺了它们，后续"数量改成 N"会（正确地）走追问而不是 stale 标记。
+            "call_chain": [
+                {"seq": 1, "skill_id": "quotation.analyze_real", "status": "ok",
+                 "arguments": {"customer_id": "上汽集团", "item_code": "BD-2401",
+                               "quantity": 2000, "delivery_date": "2026-10-31"}},
+            ],
             "rounds": 1,
-            "tool_count": 0,
+            "tool_count": 1,
             "coordination_run_id": "RUN-COORD-TESTPLAN",
             "proposal_options": {
                 "plan_id": "PROC-TESTPLAN01",
@@ -307,6 +333,36 @@ class SelectionFlowTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(result["needs_input"])
         self.assertIn("已不存在", result["answer"])
+
+    async def test_select_refused_after_quantity_change_marks_plan_stale(self):
+        """缺口①连续回归：缺料方案 → 数量变更 → 选第二个方案必须被拒绝。"""
+        first, _ = await self._seed_task_with_plan()()
+        # 数量变更（真实走 stale 标记路径）：任务上下文已带 plan_id=PROC-TESTPLAN01
+        from unittest.mock import AsyncMock as _AM
+
+        with patch.object(real_order, "analyze_quotation", _AM(return_value={
+            "quotation_id": "QUO-NEWQTY00001", "status": "ok",
+            "unit_price": 85.0, "total_price": 255000, "currency": "CNY",
+        })):
+            qty_result = await session_module.handle_ask(
+                "数量改成 3000", lambda: (_ for _ in ()).throw(AssertionError("不应调用 LLM")),
+                session_id=first["session_id"],
+            )
+        stale_types = {s["type"] for s in qty_result["stale_downstream"]}
+        self.assertIn("procurement_plan", stale_types)
+        # 旧方案仍存在且选项一致——但必须因"基于旧数量"被拒绝
+        with SessionLocal() as db:
+            row = db.get(BusinessTaskRow, first["business_task_id"])
+            stored_plan = dict(row.active_plan or {})
+        with patch.object(real_order, "get_procurement_plan", return_value=stored_plan):
+            result = await session_module.handle_ask(
+                "选第二个方案", lambda: (_ for _ in ()).throw(AssertionError("不应调用 LLM")),
+                session_id=first["session_id"],
+            )
+        self.assertTrue(result["needs_input"])
+        self.assertIn("旧数量", result["answer"])
+        self.assertNotIn("pending_selection", result)
+        self.assertIn("重新发起", result["answer"])
 
 
 class ClarifyFlowTests(unittest.IsolatedAsyncioTestCase):

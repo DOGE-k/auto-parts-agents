@@ -191,6 +191,22 @@ class CollaborationEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again["status"], "MANUAL_HANDLED")
         self.assertIn("已人工接管", again["error"]["message"])
 
+    async def test_retrigger_after_manual_takeover_creates_new_event(self):
+        """缺口③回归：人工接管后同一业务事实再次触发 → 新事件，不撞唯一约束。"""
+        patches = _patch_happy_path()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            first = await collaboration.trigger_quality_issue_event("11", "9006", title="TEST 接管后重触发")
+        collaboration.takeover_event(first["event_id"], "admin", note="人工处置中")
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            second = await collaboration.trigger_quality_issue_event("11", "9006", title="TEST 接管后重触发")
+        self.assertNotEqual(first["event_id"], second["event_id"])
+        self.assertEqual(second["status"], "COMPLETED")
+        self.assertFalse(second.get("deduplicated"))
+        # 重触发事件使用 #N 后缀键；原事件保留 MANUAL_HANDLED 留痕
+        detail = collaboration.get_event(second["event_id"])
+        self.assertTrue(detail["dedup_key"].endswith("#2"))
+        self.assertEqual(collaboration.get_event(first["event_id"])["status"], "MANUAL_HANDLED")
+
 
 class CollaborationEndpointTests(unittest.IsolatedAsyncioTestCase):
     def test_list_endpoint_returns_events(self):

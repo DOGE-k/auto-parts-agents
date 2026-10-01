@@ -56,13 +56,20 @@ const completedEvent = {
   },
 };
 
-function mountPanel(): { container: HTMLElement; cleanup: () => void } {
+function mountPanel(
+  onGoTarget?: (event: import("../../api").CollaborationEvent) => void,
+  onErrorSpy?: (message: string) => void,
+): { container: HTMLElement; cleanup: () => void } {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root: Root = createRoot(container);
   act(() => {
     root.render(
-      <CollaborationEventsPanel notify={() => undefined} onError={() => undefined} />,
+      <CollaborationEventsPanel
+        notify={() => undefined}
+        onError={onErrorSpy ?? (() => undefined)}
+        onGoTarget={onGoTarget}
+      />,
     );
   });
   return {
@@ -177,5 +184,159 @@ describe("CollaborationEventsPanel（P1 回归）", () => {
     });
     await flush();
     expect(takeoverCollaborationEventMock).toHaveBeenCalledWith("EVT-TEST0000001");
+  });
+});
+
+// ===== 任务 A：去处置/去处理导航（交接文档 3.4 的五条要求） =====
+
+const shortageEvent = {
+  ...completedEvent,
+  event_id: "EVT-SHORTTEST01",
+  event_type: "material_shortage",
+  dedup_key: "material_shortage:QUO-S1:sig",
+  payload: { plan_id: "PROC-S1", quotation_id: "QUO-S1", source: "procurement_analyze" },
+  result: {
+    ...completedEvent.result,
+    shortage: { quotation_id: "QUO-S1", plan_id: "PROC-S1", recommended_option_id: "OPT-1", shortage_items: [], supplier_options: [] },
+  },
+};
+
+const overdueEvent = {
+  ...completedEvent,
+  event_id: "EVT-OVERDUE01",
+  event_type: "production_overdue",
+  dedup_key: "production_overdue:2:2026-10-01",
+  payload: { work_order_id: "2", work_order_no: "WO-2026-001", source: "track_order" },
+  result: {
+    conclusions: ["生产维度：工单已过交期 3 天仍未完成"],
+    overdue_days: 3,
+    tracking: { completion_rate: 0, due_date: "2026-09-28" },
+    data_gaps: [],
+    authority: "OpenMES（只读协同，未写入）",
+  },
+};
+
+function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll("button")).find(
+    (b) => b.textContent?.includes(text),
+  );
+}
+
+describe("CollaborationEventsPanel 去处置/去处理导航（任务 A 回归）", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const fn of cleanups.splice(0).reverse()) fn();
+    getCollaborationEventsMock.mockReset();
+  });
+
+  it("三类事件显示正确类型徽标与对应目标按钮文案", async () => {
+    getCollaborationEventsMock.mockResolvedValue({
+      items: [completedEvent, shortageEvent, overdueEvent],
+      count: 3,
+    });
+    const panel = mountPanel(() => undefined);
+    cleanups.push(panel.cleanup);
+    await flush();
+    expect(panel.container.textContent).toContain("质量异常");
+    expect(panel.container.textContent).toContain("物料短缺");
+    expect(panel.container.textContent).toContain("生产延期");
+    expect(findButton(panel.container, "去处置")).toBeTruthy();
+    expect(findButton(panel.container, "去处理方案")).toBeTruthy();
+    expect(findButton(panel.container, "查看跟单")).toBeTruthy();
+  });
+
+  it("质量事件点击后回调携带工单与问题编号", async () => {
+    getCollaborationEventsMock.mockResolvedValue({ items: [completedEvent], count: 1 });
+    const onGoTarget = vi.fn();
+    const panel = mountPanel(onGoTarget);
+    cleanups.push(panel.cleanup);
+    await flush();
+    act(() => {
+      findButton(panel.container, "去处置")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await flush();
+    expect(onGoTarget).toHaveBeenCalledTimes(1);
+    const arg = onGoTarget.mock.calls[0][0];
+    expect(arg.event_id).toBe("EVT-TEST0000001");
+    expect(arg.payload.work_order_id).toBe("11");
+    expect(arg.payload.issue_id).toBe("5");
+  });
+
+  it("缺料事件回调携带报价/方案编号；延期事件回调携带工单编号", async () => {
+    getCollaborationEventsMock.mockResolvedValue({ items: [shortageEvent, overdueEvent], count: 2 });
+    const onGoTarget = vi.fn();
+    const panel = mountPanel(onGoTarget);
+    cleanups.push(panel.cleanup);
+    await flush();
+    act(() => {
+      findButton(panel.container, "去处理方案")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+    act(() => {
+      findButton(panel.container, "查看跟单")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await flush();
+    expect(onGoTarget).toHaveBeenCalledTimes(2);
+    const [shortageArg, overdueArg] = onGoTarget.mock.calls.map((c) => c[0]);
+    expect(shortageArg.event_type).toBe("material_shortage");
+    expect(shortageArg.result.shortage.quotation_id).toBe("QUO-S1");
+    expect(shortageArg.result.shortage.plan_id).toBe("PROC-S1");
+    expect(overdueArg.event_type).toBe("production_overdue");
+    expect(overdueArg.payload.work_order_id).toBe("2");
+  });
+
+  it("关键编号缺失时显示可见错误且不调用导航回调", async () => {
+    const noIds = {
+      ...completedEvent,
+      event_id: "EVT-NOIDS00001",
+      payload: { title: "缺编号事件", source: "issue_registration" },
+    };
+    getCollaborationEventsMock.mockResolvedValue({ items: [noIds], count: 1 });
+    const onGoTarget = vi.fn();
+    const errors: string[] = [];
+    const panel = mountPanel(onGoTarget, (m) => errors.push(m));
+    cleanups.push(panel.cleanup);
+    await flush();
+    act(() => {
+      findButton(panel.container, "去处置")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await flush();
+    expect(onGoTarget).not.toHaveBeenCalled();
+    expect(errors.some((m) => m.includes("缺少关联的工单编号或质量问题编号"))).toBe(true);
+  });
+
+  it("人工接管后仍可见状态与留痕，导航按钮不误显示为已处置", async () => {
+    const handled = {
+      ...completedEvent,
+      event_id: "EVT-HANDLED001",
+      status: "MANUAL_HANDLED",
+      taken_over_by: "Administrator",
+      taken_over_at: "2026-10-01T11:00:00Z",
+    };
+    getCollaborationEventsMock.mockResolvedValue({ items: [handled], count: 1 });
+    const onGoTarget = vi.fn();
+    const panel = mountPanel(onGoTarget);
+    cleanups.push(panel.cleanup);
+    await flush();
+    // 接管留痕可见；不出现"已处置"措辞（接管≠处置）
+    expect(panel.container.textContent).toContain("已由 Administrator 接管");
+    expect(panel.container.textContent).not.toContain("已处置");
+    // 导航按钮仍可用（查看不等于处置）
+    expect(findButton(panel.container, "去处置")).toBeTruthy();
+    act(() => {
+      findButton(panel.container, "去处置")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await flush();
+    expect(onGoTarget).toHaveBeenCalledTimes(1);
   });
 });

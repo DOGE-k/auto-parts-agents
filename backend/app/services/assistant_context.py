@@ -355,6 +355,12 @@ def validate_ordinal_selection(
             "option_id": opt.get("option_id", ""),
             "supplier_name": opt.get("supplier_name", ""),
             "total_cost": opt.get("total_cost"),
+            "currency": opt.get("currency", ""),
+            # 快照完整性（2026-10-01 接手缺口②）：交期与覆盖变化同样要求
+            # 重新选择——字段均来自现有 proposal supplier_options 契约。
+            "lead_time_days": opt.get("lead_time_days"),
+            "lead_time_source": opt.get("lead_time_source", ""),
+            "coverage": opt.get("coverage"),
         }
         for opt in (current_plan.get("supplier_options") or [])
     ]
@@ -363,6 +369,10 @@ def validate_ordinal_selection(
             "option_id": opt.get("option_id", ""),
             "supplier_name": opt.get("supplier_name", ""),
             "total_cost": opt.get("total_cost"),
+            "currency": opt.get("currency", ""),
+            "lead_time_days": opt.get("lead_time_days"),
+            "lead_time_source": opt.get("lead_time_source", ""),
+            "coverage": opt.get("coverage"),
         }
         for opt in options
     ]

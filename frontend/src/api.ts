@@ -565,9 +565,18 @@ export type CollaborationEventPayload = {
   title?: string;
   severity?: string;
   source?: string;
+  quotation_id?: string;
+  plan_id?: string;
 };
 
 export type CollaborationEventResult = {
+  shortage?: {
+    quotation_id?: string;
+    plan_id?: string;
+    recommended_option_id?: string;
+    shortage_items?: Array<Record<string, unknown>>;
+    supplier_options?: Array<Record<string, unknown>>;
+  } | null;
   quality_impact?: {
     open_issues_count?: number;
     quality_gate_passed?: boolean;

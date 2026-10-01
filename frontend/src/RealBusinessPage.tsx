@@ -34,6 +34,7 @@ import {
   setRealWriteToken,
 } from "./api";
 import type {
+  CollaborationEvent,
   QualityTodoItem,
   RealIdentity,
   WorkOrderDispatchPlan,
@@ -509,6 +510,112 @@ export default function RealBusinessPage() {
     }
   }, []);
 
+  // 协同事件"去处置/去处理"导航（P1 任务 A；只读导航，不执行任何审批/写入）
+  const goToEventTarget = useCallback(async (event: CollaborationEvent) => {
+    const payload = event.payload ?? {};
+    if (event.event_type === "quality_issue_raised") {
+      // 复用质量待办的处置跳转：加载工单三面板并聚焦该问题的 NCR 卡片
+      // （质量待办入口在外层先切页签再调 goToQualityDispose，此处保持一致）
+      setActiveTab("flow");
+      // goToQualityDispose 只消费工单/问题编号与标题；其余字段按类型契约补空
+      await goToQualityDispose({
+        issue_id: String(payload.issue_id ?? ""),
+        work_order_id: String(payload.work_order_id ?? ""),
+        work_order_no: String(payload.work_order_no ?? ""),
+        title: String(payload.title ?? ""),
+        severity: "",
+        status: "",
+        disposition: "",
+        reported_at: "",
+        assigned_to: "",
+      });
+      return;
+    }
+    if (event.event_type === "material_shortage") {
+      const quotationId = event.result?.shortage?.quotation_id ?? payload.quotation_id;
+      const planId = event.result?.shortage?.plan_id ?? payload.plan_id;
+      if (!quotationId || !planId) {
+        setError(`事件 ${event.event_id} 缺少关联的报价/采购方案编号，无法跳转`);
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        // 只读加载已持久化的真实报价与方案，落到方案审批区（不执行审批）
+        const loadedQuotation = await api<Quotation>(`/real-orders/quotations/${encodeURIComponent(quotationId)}`);
+        const plans = await api<ProcurementPlan[]>("/real-orders/procurement/plans");
+        const target = plans.find((pl) => pl.plan_id === planId) ?? null;
+        if (!target) {
+          setError(`采购方案 ${planId} 在当前业务库中不存在，无法跳转`);
+          return;
+        }
+        setQuotation(loadedQuotation);
+        setPlan(target);
+        if (target.net_requirement.has_shortage) {
+          setSelectedOptionId(target.recommended_option_id ?? target.supplier_options[0]?.option_id ?? "");
+          setStep(5);
+        } else {
+          setStep(4);
+        }
+        setActiveTab("flow");
+        notify(`已打开方案 ${planId} 的采购审批视图（基于事件 ${event.event_id}）`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "打开采购方案视图失败");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    if (event.event_type === "production_overdue") {
+      const workOrderId = String(payload.work_order_id ?? "");
+      const workOrderNo = String(payload.work_order_no ?? "");
+      if (!workOrderId && !workOrderNo) {
+        setError(`事件 ${event.event_id} 缺少关联的工单编号，无法跳转`);
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        // 复用质量待办跳转的加载路径：反查审批状态（不猜）→ 三面板只读加载
+        let quotationApproved = false;
+        try {
+          const orders = await api<WorkOrder[]>("/mes/work-orders?limit=100");
+          setWorkOrders(orders);
+          const linkedOrder = orders
+            .find((wo) => String(wo.work_order_id) === String(workOrderId))
+            ?.customer_order_no?.trim();
+          if (linkedOrder) {
+            const quotations = await api<Quotation[]>("/real-orders/quotations");
+            quotationApproved = quotations.some(
+              (q) => q.erp_draft_id?.trim() === linkedOrder && q.status === "APPROVED",
+            );
+          }
+        } catch {
+          // 反查失败按"未审批"口径显示
+        }
+        const [track, qual, ship] = await Promise.all([
+          api<TrackingInfo>(`/real-orders/mes/track/${workOrderId}`),
+          api<QualityInfo>(`/real-orders/quality/package/${workOrderId}`),
+          api<ShipGateInfo>(`/real-orders/ship-gate/${workOrderId}?quotation_approved=${quotationApproved}`),
+        ]);
+        setTracking(track);
+        setQuality(qual);
+        setShipGate(ship);
+        setWorkOrderId(workOrderId);
+        setStep(8);
+        setActiveTab("flow");
+        void restoreNcrWorkflowStates(qual);
+        notify(`已打开工单 ${workOrderNo || workOrderId} 的跟单视图（生产延期事件）`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "打开跟单视图失败");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    setError(`事件 ${event.event_id} 类型未知（${event.event_type}），无法跳转`);
+  }, [goToQualityDispose, notify]);
+
   // 跳转后滚动并高亮目标 NCR 卡片（依赖 activeTab：去处置先切回订单流程页签，渲染后再滚动）
   useEffect(() => {
     if (!todoFocusIssueId) return;
@@ -725,7 +832,7 @@ export default function RealBusinessPage() {
             void goToQualityDispose(item);
           }}
         />
-        <CollaborationEventsPanel notify={notify} onError={setError} />
+        <CollaborationEventsPanel notify={notify} onError={setError} onGoTarget={(event) => void goToEventTarget(event)} />
         </ErrorBoundary>
       )}
 

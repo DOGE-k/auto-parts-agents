@@ -378,6 +378,18 @@ async def handle_ask(
                 {"needs_input": True, "missing_slots": missing},
             )
         stale = _stale_from_context(entity_context, signals.quantity_change)
+        # 任务的 active_plan 一定基于旧数量：无论调用链是否带过 plan_id
+        # 参数，数量变更后都必须把当前方案标记为需重新确认（缺口①配套）。
+        active_plan_id = (task.active_plan or {}).get("plan_id", "")
+        if active_plan_id and not any(
+            s.get("type") == "procurement_plan" and str(s.get("id")) == active_plan_id
+            for s in stale
+        ):
+            stale.append({
+                "type": "procurement_plan",
+                "id": active_plan_id,
+                "reason": f"数量已改为 {signals.quantity_change}，需要基于新数量重新确认（缺料清单与供应商方案会随数量变化）",
+            })
         task.stale_downstream = stale
         task.status = "RECONFIRMATION_REQUIRED" if stale else "ACTIVE"
         analysis: dict[str, Any] | None = None
@@ -404,6 +416,22 @@ async def handle_ask(
 
     # ---- 确定性指令 2：选第 N 个方案 → 展示顺序映射 + 快照校验 ----
     if signals.ordinal_selection is not None:
+        # 数量变更后旧方案已标记"需重新确认"（缺口①）：拒绝基于旧数量的
+        # 方案选择，引导重新分析——不能让用户继续确认过期方案。
+        active_plan_id = (task.active_plan or {}).get("plan_id", "")
+        stale_plan_ids = {
+            str(s.get("id") or "")
+            for s in (task.stale_downstream or [])
+            if s.get("type") == "procurement_plan"
+        }
+        if active_plan_id and active_plan_id in stale_plan_ids:
+            return _finish(
+                f"方案 {active_plan_id} 基于旧数量（当前数量已改为 {merged.get('quantity')}），"
+                "不能继续选择。请重新发起一次缺料方案提问（例如「SAL-ORD-2026-00023 缺料了怎么办」），"
+                "拿到基于新数量的方案后再选第几个方案。",
+                "deterministic_selection",
+                {"needs_input": True},
+            )
         current_plan = None
         plan_id = (task.active_plan or {}).get("plan_id", "")
         if plan_id:

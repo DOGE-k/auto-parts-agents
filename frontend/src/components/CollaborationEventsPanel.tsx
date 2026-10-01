@@ -1,4 +1,4 @@
-// 跨智能体协同事件面板（P1：质量异常事件自动协同；只读结论 + 失败重试 + 人工接管）
+// 跨智能体协同事件面板（P1：质量异常/物料短缺/生产延期事件自动协同；只读结论 + 失败重试 + 人工接管 + 去处置/去处理导航）
 import { useCallback, useEffect, useState } from "react";
 import {
   collaborationEventStatusLabels,
@@ -9,12 +9,48 @@ import {
 } from "../api";
 import type { CollaborationEvent } from "../api";
 
+// 每类事件的"去处置/去处理"文案（导航由父页面实现；面板只校验编号并回调）
+const GO_TARGET_LABELS: Record<string, string> = {
+  quality_issue_raised: "去处置",
+  material_shortage: "去处理方案",
+  production_overdue: "查看跟单",
+};
+
+// 事件跳转所需的关联编号检查：缺失时给出可见错误，不调用导航回调
+function missingTargetReason(ev: CollaborationEvent): string {
+  const payload = ev.payload ?? {};
+  const shortage = ev.result?.shortage;
+  switch (ev.event_type) {
+    case "quality_issue_raised":
+      if (!payload.work_order_id || !payload.issue_id) {
+        return "缺少关联的工单编号或质量问题编号";
+      }
+      return "";
+    case "material_shortage": {
+      const quotationId = shortage?.quotation_id ?? payload.quotation_id;
+      const planId = shortage?.plan_id ?? payload.plan_id;
+      if (!quotationId || !planId) {
+        return "缺少关联的报价编号或采购方案编号";
+      }
+      return "";
+    }
+    case "production_overdue":
+      if (!payload.work_order_id && !payload.work_order_no) {
+        return "缺少关联的工单编号";
+      }
+      return "";
+    default:
+      return "未知事件类型，无法跳转";
+  }
+}
+
 type Props = {
   notify: (message: string) => void;
   onError: (message: string) => void;
+  onGoTarget?: (event: CollaborationEvent) => void;
 };
 
-export default function CollaborationEventsPanel({ notify, onError }: Props) {
+export default function CollaborationEventsPanel({ notify, onError, onGoTarget }: Props) {
   const [events, setEvents] = useState<CollaborationEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string>("");
@@ -75,7 +111,9 @@ export default function CollaborationEventsPanel({ notify, onError }: Props) {
         </button>
       </div>
       {events !== null && events.length === 0 && (
-        <p className="field-hint">当前没有协同事件。在第 8 步"登记质量问题"后会自动产生一条。</p>
+        <p className="field-hint">
+          当前没有协同事件。质量异常（登记质量问题）、物料短缺（含缺料的采购分析）、生产延期（工单过交期未完成）发生后会自动产生对应事件。
+        </p>
       )}
       {(events ?? []).map((ev) => {
         const detail = expanded === ev.event_id ? ev.result : null;
@@ -90,8 +128,12 @@ export default function CollaborationEventsPanel({ notify, onError }: Props) {
                 {collaborationEventStatusLabels[ev.status] ?? ev.status}
               </span>
               <span className="collab-event-meta">
-                {ev.payload?.work_order_no ? `工单 ${ev.payload.work_order_no}` : `工单 id ${ev.payload?.work_order_id ?? "?"}`}
-                {ev.payload?.issue_id ? ` · 问题 #${ev.payload.issue_id}` : ""}
+                {ev.event_type === "material_shortage"
+                  ? [
+                      ev.payload?.quotation_id ? `报价 ${ev.payload.quotation_id}` : "",
+                      ev.payload?.plan_id ? `方案 ${ev.payload.plan_id}` : "",
+                    ].filter(Boolean).join(" · ") || "采购分析事件"
+                  : `${ev.payload?.work_order_no ? `工单 ${ev.payload.work_order_no}` : `工单 id ${ev.payload?.work_order_id ?? "?"}`}${ev.payload?.issue_id ? ` · 问题 #${ev.payload.issue_id}` : ""}`}
                 {ev.payload?.title ? ` · ${ev.payload.title}` : ""}
               </span>
               <span className="collab-event-meta">
@@ -113,6 +155,23 @@ export default function CollaborationEventsPanel({ notify, onError }: Props) {
               >
                 {expanded === ev.event_id ? "收起协同结论" : "查看协同结论"}
               </button>
+              {onGoTarget && GO_TARGET_LABELS[ev.event_type] && (
+                <button
+                  className="button ghost"
+                  disabled={busyId === ev.event_id}
+                  title={missingTargetReason(ev) || `跳转到${GO_TARGET_LABELS[ev.event_type].replace(/^去/, "")}区域（只读导航，不执行审批）`}
+                  onClick={() => {
+                    const missing = missingTargetReason(ev);
+                    if (missing) {
+                      onError(`事件 ${ev.event_id} ${missing}，无法跳转`);
+                      return;
+                    }
+                    onGoTarget(ev);
+                  }}
+                >
+                  {GO_TARGET_LABELS[ev.event_type]}
+                </button>
+              )}
               {canRetry && (
                 <button className="button ghost" disabled={busyId === ev.event_id} onClick={() => void doRetry(ev.event_id)}>
                   重试协同

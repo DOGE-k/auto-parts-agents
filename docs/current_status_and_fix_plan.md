@@ -1737,3 +1737,54 @@ ERP 物料需求
 
 - 已完成：质量异常（§3.50）、关键物料短缺、生产延期（本节）三类事件——AI_HANDOFF_PLAN 第 6 节的四个场景中三个已落地（质量门禁未通过→禁止发运已有既有门禁+待办承接）。
 - 剩余：事件"去处置/去处理"与对应业务面板的跳转联动（复用 goToQualityDispose 模式）；事件量大后同步改异步；提前预警阈值等业务规则确认。
+
+### 3.52 协同事件去处置联动 + 接手缺口收口 + SQLite 回退一致性（2026-10-02，依据 docs/handoff_2026-10-01_event_disposal_and_stabilization.md）
+
+**范围**：交接文档定义的任务 A/B/C/D 与 §二点五 三个已知缺口；不新增业务规则、不新增预警阈值、不改真实 ERP/MES 写入流程。
+
+#### 一、三个已知缺口的修复（均有回归测试锁定）
+
+1. **人工接管后事件重触发撞 dedup 唯一约束**（缺口③）：三处触发函数（质量/缺料/延期）重构为公共幂等入口 `_trigger_with_dedup`——同键存在未接管事件返回既有；已有事件全部人工接管后同一业务事实再次发生 → 产生**新事件**（dedup_key 加 `#N` 后缀，不改唯一约束、避免 SQLite/PG 跨库重建表迁移）；并发竞态撞约束时回读未接管事件返回，IntegrityError 不泄漏给登记/采购分析/跟单等原始业务操作。回归：接管 → 再次触发 → 新事件 COMPLETED、后缀 #2、原事件保留 MANUAL_HANDLED。
+2. **数量变更后仍可选旧方案**（缺口①）：选择分支前置检查——`active_plan.plan_id` 出现在 `stale_downstream`（type=procurement_plan）时拒绝并引导"重新发起缺料方案提问"；同时补强 stale 标记本身：数量变更时无论调用链是否带过 plan 参数，**任务的 active_plan 必然基于旧数量**，一律标记为需重新确认。连续回归：缺料方案 → "数量改成 3000" → "选第二个方案" → 拒绝（needs_input，不产生 pending_selection）。
+3. **方案快照完整性**（缺口②）：序号校验在 option_id/供应商/总价之外，增加 **lead_time_days / lead_time_source / coverage / currency** 比较（字段均来自现有 proposal supplier_options 契约，未发明字段）；交期或覆盖变化要求重新选择。
+
+#### 二、任务 A：事件面板"去处置/去处理"导航（只读，不执行审批）
+
+- `CollaborationEventsPanel` 新增 `onGoTarget` prop 与按类型按钮（质量→"去处置"、缺料→"去处理方案"、延期→"查看跟单"）；**面板内先做编号检查**：缺工单/问题/报价/方案编号时显示"事件 EVT-… 缺少关联的…，无法跳转"且不调导航回调；空状态文案覆盖三类事件；缺料事件元信息按类型显示"报价 X · 方案 Y"（修正原先误显示"工单 id ？"）。
+- `RealBusinessPage` 新增 `goToEventTarget`：
+  - 质量事件 → 复用既有 `goToQualityDispose`（先切"订单流程"页签，加载工单三面板并聚焦该问题 NCR 卡片）；
+  - 缺料事件 → 只读加载已持久化报价（`GET /real-orders/quotations/{id}`）与方案（`/procurement/plans` 过滤 plan_id），落到第 5 步方案审批视图；方案不存在时明确报错；
+  - 延期事件 → 反查报价审批状态（不猜）→ track/quality/ship-gate 三面板加载到第 8 步跟单视图。
+- 人工接管语义不变：接管≠已处置，导航不等于审批（页面与测试均锁定该措辞）。
+
+#### 三、任务 C：SQLite 回退一致性（决策：继续支持 SQLite 回退）
+
+- 根因：`backend/data/demo.db` 停在 `b5d9e6a41c77`，缺 `collaboration_events` 表。
+- 处置：对 demo.db 执行 `alembic upgrade head` → 版本 `c7e2f9a84d15`，表与 13 列齐全；以 `DATABASE_URL=sqlite:///./data/demo.db` 启动临时 9001 实例冒烟：`/api/health` ok、`/api/real-orders/collaboration/events` 200（空列表为真实状态）。事件读写路径由测试套件持续覆盖（conftest 即 SQLite 临时库）。
+- 边界说明（写入文档）：`init_database` 的 create_all 只负责新装零依赖场景的初始 schema；**已有库的升级路径是 alembic**，create_all 不会修改已存在表，不掩盖迁移缺失。
+
+#### 四、任务 D：测试与构建收口（实际结果）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `..\.conda-env\python.exe -m pytest tests -q` | **214 passed**（基线 211 + 缺口回归 3） |
+| 后端编译 | `compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **26 passed**（21 + 导航回归 5） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | 通过（本轮未复现 EPERM） |
+
+#### 五、页面级走查（真实系统，只读）
+
+- 事件面板三类徽标与按钮齐全；**"去处置"点击 → 订单流程页签第 8 步 + 工单 11（WO-SO-2026-00025，DONE、3 条质量记录）真实加载 + toast 确认**（截图 `gui-test-screenshots/2026-10-02_event_go_dispose_jump.png`；走查中发现并修复质量分支漏切页签的问题）；
+- **"去处理方案"点击 → 第 5 步方案审批视图，方案 PROC-806DCF2D5774 真实数据（缺料 3 项价格记录号、三家供应商方案）+ toast 确认**（截图 `2026-10-02_event_go_procurement_jump.png`）；
+- 延期事件的"查看跟单"跳转由面板测试覆盖；当前真实工单无过期数据、无延期事件可点——如实记录，不造数据。
+
+#### 六、ERPNext/OpenMES 写入
+
+零写入。本轮全部为本地业务库（事件状态）与只读导航改动；登记/审批/写回流程未触碰。
+
+#### 七、遗留（如实记录）
+
+- 延期事件"查看跟单"的页面级点击验证待真实出现过期工单后补做（按钮与回调路径已由单测锁定）；
+- `npm run build` 的 EPERM 历史问题本轮未复现，继续观察；
+- 交接文档提及的仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）未纳入本轮范围，维持原状未动。

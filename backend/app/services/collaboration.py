@@ -106,6 +106,61 @@ def get_event(event_id: str) -> dict[str, Any] | None:
         return _event_summary(row)
 
 
+async def _trigger_with_dedup(
+    base_key: str,
+    make_row,
+) -> dict[str, Any]:
+    """事件触发的公共幂等入口（2026-10-01 接手缺口③修复）。
+
+    - 同 base_key 下存在未接管事件 → 直接返回既有（deduplicated）；
+    - 已有事件全部人工接管后同一业务事实再次发生 → 产生**新事件**，
+      dedup_key 加 "#N" 后缀保持唯一约束不被破坏（不改约束，避免
+      SQLite/PG 跨库重建表迁移）；
+    - 并发竞态撞唯一约束时回读未接管事件返回，不把 IntegrityError
+      泄漏给登记/采购分析/跟单等原始业务操作。
+    """
+    import sqlalchemy.exc
+
+    with SessionLocal() as session:
+        existing = session.scalars(
+            select(CollaborationEventRow).where(
+                CollaborationEventRow.dedup_key.like(f"{base_key}%"),
+                CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
+            ).order_by(CollaborationEventRow.created_at.desc())
+        ).first()
+        if existing is not None:
+            summary = _event_summary(existing)
+            summary["deduplicated"] = True
+            return summary
+        prior_count = len(
+            session.scalars(
+                select(CollaborationEventRow.dedup_key).where(
+                    CollaborationEventRow.dedup_key.like(f"{base_key}%")
+                )
+            ).all()
+        )
+        dedup_key = base_key if prior_count == 0 else f"{base_key}#{prior_count + 1}"
+        row = make_row(dedup_key)
+        session.add(row)
+        try:
+            session.commit()
+        except sqlalchemy.exc.IntegrityError:
+            session.rollback()
+            raced = session.scalars(
+                select(CollaborationEventRow).where(
+                    CollaborationEventRow.dedup_key.like(f"{base_key}%"),
+                    CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
+                )
+            ).first()
+            if raced is not None:
+                summary = _event_summary(raced)
+                summary["deduplicated"] = True
+                return summary
+            raise
+        event_id = row.event_id
+    return await process_event(event_id)
+
+
 async def trigger_quality_issue_event(
     work_order_id: str,
     issue_id: str,
@@ -121,19 +176,10 @@ async def trigger_quality_issue_event(
     """
     wo_id = str(work_order_id).strip()
     iss_id = str(issue_id).strip()
-    dedup_key = f"{EVENT_TYPE_QUALITY_ISSUE}:{wo_id}:{iss_id}"
-    with SessionLocal() as session:
-        existing = session.scalars(
-            select(CollaborationEventRow).where(
-                CollaborationEventRow.dedup_key == dedup_key,
-                CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
-            )
-        ).first()
-        if existing is not None:
-            summary = _event_summary(existing)
-            summary["deduplicated"] = True
-            return summary
-        row = CollaborationEventRow(
+    base_key = f"{EVENT_TYPE_QUALITY_ISSUE}:{wo_id}:{iss_id}"
+
+    def make_row(dedup_key: str) -> CollaborationEventRow:
+        return CollaborationEventRow(
             event_id=_new_event_id(),
             event_type=EVENT_TYPE_QUALITY_ISSUE,
             dedup_key=dedup_key,
@@ -147,10 +193,8 @@ async def trigger_quality_issue_event(
             },
             max_retries=DEFAULT_MAX_RETRIES,
         )
-        session.add(row)
-        session.commit()
-        event_id = row.event_id
-    return await process_event(event_id)
+
+    return await _trigger_with_dedup(base_key, make_row)
 
 
 async def process_event(event_id: str) -> dict[str, Any]:
@@ -436,18 +480,8 @@ async def trigger_shortage_event(plan: dict[str, Any]) -> dict[str, Any] | None:
         "quotation_status": plan.get("quotation_status", ""),
         "source": "procurement_analyze",
     }
-    with SessionLocal() as session:
-        existing = session.scalars(
-            select(CollaborationEventRow).where(
-                CollaborationEventRow.dedup_key == dedup_key,
-                CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
-            )
-        ).first()
-        if existing is not None:
-            summary = _event_summary(existing)
-            summary["deduplicated"] = True
-            return summary
-        row = CollaborationEventRow(
+    def make_row(dedup_key: str) -> CollaborationEventRow:
+        return CollaborationEventRow(
             event_id=_new_event_id(),
             event_type=EVENT_TYPE_SHORTAGE,
             dedup_key=dedup_key,
@@ -455,10 +489,8 @@ async def trigger_shortage_event(plan: dict[str, Any]) -> dict[str, Any] | None:
             payload_json=payload,
             max_retries=DEFAULT_MAX_RETRIES,
         )
-        session.add(row)
-        session.commit()
-        event_id = row.event_id
-    return await process_event(event_id)
+
+    return await _trigger_with_dedup(dedup_key, make_row)
 
 
 async def _find_work_order_for_quotation(quotation_id: str) -> tuple[str, list[dict[str, str]]]:
@@ -613,19 +645,11 @@ async def trigger_overdue_event_if_needed(track: dict[str, Any]) -> dict[str, An
         wo_id = str(track.get("work_order_id", ""))
         wo_no = str(track.get("work_order_no", ""))
         dedup_key = f"{EVENT_TYPE_OVERDUE}:{wo_id or wo_no}:{date.today().isoformat()}"
-        with SessionLocal() as session:
-            existing = session.scalars(
-                select(CollaborationEventRow).where(
-                    CollaborationEventRow.dedup_key == dedup_key,
-                    CollaborationEventRow.status != EVENT_STATUS_MANUAL_HANDLED,
-                )
-            ).first()
-            if existing is not None:
-                return None
-            row = CollaborationEventRow(
+        def make_row(row_dedup_key: str) -> CollaborationEventRow:
+            return CollaborationEventRow(
                 event_id=_new_event_id(),
                 event_type=EVENT_TYPE_OVERDUE,
-                dedup_key=dedup_key,
+                dedup_key=row_dedup_key,
                 status=EVENT_STATUS_PENDING,
                 payload_json={
                     "work_order_id": wo_id,
@@ -640,10 +664,10 @@ async def trigger_overdue_event_if_needed(track: dict[str, Any]) -> dict[str, An
                 },
                 max_retries=DEFAULT_MAX_RETRIES,
             )
-            session.add(row)
-            session.commit()
-            event_id = row.event_id
-        return await process_event(event_id)
+
+        # 延期事件包装语义：首次触发返回事件摘要；同日重复（deduplicated）返回 None
+        result = await _trigger_with_dedup(dedup_key, make_row)
+        return None if result.get("deduplicated") else result
     except Exception:
         logger.exception("延期事件检查失败（不影响跟单查询）")
         return None
