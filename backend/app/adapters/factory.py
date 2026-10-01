@@ -131,9 +131,9 @@ def get_mes_adapter() -> Any:
 
     if mode == "real":
         from app.adapters.mes.openmes_adapter import OpenMESAdapter
-        from app.adapters.mes.openmes import OpenMESClient
-        client = OpenMESClient(
-            settings.openmes_base_url,
+        from app.integrations.openmes_session import build_openmes_client
+        client = build_openmes_client(
+            settings,
             user_token=settings.openmes_user_token,
             erp_api_key=settings.openmes_erp_api_key,
         )
@@ -148,9 +148,9 @@ def get_mes_adapter() -> Any:
     if mes_configured:
         try:
             from app.adapters.mes.openmes_adapter import OpenMESAdapter
-            from app.adapters.mes.openmes import OpenMESClient
-            client = OpenMESClient(
-                settings.openmes_base_url,
+            from app.integrations.openmes_session import build_openmes_client
+            client = build_openmes_client(
+                settings,
                 user_token=settings.openmes_user_token,
                 erp_api_key=settings.openmes_erp_api_key,
             )

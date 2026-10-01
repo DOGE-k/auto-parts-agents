@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from app.integrations.errors import IntegrationNotConfigured, IntegrationPermissionDenied
 from app.integrations.http import JsonHttpClient
+
+if TYPE_CHECKING:
+    from app.integrations.openmes_session import OpenMESUserSessionManager
 
 
 WORK_ORDER_FILTERS = frozenset(
@@ -23,12 +26,14 @@ class OpenMESClient:
         erp_api_key: str | None = None,
         timeout_seconds: float = 15.0,
         client=None,
+        user_session: "OpenMESUserSessionManager | None" = None,
     ) -> None:
         if not base_url.strip():
             raise IntegrationNotConfigured("OpenMES", ["OPENMES_BASE_URL"])
         self._user_token = user_token.strip() if user_token else ""
         self._erp_api_key = erp_api_key.strip() if erp_api_key else ""
-        self._http = JsonHttpClient(
+        self._user_session = user_session
+        inner_http = JsonHttpClient(
             base_url,
             # Laravel 只在 Accept: application/json 时把认证/校验失败渲染成
             # JSON（401/422）；否则 302 回登录页 HTML，错误信息会失真。
@@ -36,6 +41,26 @@ class OpenMESClient:
             timeout_seconds=timeout_seconds,
             client=client,
         )
+        if user_session is not None:
+            # 401 时经内存会话管理器重登并重试一次（仅 Bearer 请求）；
+            # 令牌只存在于管理器内存中，不落日志/配置/数据库。
+            from app.integrations.openmes_session import UserTokenRetryTransport
+
+            self._http = UserTokenRetryTransport(inner_http, user_session)
+        else:
+            self._http = inner_http
+
+    async def _user_auth_headers(self) -> dict[str, str]:
+        """用户会话请求头：内存缓存优先 → 静态配置令牌 → 主动登录。"""
+        if self._user_session is not None:
+            cached = self._user_session.peek()
+            if cached:
+                return {"Authorization": f"Bearer {cached}"}
+        if self._user_token:
+            return {"Authorization": f"Bearer {self._user_token}"}
+        if self._user_session is not None:
+            return {"Authorization": f"Bearer {await self._user_session.get_token()}"}
+        raise IntegrationNotConfigured("OpenMES 用户 API", ["OPENMES_TOKEN"])
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -49,7 +74,7 @@ class OpenMESClient:
     async def current_user(self) -> dict[str, Any]:
         self._require_user_token()
         result = await self._http.request_json(
-            "GET", "api/auth/me", headers={"Authorization": f"Bearer {self._user_token}"}
+            "GET", "api/auth/me", headers=await self._user_auth_headers()
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 用户接口返回格式不符合其 API 文档")
@@ -71,7 +96,7 @@ class OpenMESClient:
             "GET",
             "api/v1/issues",
             params={"status": status, "page": page},
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), list):
             raise ValueError("OpenMES 质量问题列表返回格式不符合其 API 文档")
@@ -82,7 +107,7 @@ class OpenMESClient:
         self._require_user_token()
         result = await self._http.request_json(
             "GET", "api/v1/issue-types",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, list):
@@ -102,7 +127,7 @@ class OpenMESClient:
             raise ValueError(f"创建 OpenMES 质量问题缺少字段：{', '.join(missing)}")
         result = await self._http.request_json(
             "POST", "api/v1/issues", json_body=payload,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 质量问题创建接口返回格式不符合其 API 文档")
@@ -116,7 +141,7 @@ class OpenMESClient:
             raise ValueError("OpenMES issue_id 不能为空")
         result = await self._http.request_json(
             "GET", f"api/v1/issues/{quote(value, safe='')}",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 质量问题详情返回格式不符合其 API 文档")
@@ -134,7 +159,7 @@ class OpenMESClient:
             "GET",
             "api/v1/work-orders",
             params=filters,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), list):
             raise ValueError("OpenMES 工单列表返回格式不符合其 API 文档")
@@ -146,7 +171,7 @@ class OpenMESClient:
             "GET",
             "api/v1/product-types",
             params={"q": query} if query else None,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, list):
@@ -161,7 +186,7 @@ class OpenMESClient:
             raise ValueError(f"创建 OpenMES 工单缺少字段：{', '.join(missing)}")
         result = await self._http.request_json(
             "POST", "api/v1/work-orders", json_body=payload,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 工单创建接口返回格式不符合其 API 文档")
@@ -174,7 +199,7 @@ class OpenMESClient:
             raise ValueError("接收 OpenMES 工单必须提供 work_order_id")
         result = await self._http.request_json(
             "POST", f"api/v1/work-orders/{quote(value, safe='')}/accept",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 工单接收接口返回格式不符合其 API 文档")
@@ -188,7 +213,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "GET",
             f"api/v1/work-orders/{quote(value, safe='')}",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 工单详情返回格式不符合其 API 文档")
@@ -202,7 +227,7 @@ class OpenMESClient:
             "GET",
             "api/v1/event-logs/entity",
             params={"entity_type": entity_type, "entity_id": str(entity_id)},
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 事件日志返回格式不符合其 API 文档")
@@ -251,7 +276,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "GET",
             f"api/v1/work-orders/{quote(value, safe='')}/engineering-documents",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, list):
@@ -267,7 +292,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "GET",
             f"api/v1/engineering-documents/{quote(value, safe='')}",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, dict):
@@ -283,7 +308,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "GET",
             f"api/v1/work-orders/{quote(value, safe='')}/batches",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -309,7 +334,7 @@ class OpenMESClient:
             "POST",
             f"api/v1/work-orders/{quote(value, safe='')}/batches",
             json_body=payload,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 批次创建接口返回格式不符合其 API 文档")
@@ -324,7 +349,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "POST",
             f"api/v1/batch-steps/{quote(value, safe='')}/start",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 批次步骤开工接口返回格式不符合其 API 文档")
@@ -344,7 +369,7 @@ class OpenMESClient:
             "POST",
             f"api/v1/batch-steps/{quote(value, safe='')}/complete",
             json_body=payload,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 批次步骤报工接口返回格式不符合其 API 文档")
@@ -376,7 +401,7 @@ class OpenMESClient:
                 "document_type": document_type,
             },
             files={"file": (filename, content, "text/html")},
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 工程文档上传接口返回格式不符合其 API 文档")
@@ -391,7 +416,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "POST",
             f"api/v1/engineering-documents/{quote(value, safe='')}/release",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("OpenMES 工程文档发布接口返回格式不符合其 API 文档")
@@ -405,7 +430,7 @@ class OpenMESClient:
             "GET",
             "api/v1/inspections",
             params=params,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -425,7 +450,7 @@ class OpenMESClient:
             "POST",
             f"api/v1/issues/{quote(value, safe='')}/resolve",
             json_body={"resolution_notes": notes},
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 质量问题处理接口返回格式不符合其 API 文档")
@@ -440,7 +465,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "POST",
             f"api/v1/issues/{quote(value, safe='')}/close",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 质量问题关闭接口返回格式不符合其 API 文档")
@@ -475,7 +500,7 @@ class OpenMESClient:
             "PUT",
             f"api/v1/issues/{quote(value, safe='')}/disposition",
             json_body=payload,
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         if not isinstance(result, dict):
             raise ValueError("OpenMES 质量处置接口返回格式不符合其 API 文档")
@@ -490,7 +515,7 @@ class OpenMESClient:
         result = await self._http.request_json(
             "GET",
             f"api/v1/issues/{quote(value, safe='')}/actions",
-            headers={"Authorization": f"Bearer {self._user_token}"},
+            headers=await self._user_auth_headers(),
         )
         data = result.get("data") if isinstance(result, dict) else None
         if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -531,6 +556,10 @@ class OpenMESClient:
         )
 
     def _require_user_token(self) -> None:
+        # 挂接内存会话管理器时允许静态令牌为空：请求头阶段或 401 重试阶段
+        # 会经 get_token()/refresh() 按需登录。
+        if self._user_session is not None:
+            return
         if not self._user_token:
             raise IntegrationNotConfigured("OpenMES 用户 API", ["OPENMES_TOKEN"])
 

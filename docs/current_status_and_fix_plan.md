@@ -1528,3 +1528,62 @@ ERP 物料需求
 - **CI 首跑失败并修复**：backend job 在 pytest 收集阶段全量 `ModuleNotFoundError: No module named 'acps_sdk'`——vendored 的 ACPs SDK（`acps-sdk-src/acps-sdk`，本地以 editable 方式导入）未进 CI 环境；frontend job 首跑即绿。修复：ci.yml 在 `pip install -e backend` 前加 `pip install -e acps-sdk-src/acps-sdk`（后端仅用 SDK 核心 acs/aip 模块，可选 extra amp-sign 的 jcs/cryptography 本地亦未装，无需安装）。
 - **修复后 CI 双 job 全绿**：Backend (pytest + compileall) ✅ / Frontend (vitest + build) ✅（run on 8a04fa4）。
 - 注：仓库为私有，CI 状态经 git 凭据（未输出密钥）调用 GitHub API 核验。
+
+### 3.46 文档整理与后续 AI 接手计划（2026-10-01）
+
+本轮只整理文档，没有修改业务代码或真实 ERP/MES 数据。
+
+- 新增 `docs/AI_HANDOFF_PLAN.md`，统一记录最终产品目标、四个智能体边界、当前真实状态、P0/P1/P2 开发路线、执行模板、验收标准和禁止事项。
+- 更新 `docs/README.md`，明确推荐阅读顺序，并标出当前依据、历史交接稿、字段映射和 TEST 数据提示词的用途边界。
+- 在 `docs/next_development_plan.md` 顶部增加历史计划提示，避免接手者把早期未勾选任务当成当前待办。
+- 当前后端测试基线仍以本次复核的 `154 passed` 为准；接手者开始新阶段前应重新运行测试和真实接口检查。
+- 运行检查发现 `/api/mes/work-orders` 当前返回空列表，而历史记录曾有工单数据；该差异列为接手后的首个核对项，解决前不得把工单数量写死到演示或新文档。
+
+### 3.47 OpenMES 认证自愈与适配器错误传播修复（2026-10-01，接手 §3.46 首个核对项）
+
+**背景**：§3.46 记录 `/api/mes/work-orders` 返回空列表。本轮查明根因并按用户确认的规则修复（只做认证恢复与错误处理，未写入任何 ERP/MES/业务数据）。
+
+#### 一、根因结论（每一环均有实证）
+
+1. `.env` 的 `OPENMES_TOKEN` 是 `get_openmes_token.py` 用 admin 登录换取的 Sanctum **会话令牌**，OpenMES 源码（`services/OpenMes/backend/app/Services/Auth/AuthService.php:37`）在签发时即写入 15 分钟过期（`now()->addMinutes(openmmes.default_token_ttl_minutes, 15)`）——把会话令牌当长期凭据，过期是结构性必然。
+2. 实证：令牌表（personal_access_tokens）中 `.env` 引用的令牌 id=23 已不存在；现存最新令牌均已过 TTL。
+3. 后端所有 `/api/v1/*` 读取走该 Bearer 令牌 → 全部 401 `Unauthenticated.`；`X-Api-Key`（持久 API Key）仅覆盖 3 个 ERP 作用域端点。
+4. `openmes_adapter.py` 非严格 `get_work_orders` 捕获全部异常后 `return []`，把 401 吞成空列表——这就是"历史有 4 条、当前返回空"的差异来源。
+5. 数据无丢失：`openmes-postgres` 只读查询 work_orders 表 **12 条**；ERPNext 全程正常（Administrator 认证可用）。
+
+#### 二、修复内容（错误传播 + 令牌自动刷新）
+
+| 文件 | 改动 |
+|------|------|
+| `backend/app/adapters/mes/openmes_adapter.py` | 5 处吞错修复：`get_work_orders`（委托 strict）、`get_operation_progress`、`get_wip`、`get_production_documents`、`read_authoritative_events` 全部改为失败抛出；只有 OpenMES 正常返回 200 且数据为空才返回空列表；`get_production_documents` 缺 work_order_id 抛 ValueError 而非空列表 |
+| `backend/app/integrations/openmes_session.py`（新增） | `OpenMESUserSessionManager`：令牌只存进程内存（默认 14 分钟缓存，留 1 分钟 TTL 余量）；凭据仅从 `services/OpenMes/.env` 读取且只在登录调用瞬间使用；401 刷新带并发去重（其他请求已换新则复用）；登录失败包装为 `openmes_relogin_failed` 明确错误（不含凭据）。`UserTokenRetryTransport`：仅对带 Authorization 的请求在 401 时刷新重试一次（X-Api-Key/匿名 401 不重试），重试后仍 401 原样抛出不循环 |
+| `backend/app/adapters/mes/openmes.py` | 客户端支持 `user_session`；请求头构建顺序=内存缓存 → 静态引导令牌 → 主动登录；`_require_user_token` 感知会话模式；24 处 Bearer 头统一经 `_user_auth_headers()` |
+| `backend/app/adapters/factory.py` | real/auto 模式的 MES 客户端改经 `build_openmes_client`（自动刷新默认开启） |
+| `backend/app/main.py` | 3 个直构点接入；新增 `_mes_status_error`：401/`openmes_relogin_failed`→HTTP 401 `mes_auth_expired`，timeout/network→502 `mes_unreachable`；4 个 `/api/mes/*` 路由全部挂映射 |
+| `backend/app/services/identity.py` | 无浏览器会话时的服务端身份回退同样挂自动刷新（浏览器会话路径不变，仍用请求令牌原样解析） |
+| `.env.example` | 新增 `OPENMES_SESSION_AUTO_REFRESH`（默认 true）与 `OPENMES_SESSION_TTL_SECONDS`（默认 840）说明 |
+
+#### 三、真实验证记录（全部只读）
+
+| 步骤 | 结果 |
+|------|------|
+| 阶段1 刷新令牌（get_openmes_token.py） | 登录成功（令牌 id=34）；工单端点 12 条；X-Api-Key 验证 completions=2、quality issues=3 |
+| 重启后端后 `/api/mes/work-orders` | HTTP 200，**12 条工单**（含 WO-2026-001→SAL-ORD-2026-00001、TEST_WO_PAGE_00023→00023、WO-SO-2026-00024/25/26 全部关联正确） |
+| `/api/integrations/openmes/work-orders` | HTTP 200 |
+| `GET /api/real-orders/mes/track/2` | 200：WO-2026-001 真实数据（0%、ETA DATA_MISSING 如实） |
+| `GET /api/real-orders/mes/track/9` | 200：`eta_status=RATE_BASED`（真实速率线不受影响） |
+| `GET /api/real-orders/quality/todo` | HTTP 200（恢复） |
+| **阶段3 自愈验证** | 将 `.env` 令牌替换为失效占位值 → 重启后端 → 首次请求 401 → **自动重登（令牌表新增 id=36，时间与首次请求一致）** → `/api/mes/work-orders` 返回 200+12 条；第二次请求命中内存缓存 |
+| 身份回退 | `GET /api/real-orders/identity/me` 200：Administrator（经 build 路径） |
+| 日志泄漏检查 | uvicorn-9000*.log 中 0 处令牌/占位值出现 |
+
+#### 四、测试
+
+- 新增 `backend/tests/test_openmes_session_refresh.py` **23 例**：会话缓存/TTL/并发去重/登录失败包装/凭据缺失、传输层 401 单次重试与二次 401 传播、X-Api-Key 与网络错误不重试、请求头三级回退、适配器 5 处错误传播、空数据仍为空列表、`_mes_status_error` 映射、端到端 401→`mes_auth_expired`。
+- 全量：**177 passed**（基线 154 + 新增 23）；`compileall` 通过。
+
+#### 五、边界与下一步
+
+- `.env` 的 `OPENMES_TOKEN` 现在定位为**引导令牌**（自动刷新关闭时或冷启动首请求前使用）；正常运行期由内存会话自愈，无需重启。
+- 写操作（报工/登记/处置/下达）同样经重试传输层：401 时首次尝试未达服务端，重登后重试一次安全；写入本身仍全部走审批门禁。
+- 下一步按用户确认顺序开始 P0 会话与槽位检查开发（数量改→只读重报价+下游重确认标记；选第二方案→展示序号+option_id 快照；上下文沿用回显；90 天可配置保留）。

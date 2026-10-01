@@ -33,8 +33,10 @@ class OpenMESAdapter:
 
     实现 MESAdapter Protocol，通过 OpenMESClient 调用 OpenMES REST API。
     - 查询操作：直接读取 OpenMES 数据
-    - 写操作：默认禁用，抛出权限错误
-    - 连接失败时：记录错误并返回带 error 信息的空结果，不静默退回 Mock
+    - 写操作：默认禁用，抛出权限错误（审批门禁内的写操作除外）
+    - 读取失败（认证失效/超时/网络/远端 5xx）一律抛出 IntegrationError，
+      由路由层映射为明确错误状态；只有 OpenMES 正常返回 200 且数据为空
+      时才返回空列表——绝不允许把系统故障伪装成"没有数据"。
     """
 
     def __init__(self, client: OpenMESClient) -> None:
@@ -107,21 +109,13 @@ class OpenMESAdapter:
     # ========== 工单与进度 ==========
 
     async def get_work_orders(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
-        """获取工单列表。"""
-        try:
-            filters: dict[str, Any] = {}
-            if scope.get("status"):
-                filters["status"] = scope["status"]
-            if scope.get("search"):
-                filters["search"] = scope["search"]
-            filters["per_page"] = min(scope.get("limit", 50), 100)
+        """获取工单列表。
 
-            result = await self._client.list_work_orders(filters)
-            data = result.get("data", [])
-            return [self._map_work_order(wo) for wo in data]
-        except Exception as e:
-            logger.error("OpenMES get_work_orders failed: %s", e)
-            return []
+        读取失败（认证/网络/远端错误）直接抛出——空列表只代表 OpenMES
+        正常返回了 0 条记录。2026-10-01 实证：吞掉 401 返回 [] 会把令牌
+        过期伪装成"没有工单"。
+        """
+        return await self.get_work_orders_strict(scope)
 
     async def get_work_orders_strict(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
         """获取工单列表（严格模式）。
@@ -168,94 +162,86 @@ class OpenMESAdapter:
         """获取工序进度。
 
         OpenMES API 没有独立的工序端点，工单详情中包含 process_snapshot
-        和 issues。将工单级别的进度作为整体工序返回。
+        和 issues。将工单级别的进度作为整体工序返回。读取失败直接抛出，
+        不把故障伪装成"没有工序数据"。
         """
-        try:
-            result = await self._client.get_work_order(work_order_id)
-            data = result.get("data", {})
+        result = await self._client.get_work_order(work_order_id)
+        data = result.get("data", {})
 
-            planned = data.get("planned_qty", 0)
-            produced = data.get("produced_qty", 0)
-            packed = data.get("packed_qty", 0)
-            status = data.get("status", "pending")
-            line = data.get("line") or {}
+        planned = data.get("planned_qty", 0)
+        produced = data.get("produced_qty", 0)
+        packed = data.get("packed_qty", 0)
+        status = data.get("status", "pending")
+        line = data.get("line") or {}
 
-            process_snapshot = data.get("process_snapshot")
-            if isinstance(process_snapshot, dict) and process_snapshot.get("steps"):
-                steps = process_snapshot.get("steps", [])
-                return [
-                    {
-                        "operation_id": str(step.get("id", f"step-{i}")),
-                        "operation_name": step.get("name", f"工序 {i+1}"),
-                        "sequence": i + 1,
-                        "planned_qty": str(planned),
-                        "completed_qty": str(step.get("completed_qty", 0)),
-                        "rejected_qty": str(step.get("rejected_qty", 0)),
-                        "status": step.get("status", "pending"),
-                        "work_center": step.get("workstation", ""),
-                        "start_time": step.get("started_at", ""),
-                        "end_time": step.get("finished_at", ""),
-                        # These are execution facts, not planned schedule values.
-                        # Keep them explicit so ETA cannot accidentally use a
-                        # planned start as an observed production rate sample.
-                        "actual_start_at": step.get("started_at", ""),
-                        "actual_end_at": step.get("finished_at", ""),
-                        "actual_elapsed_minutes": step.get("actual_elapsed_minutes"),
-                        "actual_run_minutes": step.get("actual_run_minutes"),
-                        "run_time_per_unit_minutes": step.get("run_time_per_unit_minutes"),
-                        "passed_qty": str(step.get("passed_qty", step.get("completed_qty", 0))),
-                        "authority": self.authority,
-                        "data_source": "openmes_api",
-                    }
-                    for i, step in enumerate(steps)
-                ]
-
+        process_snapshot = data.get("process_snapshot")
+        if isinstance(process_snapshot, dict) and process_snapshot.get("steps"):
+            steps = process_snapshot.get("steps", [])
             return [
                 {
-                    "operation_id": f"WO-{work_order_id}-OVERALL",
-                    "operation_name": "整体生产进度",
-                    "sequence": 1,
+                    "operation_id": str(step.get("id", f"step-{i}")),
+                    "operation_name": step.get("name", f"工序 {i+1}"),
+                    "sequence": i + 1,
                     "planned_qty": str(planned),
-                    "completed_qty": str(produced),
-                    "packed_qty": str(packed),
-                    "rejected_qty": "0",
-                    "status": status,
-                    "work_center": line.get("name", ""),
-                    # The overall row has no observed timing when the order has
-                    # not started. Planned dates are kept separately and are
-                    # never used as rate observations.
-                    "start_time": data.get("actual_start_at", ""),
-                    "end_time": data.get("completed_at", ""),
-                    "actual_start_at": data.get("actual_start_at", ""),
-                    "actual_end_at": data.get("completed_at", ""),
-                    "planned_start_at": data.get("planned_start_at", ""),
-                    "planned_end_at": data.get("planned_end_at", ""),
-                    "actual_elapsed_minutes": data.get("actual_elapsed_minutes"),
-                    "actual_run_minutes": data.get("actual_run_minutes"),
-                    "passed_qty": str(produced),
-                    "due_date": data.get("due_date", ""),
+                    "completed_qty": str(step.get("completed_qty", 0)),
+                    "rejected_qty": str(step.get("rejected_qty", 0)),
+                    "status": step.get("status", "pending"),
+                    "work_center": step.get("workstation", ""),
+                    "start_time": step.get("started_at", ""),
+                    "end_time": step.get("finished_at", ""),
+                    # These are execution facts, not planned schedule values.
+                    # Keep them explicit so ETA cannot accidentally use a
+                    # planned start as an observed production rate sample.
+                    "actual_start_at": step.get("started_at", ""),
+                    "actual_end_at": step.get("finished_at", ""),
+                    "actual_elapsed_minutes": step.get("actual_elapsed_minutes"),
+                    "actual_run_minutes": step.get("actual_run_minutes"),
+                    "run_time_per_unit_minutes": step.get("run_time_per_unit_minutes"),
+                    "passed_qty": str(step.get("passed_qty", step.get("completed_qty", 0))),
                     "authority": self.authority,
                     "data_source": "openmes_api",
                 }
+                for i, step in enumerate(steps)
             ]
-        except Exception as e:
-            logger.error("OpenMES get_operation_progress failed (wo=%s): %s", work_order_id, e)
-            return []
+
+        return [
+            {
+                "operation_id": f"WO-{work_order_id}-OVERALL",
+                "operation_name": "整体生产进度",
+                "sequence": 1,
+                "planned_qty": str(planned),
+                "completed_qty": str(produced),
+                "packed_qty": str(packed),
+                "rejected_qty": "0",
+                "status": status,
+                "work_center": line.get("name", ""),
+                # The overall row has no observed timing when the order has
+                # not started. Planned dates are kept separately and are
+                # never used as rate observations.
+                "start_time": data.get("actual_start_at", ""),
+                "end_time": data.get("completed_at", ""),
+                "actual_start_at": data.get("actual_start_at", ""),
+                "actual_end_at": data.get("completed_at", ""),
+                "planned_start_at": data.get("planned_start_at", ""),
+                "planned_end_at": data.get("planned_end_at", ""),
+                "actual_elapsed_minutes": data.get("actual_elapsed_minutes"),
+                "actual_run_minutes": data.get("actual_run_minutes"),
+                "passed_qty": str(produced),
+                "due_date": data.get("due_date", ""),
+                "authority": self.authority,
+                "data_source": "openmes_api",
+            }
+        ]
 
     async def get_wip(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
-        """获取在制品列表。"""
-        try:
-            filters: dict[str, Any] = {"per_page": min(scope.get("limit", 100), 100)}
-            if scope.get("status"):
-                filters["status"] = scope["status"]
-            result = await self._client.list_work_orders(filters)
-            data = result.get("data", [])
-            wip = [self._map_work_order(wo) for wo in data
-                    if wo.get("status") in ("ACCEPTED", "IN_PROGRESS", "PLANNED")]
-            return wip
-        except Exception as e:
-            logger.error("OpenMES get_wip failed: %s", e)
-            return []
+        """获取在制品列表。读取失败直接抛出，不返回空列表伪装无在制。"""
+        filters: dict[str, Any] = {"per_page": min(scope.get("limit", 100), 100)}
+        if scope.get("status"):
+            filters["status"] = scope["status"]
+        result = await self._client.list_work_orders(filters)
+        data = result.get("data", [])
+        return [self._map_work_order(wo) for wo in data
+                if wo.get("status") in ("ACCEPTED", "IN_PROGRESS", "PLANNED")]
 
     async def get_quality_records(self, batch_scope: dict[str, Any]) -> list[dict[str, Any]]:
         """获取质量记录（质量问题/NCR 等）。
@@ -493,79 +479,73 @@ class OpenMESAdapter:
         """获取生产文档（SOP、Control Plan 等）。
 
         OpenMES 当前无独立文档管理端点。检查事件日志是否有关联文档。
-        如无文档记录，返回空列表——不虚构占位文档。
+        读取失败直接抛出；只有事件日志正常返回且无文档记录时才返回空列表。
         """
         work_order_id = scope.get("work_order_id", scope.get("order_id", ""))
         if not work_order_id:
-            return []
-        try:
-            result = await self._client.list_event_logs("work_order", work_order_id)
-            events = result.get("data", [])
-            docs = []
-            for evt in events:
-                doc_types = ["SOP", "Control Plan", "PFMEA", "Drawing", "Inspection Plan"]
-                for dt in doc_types:
-                    if dt.lower() in str(evt.get("description", "")).lower():
-                        docs.append({
-                            "doc_id": str(evt.get("id", "")),
-                            "doc_type": dt,
-                            "doc_name": evt.get("title", f"{dt} 文档"),
-                            "work_order_id": work_order_id,
-                            "version": evt.get("version", "v1"),
-                            "status": "released",
-                            "source": "event_log",
-                            "authority": self.authority,
-                            "data_source": "openmes_api",
-                        })
-                        break
-            return docs
-        except Exception as e:
-            logger.error("OpenMES get_production_documents failed (wo=%s): %s", work_order_id, e)
-            return []
+            raise ValueError("查询生产文档必须提供 work_order_id")
+        result = await self._client.list_event_logs("work_order", work_order_id)
+        events = result.get("data", [])
+        docs = []
+        for evt in events:
+            doc_types = ["SOP", "Control Plan", "PFMEA", "Drawing", "Inspection Plan"]
+            for dt in doc_types:
+                if dt.lower() in str(evt.get("description", "")).lower():
+                    docs.append({
+                        "doc_id": str(evt.get("id", "")),
+                        "doc_type": dt,
+                        "doc_name": evt.get("title", f"{dt} 文档"),
+                        "work_order_id": work_order_id,
+                        "version": evt.get("version", "v1"),
+                        "status": "released",
+                        "source": "event_log",
+                        "authority": self.authority,
+                        "data_source": "openmes_api",
+                    })
+                    break
+        return docs
 
     async def read_authoritative_events(
         self, scope: dict[str, Any], cursor: str | None = None
     ) -> list[dict[str, Any]]:
-        """读取权威事件（生产完工、质量问题等）。"""
-        events = []
-        try:
-            result = await self._client.list_erp_production_completions(
-                since=scope.get("since"),
-                cursor=cursor,
-            )
-            for item in result.get("data", []):
-                events.append({
-                    "event_id": f"completion-{item.get('id', '')}",
-                    "event_type": "PRODUCTION_COMPLETED",
-                    "entity_type": "work_order",
-                    "entity_id": str(item.get("work_order_id", "")),
-                    "payload": item,
-                    "occurred_at": item.get("completed_at", item.get("created_at", "")),
-                    "is_authoritative": True,
-                    "authority": self.authority,
-                    "source": "erp_production_completions",
-                })
-        except Exception as e:
-            logger.error("OpenMES read_authoritative_events (completions) failed: %s", e)
+        """读取权威事件（生产完工、质量问题等）。
 
-        try:
-            result = await self._client.list_erp_quality_issues(
-                since=scope.get("since"),
-            )
-            for item in result.get("data", []):
-                events.append({
-                    "event_id": f"quality-{item.get('id', '')}",
-                    "event_type": "QUALITY_ISSUE",
-                    "entity_type": "work_order",
-                    "entity_id": str(item.get("work_order_id", "")),
-                    "payload": item,
-                    "occurred_at": item.get("reported_at", item.get("created_at", "")),
-                    "is_authoritative": True,
-                    "authority": self.authority,
-                    "source": "erp_quality_issues",
-                })
-        except Exception as e:
-            logger.error("OpenMES read_authoritative_events (quality) failed: %s", e)
+        任一事件源读取失败直接抛出——部分成功的事件列表会让人把"读取失
+        败"误判成"没有完工/质量问题"，与 2026-10-01 工单空列表同根因。
+        """
+        events = []
+        result = await self._client.list_erp_production_completions(
+            since=scope.get("since"),
+            cursor=cursor,
+        )
+        for item in result.get("data", []):
+            events.append({
+                "event_id": f"completion-{item.get('id', '')}",
+                "event_type": "PRODUCTION_COMPLETED",
+                "entity_type": "work_order",
+                "entity_id": str(item.get("work_order_id", "")),
+                "payload": item,
+                "occurred_at": item.get("completed_at", item.get("created_at", "")),
+                "is_authoritative": True,
+                "authority": self.authority,
+                "source": "erp_production_completions",
+            })
+
+        result = await self._client.list_erp_quality_issues(
+            since=scope.get("since"),
+        )
+        for item in result.get("data", []):
+            events.append({
+                "event_id": f"quality-{item.get('id', '')}",
+                "event_type": "QUALITY_ISSUE",
+                "entity_type": "work_order",
+                "entity_id": str(item.get("work_order_id", "")),
+                "payload": item,
+                "occurred_at": item.get("reported_at", item.get("created_at", "")),
+                "is_authoritative": True,
+                "authority": self.authority,
+                "source": "erp_quality_issues",
+            })
 
         return events
 

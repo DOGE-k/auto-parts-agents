@@ -32,6 +32,7 @@ from app.persistence.models import (
 )
 from app.adapters.erp.erpnext import ERPNextClient
 from app.adapters.mes.openmes import OpenMESClient
+from app.integrations.openmes_session import build_openmes_client
 from app.integrations.deepseek import DeepSeekClient
 from app.services.llm_quotation import (
     extract_rfq,
@@ -201,6 +202,25 @@ def _integration_status_error(exc: IntegrationError) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)})
 
 
+def _mes_status_error(exc: IntegrationError) -> HTTPException:
+    """/api/mes/* 路由的 MES 集成错误映射。
+
+    401 → mes_auth_expired（服务端令牌失效且自动重登未成功）；网络/超时
+    → mes_unreachable；其余沿用通用映射。绝不把失败渲染成空数据。
+    """
+    if exc.status_code == 401 or exc.code == "openmes_relogin_failed":
+        return HTTPException(
+            status_code=401,
+            detail={"code": "mes_auth_expired", "message": str(exc)},
+        )
+    if exc.code in {"timeout", "network_error"}:
+        return HTTPException(
+            status_code=502,
+            detail={"code": "mes_unreachable", "message": str(exc)},
+        )
+    return _integration_status_error(exc)
+
+
 def require_real_write_access(
     x_real_write_token: str | None = Header(default=None, alias="X-Real-Write-Token"),
 ) -> bool:
@@ -351,8 +371,8 @@ async def check_erpnext() -> dict:
 async def check_openmes() -> dict:
     settings = IntegrationSettings.from_environment()
     try:
-        client = OpenMESClient(
-            settings.openmes_base_url,
+        client = build_openmes_client(
+            settings,
             user_token=settings.openmes_user_token or None,
             erp_api_key=settings.openmes_erp_api_key or None,
         )
@@ -385,8 +405,8 @@ async def openmes_work_orders(
     """Read actual OpenMES work orders using documented, allowlisted filters."""
     settings = IntegrationSettings.from_environment()
     try:
-        client = OpenMESClient(
-            settings.openmes_base_url,
+        client = build_openmes_client(
+            settings,
             user_token=settings.openmes_user_token or None,
         )
         try:
@@ -413,8 +433,8 @@ async def openmes_work_orders(
 async def openmes_work_order(work_order_id: str) -> dict:
     settings = IntegrationSettings.from_environment()
     try:
-        client = OpenMESClient(
-            settings.openmes_base_url,
+        client = build_openmes_client(
+            settings,
             user_token=settings.openmes_user_token or None,
         )
         try:
@@ -511,7 +531,11 @@ async def erp_get_inventory(item_codes: str) -> list[dict]:
 
 @app.get("/api/mes/work-orders", tags=["mes"])
 async def mes_get_work_orders(status: str | None = None, search: str | None = None, limit: int = 50) -> list[dict]:
-    """获取工单列表。自动使用 OpenMES 或 Mock 适配器。"""
+    """获取工单列表。自动使用 OpenMES 或 Mock 适配器。
+
+    OpenMES 读取失败时返回 401/502 明确错误（mes_auth_expired/
+    mes_unreachable），空列表只代表真实返回 0 条。
+    """
     from app.adapters.factory import get_mes_adapter
     adapter = get_mes_adapter()
     scope: dict[str, Any] = {"limit": limit}
@@ -519,15 +543,21 @@ async def mes_get_work_orders(status: str | None = None, search: str | None = No
         scope["status"] = status
     if search:
         scope["search"] = search
-    return await adapter.get_work_orders(scope)
+    try:
+        return await adapter.get_work_orders(scope)
+    except IntegrationError as exc:
+        raise _mes_status_error(exc) from exc
 
 
 @app.get("/api/mes/work-orders/{work_order_id}/progress", tags=["mes"])
 async def mes_get_operation_progress(work_order_id: str) -> list[dict]:
-    """获取工序进度。自动使用 OpenMES 或 Mock 适配器。"""
+    """获取工序进度。自动使用 OpenMES 或 Mock 适配器（失败返回明确错误）。"""
     from app.adapters.factory import get_mes_adapter
     adapter = get_mes_adapter()
-    return await adapter.get_operation_progress(work_order_id)
+    try:
+        return await adapter.get_operation_progress(work_order_id)
+    except IntegrationError as exc:
+        raise _mes_status_error(exc) from exc
 
 
 @app.get("/api/mes/quality-records", tags=["mes"])
@@ -540,7 +570,10 @@ async def mes_get_quality_records(work_order_id: str | None = None, batch_no: st
         scope["work_order_id"] = work_order_id
     if batch_no:
         scope["batch_no"] = batch_no
-    return await adapter.get_quality_records(scope)
+    try:
+        return await adapter.get_quality_records(scope)
+    except IntegrationError as exc:
+        raise _mes_status_error(exc) from exc
 
 
 @app.get("/api/mes/production-documents", tags=["mes"])
@@ -548,7 +581,12 @@ async def mes_get_production_documents(work_order_id: str) -> list[dict]:
     """获取生产文档（SOP、Control Plan 等）。自动使用 OpenMES 或 Mock 适配器。"""
     from app.adapters.factory import get_mes_adapter
     adapter = get_mes_adapter()
-    return await adapter.get_production_documents({"work_order_id": work_order_id})
+    try:
+        return await adapter.get_production_documents({"work_order_id": work_order_id})
+    except (IntegrationError, ValueError) as exc:
+        if isinstance(exc, IntegrationError):
+            raise _mes_status_error(exc) from exc
+        raise HTTPException(status_code=422, detail={"code": "invalid_request", "message": str(exc)}) from exc
 
 
 @app.get("/api/projects/{project_id}/snapshot", tags=["projects"])

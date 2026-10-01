@@ -169,8 +169,28 @@ async def _from_openmes(
     *,
     request_token: str | None = None,
 ) -> RealIdentity:
-    token = (request_token or settings.openmes_user_token).strip()
-    client = OpenMESClient(settings.openmes_base_url, user_token=token)
+    token = (request_token or "").strip()
+    if token:
+        # 浏览器短时会话：用请求令牌原样解析，不挂服务端会话管理器。
+        client = OpenMESClient(settings.openmes_base_url, user_token=token)
+    else:
+        # 服务端集成身份回退：带内存自动刷新（401 时按需重登一次）。
+        # 保持经模块级 OpenMESClient 构造，测试打桩点不变。
+        from app.integrations.openmes_session import (
+            auto_refresh_enabled,
+            get_openmes_user_session,
+        )
+
+        session = (
+            get_openmes_user_session(settings.openmes_base_url)
+            if auto_refresh_enabled()
+            else None
+        )
+        client = OpenMESClient(
+            settings.openmes_base_url,
+            user_token=settings.openmes_user_token or None,
+            user_session=session,
+        )
     try:
         raw_payload = await client.current_user()
         # OpenMES returns the authenticated user in ``data``; accepting the
