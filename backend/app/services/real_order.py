@@ -61,8 +61,18 @@ def _save_agent_run(
     result: Any,
     error: Any,
     started_at: datetime,
+    *,
+    session_id: str | None = None,
+    business_task_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> None:
-    """持久化一次 Agent 运行（输入/结果/错误）。"""
+    """持久化一次 Agent 运行（输入/结果/错误）。
+
+    保留策略（2026-10-01 用户规则）：审批/方案/写入/回读/幂等/审计运行
+    记录 expires_at=NULL 永久保留；协调者原始问答（含中间工具参数）按
+    ASSISTANT_RETENTION_DAYS（默认 90 天）过期，由会话服务惰性清理。
+    任何凭据/令牌/密码从不进入运行记录。
+    """
     try:
         result_data = _to_jsonable(result) if result is not None else None
         summary = ""
@@ -86,6 +96,9 @@ def _save_agent_run(
                 error_json=_to_jsonable(error) if error else None,
                 started_at=started_at,
                 finished_at=_utc_now(),
+                session_id=session_id,
+                business_task_id=business_task_id,
+                expires_at=expires_at,
             ))
             session.commit()
     except Exception:

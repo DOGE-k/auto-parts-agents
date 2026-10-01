@@ -62,7 +62,7 @@ const TAB_ITEMS: { key: RealTabKey; label: string }[] = [
 
 // ========== 页面组件 ==========
 export default function RealBusinessPage() {
-  const [activeTab, setActiveTab] = useState<RealTabKey>("flow");
+  const [activeTab, setActiveTab] = useState<RealTabKey>("assistant");
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);

@@ -1587,3 +1587,52 @@ ERP 物料需求
 - `.env` 的 `OPENMES_TOKEN` 现在定位为**引导令牌**（自动刷新关闭时或冷启动首请求前使用）；正常运行期由内存会话自愈，无需重启。
 - 写操作（报工/登记/处置/下达）同样经重试传输层：401 时首次尝试未达服务端，重登后重试一次安全；写入本身仍全部走审批门禁。
 - 下一步按用户确认顺序开始 P0 会话与槽位检查开发（数量改→只读重报价+下游重确认标记；选第二方案→展示序号+option_id 快照；上下文沿用回显；90 天可配置保留）。
+
+### 3.48 P0 任务型协同问答：会话/业务任务上下文 + 槽位追问 + 确定性指令（2026-10-01）
+
+**依据**：用户 2026-10-01 确认的五条业务规则（自动重登/数量改只读重报价/选第 N 方案/上下文沿用回显/保留策略）。本节实现其中的会话与槽位层（自动重登见 §3.47）。
+
+#### 一、数据模型与迁移
+
+- 新表 `assistant_sessions`（会话锚点）/ `assistant_messages`（原始消息，带 `expires_at`）/ `business_tasks`（业务任务：entity_context/active_plan 快照/stale_downstream/summary，**永久保留**）。
+- `real_agent_runs` 新增 `session_id`/`business_task_id`/`expires_at` 三列：审批/方案/写入/回读/幂等记录 `expires_at=NULL` 永久；协调者原始问答（含中间工具参数）按 `ASSISTANT_RETENTION_DAYS`（默认 90，0=永久）过期。
+- 迁移 `b5d9e6a41c77` 已对运行库 PostgreSQL（autoparts-db）执行并验证三表存在；SQLite 回退库同构。
+- 惰性清理：每次问答前 `purge_expired_assistant_data()` 删除过期消息与协调者运行记录；业务任务/审批/写入证据不在清理范围。凭据/令牌从不进入任何持久化内容（消息/任务/运行记录均无凭据字段）。
+
+#### 二、确定性上下文层（`app/services/assistant_context.py`，不依赖 LLM）
+
+- 编号提取（全部来自项目已验证的真实编号格式）：SAL-ORD / PUR-ORD / WO-* / QUO-* / PROC-* / 物料编码；同字段多编号即视为歧义，不猜。
+- "数量改成 N"（数量改成/改为/变更为/调整为/换成 + N 或 N 件）与"第 N 个方案"（中文/数字序号）的确定性解析。
+- 意图分类（报价/采购/跟单/质量）+ 必填槽位（AI_HANDOFF_PLAN P0-2）：缺什么、为什么需要、补充后调用哪个智能体。
+- `merge_context`：新值覆盖旧值（CONTEXT_FIELDS 白名单）；`format_context_echo`："当前沿用人=…；如果需要修改请直接说明。"
+- `validate_ordinal_selection`：按 `supplier_options` 展示顺序（1 开始）映射稳定 option_id；方案不存在→"请先问一次缺料方案"；方案过期（get_procurement_plan 为 None）→"已不存在"；选项顺序/内容与快照不一致→要求重新选择。
+
+#### 三、会话服务（`app/services/assistant_session.py`）
+
+- `handle_ask(question, coordinator_factory, session_id, page_context, on_step)`：会话/任务建立与沿用 → 信号提取与上下文合并（页面流程上下文键映射为可沿用字段）→ 确定性指令 → 槽位追问 → 协调者兜底（惰性构造，用后关闭）。
+- **数量变更处理器**：沿用客户/物料/交期（缺失时从任务携带的已保存报价记录确定性解析——真实存储数据）→ 调 `analyze_quotation`（只读，仅生成本地报价记录）→ 新报价进入上下文 → 旧报价/采购方案/ERP 草稿/MES 工单全部标记 `stale_downstream`，任务状态 `RECONFIRMATION_REQUIRED` → 回答明确"没写入 ERP、没自动审批"。
+- **方案选择处理器**：展示序号→option_id+快照存入 `active_plan` 与 `pending_selection`，回答明确"选择确认≠执行，写入仍走审批门禁"。
+- **追问**：意图明确且信息不足时直接返回 `needs_input=true` + `missing_slots`（不调用大模型，DeepSeek 未配置也可用）。
+- 协调者分支：沿用上下文以 `沿用_*`/`页面_*` 注入 context；从调用链**入参**确定性回写实体上下文（白名单字段）；proposal 含 plan_id 时快照入 `active_plan`。
+
+#### 四、API 与前端
+
+- `POST /api/real-orders/assistant/ask` 与 `/ask/stream` 接受 `session_id`，响应新增 `session_id/business_task_id/applied_context/context_updates/needs_input/missing_slots/stale_downstream/pending_selection/handled_by`。流式端点在 DeepSeek 未配置时改为 error 事件（kind=llm_not_configured）而非 503——确定性路径不依赖 LLM；同步端点保留 503 契约。
+- `AssistantPanel`：session_id 存 sessionStorage（跨页签保持）+「新会话」按钮；渲染上下文回显条、追问块（缺什么/为什么/补充后调用谁）、下游需重新确认红色块、选择确认蓝色块。
+- `RealBusinessPage` 默认页签改为**协同问答**（P0-4：协同问答作为真实业务页面主要入口）。
+- `.env.example` 新增 `ASSISTANT_RETENTION_DAYS=90` 说明。
+
+#### 五、测试与真实验证
+
+- 新增 `backend/tests/test_assistant_session.py` **21 例**：信号提取（数量改/序号/编号歧义过滤）、回显、覆盖合并、方案校验（顺序变化/过期/越界）、数量变更（沿用上下文+下游标记+绝不调用审批/写入函数+DATA_MISSING 如实+从携带报价解析）、追问不调 LLM、调用链入参回写、保留期（过期清理且审计永久、0=永久可配置）、端到端会话沿用（同 task 同 session、无凭据入持久化）。`test_assistant_stream.py` 更新假协调者 run_meta 签名与 llm_not_configured 事件契约。
+- 后端全量 **198 passed**；前端 vitest **14 passed** + `npm run build`（tsc 严格检查）通过。
+- **真实多轮问答验证**（真实 DeepSeek + 真实 ERPNext/OpenMES，页面流程上下文为空、零业务写入）：
+  1. 问 1 "SAL-ORD-2026-00023 缺料了怎么办？给我几套方案"（27.9s，协调者 12 步链）：创建 `ASST-22E7C428EAF9` / `TASK-C391350B470F`，回显"当前沿用订单=SAL-ORD-2026-00023"，方案 `PROC-58B02304A321`（3 选项）快照入任务。
+  2. 问 2 "数量改成 3000"（**0.43s，无 LLM**）：从沿用报价 `QUO-93AAB835646A` 解析客户=上汽集团/物料=BD-2401/交期=2026-10-31 → 只读重报价 `QUO-9B0CC78C6864`（85 CNY × 3000 = 255000，DRAFT 未审批）→ 旧报价/采购方案/MES 工单 9 三项标记需重新确认。首次实测在无携带报价解析路径时正确追问（不猜测），补解析路径后复测通过。
+  3. 问 3 "选第二个方案"（**0.04s，无 LLM**）：映射 OPT-2（宁波紧固件有限公司，2400 CNY，7 天），快照保存，回答明确执行需走审批门禁。
+  4. 持久化核验（autoparts-db）：该会话 8 条消息全部带 `expires_at`；business_tasks 1 条；ERPNext/OpenMES 零写入（仅本地报价记录，与 8 步流程留痕口径一致）。
+
+#### 六、遗留与下一步
+
+- 页面级多轮演示冒烟（含默认页签、回显/追问/过期标记渲染）留待下次登录演示时复核（API 级已覆盖同一契约）。
+- P1 待启动：事件触发协作（质量异常/缺料/延期自动协同）、能力目录从 AIP/ACS 注册构建深化。

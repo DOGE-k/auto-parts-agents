@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from app.aip.aip_agent_client import AipAgentClient
 from app.integrations.errors import IntegrationNotConfigured
+from app.services.assistant_context import retention_expiry
 from app.services.real_order import _save_agent_run, _utc_now
 
 logger = logging.getLogger(__name__)
@@ -442,11 +443,13 @@ class BusinessCoordinator:
         question: str,
         context: dict[str, Any] | None = None,
         on_step: Callable[[dict[str, Any]], None] | None = None,
+        run_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
 
         on_step（可选）：每完成一次工具调用即回调当前调用链步骤（SSE 流式
         端点用它把"协调者正在查什么"实时推给前端；同步端点不传，行为不变）。
+        run_meta（可选）：session_id/business_task_id，用于会话关联与保留期。
         """
         if not question.strip():
             raise ValueError("问题不能为空")
@@ -568,7 +571,9 @@ class BusinessCoordinator:
         if recovered:
             result["empty_answer_recovered"] = True
 
-        # 协调运行留痕（子智能体运行由各自的 @_agent_run 装饰器另行持久化）
+        # 协调运行留痕（子智能体运行由各自的 @_agent_run 装饰器另行持久化）。
+        # 协调者原始问答含中间工具参数，按保留期（默认 90 天）过期清理。
+        run_meta = run_meta or {}
         run_id = f"RUN-COORD-{uuid4().hex[:12].upper()}"
         _save_agent_run(
             run_id,
@@ -579,6 +584,9 @@ class BusinessCoordinator:
             result,
             None,
             _utc_now(),
+            session_id=run_meta.get("session_id"),
+            business_task_id=run_meta.get("business_task_id"),
+            expires_at=retention_expiry(),
         )
         result["coordination_run_id"] = run_id
         return result

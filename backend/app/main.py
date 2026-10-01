@@ -1672,21 +1672,36 @@ async def real_order_agent_run_detail(run_id: str) -> dict:
 
 @app.post("/api/real-orders/assistant/ask", tags=["real-orders"])
 async def real_order_assistant_ask(body: dict) -> dict:
-    """协调智能体：自然语言业务问题 → 动态调用四个真实智能体（AIP）→ 汇总回答。
+    """任务型协同问答：会话/业务任务上下文 + 确定性槽位追问 + 协调者动态调用。
 
-    只读通道：协调者仅能调用查询类技能，不执行任何 ERP/MES 写操作。
-    DeepSeek 未配置时返回 503，不伪造回答。
+    - 带 session_id（或自动新建）沿用上一轮客户/物料/订单/工单/数量/交期，
+      回答中回显 applied_context；新值覆盖旧值；歧义先追问。
+    - 确定性指令（"数量改成 N"/"选第 N 个方案"）不依赖 LLM：数量变更为
+      只读重新报价并标记下游需重新确认，方案选择保存稳定 option_id 快照。
+    - 只读通道：协调者仅能调用查询类技能，不执行任何 ERP/MES 写操作；
+      需要写入时按提示回到页面审批门禁。DeepSeek 仅在需要 LLM 时要求配置。
     """
     question = str((body or {}).get("question", "")).strip()
     context = (body or {}).get("context") or {}
+    session_id = str((body or {}).get("session_id") or "").strip() or None
     if not question:
         raise HTTPException(status_code=422, detail="question 不能为空")
 
     from app.integrations.errors import IntegrationNotConfigured
-    from app.services.coordinator import build_coordinator
+    from app.services.assistant_session import handle_ask
+
+    def _coordinator_factory():
+        from app.services.coordinator import build_coordinator
+
+        return build_coordinator()
 
     try:
-        coordinator = build_coordinator()
+        return await handle_ask(
+            question,
+            _coordinator_factory,
+            session_id=session_id,
+            page_context=context,
+        )
     except IntegrationNotConfigured as exc:
         raise HTTPException(
             status_code=503,
@@ -1695,12 +1710,8 @@ async def real_order_assistant_ask(body: dict) -> dict:
                 "message": f"协调智能体不可用：{exc}。不使用固定话术伪造回答。",
             },
         )
-    try:
-        return await coordinator.ask(question, context)
     except IntegrationError as exc:
         raise _integration_status_error(exc)
-    finally:
-        await coordinator.aclose()
 
 
 @app.post("/api/real-orders/assistant/ask/stream", tags=["real-orders"])
@@ -1715,41 +1726,42 @@ async def real_order_assistant_ask_stream(body: dict):
 
     from fastapi.responses import StreamingResponse
 
-    from app.integrations.errors import IntegrationNotConfigured
-    from app.services.coordinator import build_coordinator
-
     question = str((body or {}).get("question", "")).strip()
     context = (body or {}).get("context") or {}
+    session_id = str((body or {}).get("session_id") or "").strip() or None
     if not question:
         raise HTTPException(status_code=422, detail="question 不能为空")
 
-    try:
-        coordinator = build_coordinator()
-    except IntegrationNotConfigured as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "llm_not_configured",
-                "message": f"协调智能体不可用：{exc}。不使用固定话术伪造回答。",
-            },
-        )
+    from app.integrations.errors import IntegrationNotConfigured
+    from app.services.assistant_session import handle_ask
+
+    def _coordinator_factory():
+        from app.services.coordinator import build_coordinator
+
+        return build_coordinator()
 
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run() -> None:
         try:
-            result = await coordinator.ask(
+            result = await handle_ask(
                 question,
-                context,
+                _coordinator_factory,
+                session_id=session_id,
+                page_context=context,
                 on_step=lambda step: queue.put_nowait(("step", step)),
             )
             queue.put_nowait(("done", result))
+        except IntegrationNotConfigured as exc:
+            queue.put_nowait(("error", {
+                "message": f"协调智能体不可用：{exc}。不使用固定话术伪造回答。",
+                "kind": "llm_not_configured",
+            }))
         except IntegrationError as exc:
             queue.put_nowait(("error", {"message": str(exc), "kind": "integration_error"}))
         except Exception as exc:  # 任何失败都如实推送，不让事件流静默挂死
             queue.put_nowait(("error", {"message": f"{type(exc).__name__}: {exc}", "kind": "internal_error"}))
         finally:
-            await coordinator.aclose()
             queue.put_nowait(None)
 
     task = asyncio.create_task(_run())

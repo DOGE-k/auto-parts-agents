@@ -1,4 +1,4 @@
-// 智能协同问答面板（阶段五-八：协调智能体动态调用四个真实智能体 + 方案批准执行闭环；阶段十 10.5 从 RealBusinessPage 抽出）
+// 智能协同问答面板（阶段五-八：协调智能体动态调用四个真实智能体 + 方案批准执行闭环；阶段十 10.5 从 RealBusinessPage 抽出；P0 会话上下文：多轮沿用+回显+追问+下游重确认标记）
 import { useState, useCallback } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
 import {
@@ -10,7 +10,14 @@ import {
   approveQuotation as approveQuotationApi,
   createPoFromPlan,
 } from "../api";
-import type { AssistantAnswer, AssistantCallStep, ProposalSupplierOption, RealIdentity } from "../api";
+import type {
+  AssistantAnswer,
+  AssistantCallStep,
+  ProposalSupplierOption,
+  RealIdentity,
+} from "../api";
+
+const SESSION_STORAGE_KEY = "assistant_session_id";
 
 type Props = {
   identity: RealIdentity | null;
@@ -30,6 +37,8 @@ export default function AssistantPanel({
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState<AssistantAnswer | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  // P0 会话上下文：session_id 保存在浏览器 sessionStorage（跨页签切换保持）
+  const [sessionId, setSessionId] = useState<string | null>(() => sessionStorage.getItem(SESSION_STORAGE_KEY));
   // 流式问答（阶段十 SSE）：等待期间逐条收到的调用链步骤（点亮"协调者正在查什么"）
   const [streamSteps, setStreamSteps] = useState<AssistantCallStep[]>([]);
   // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
@@ -102,10 +111,15 @@ export default function AssistantPanel({
         // 传输层失败（网络异常/端点不可用/流中断）回退同步端点。
         result = await askAssistantStream(q, context, {
           onStep: (step) => setStreamSteps((prev) => [...prev, step]),
+          sessionId,
         });
       } catch (streamErr) {
         if (streamErr instanceof AssistantStreamExecError) throw streamErr;
-        result = await askAssistant(q, context);
+        result = await askAssistant(q, context, sessionId);
+      }
+      if (result.session_id) {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, result.session_id);
+        setSessionId(result.session_id);
       }
       setAssistantAnswer(result);
       notify("协调智能体已回答");
@@ -115,7 +129,15 @@ export default function AssistantPanel({
       setAssistantLoading(false);
       setStreamSteps([]);
     }
-  }, [assistantQuestion, assistantLoading, currentErpDraftId, currentWorkOrderId, notify, onError]);
+  }, [assistantQuestion, assistantLoading, currentErpDraftId, currentWorkOrderId, sessionId, notify, onError]);
+
+  const startNewSession = useCallback(() => {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    setSessionId(null);
+    setAssistantAnswer(null);
+    setAssistantQuestion("");
+    notify("已开始新会话（业务任务上下文将重新积累）");
+  }, [notify]);
 
   return (
     <section className="panel assistant-panel">
@@ -146,7 +168,13 @@ export default function AssistantPanel({
         >
           {assistantLoading ? "协调智能体处理中..." : "提问 →"}
         </button>
+        <button className="button ghost" onClick={startNewSession} disabled={assistantLoading} title="清空当前会话上下文，重新开始一个业务任务">
+          新会话
+        </button>
       </div>
+      {sessionId && (
+        <p className="field-hint">当前会话 {sessionId} · 上一轮的客户/物料/订单/工单/数量/交期会自动沿用，回答中会回显；说"新会话"或点击上方按钮可重新开始。</p>
+      )}
       {/* 流式进行中（阶段十 SSE）：调用链逐步点亮，替代原来的长时间无反馈等待 */}
       {assistantLoading && streamSteps.length > 0 && (
         <div className="assistant-result">
@@ -168,6 +196,46 @@ export default function AssistantPanel({
       )}
       {assistantAnswer && (
         <div className="assistant-result">
+          {/* P0：上下文沿用回显（用户可纠正） */}
+          {assistantAnswer.applied_context && (
+            <div className="assistant-context-echo">{assistantAnswer.applied_context}</div>
+          )}
+          {/* P0：槽位追问（缺什么/为什么/补充后调用哪个智能体） */}
+          {assistantAnswer.needs_input && (assistantAnswer.missing_slots?.length ?? 0) > 0 && (
+            <div className="assistant-clarify">
+              <strong>需要补充信息（不猜测）</strong>
+              <ul>
+                {assistantAnswer.missing_slots!.map((m) => (
+                  <li key={m.slot}>
+                    <code>{m.slot}</code> —— {m.why}；补充后将调用 {m.agent}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {/* P0：数量变更后下游需重新确认标记 */}
+          {(assistantAnswer.stale_downstream?.length ?? 0) > 0 && (
+            <div className="assistant-stale">
+              <strong>以下已有结果需要重新确认（不能继续沿用旧结果）：</strong>
+              <ul>
+                {assistantAnswer.stale_downstream!.map((s, i) => (
+                  <li key={`${s.type}-${s.id}-${i}`}>
+                    {s.type === "quotation" ? "报价" : s.type === "procurement_plan" ? "采购方案" : s.type === "erp_so_draft" ? "ERP 销售订单草稿" : s.type === "erp_po_draft" ? "ERP 采购订单草稿" : s.type === "mes_work_order" ? "MES 工单" : s.type}
+                    {" "}
+                    <code>{s.id}</code>：{s.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {/* P0：方案选择确认（第 N 个方案 → 稳定 option_id + 快照） */}
+          {assistantAnswer.pending_selection && (
+            <div className="assistant-pending-selection">
+              已选 <code>{assistantAnswer.pending_selection.plan_id}</code> 的选项{" "}
+              <code>{assistantAnswer.pending_selection.option_id}</code>（快照已保存）。
+              执行请到方案卡片点击"选择此方案并起草 PO"，经人工审批门禁后写入。
+            </div>
+          )}
           <div
             className="assistant-answer md-body"
             dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(assistantAnswer.answer) }}

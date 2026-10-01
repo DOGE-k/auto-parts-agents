@@ -323,6 +323,26 @@ export type AssistantCallStep = {
   elapsed_ms: number;
 };
 
+// 任务型协同问答（P0）：会话/业务任务上下文字段
+export type AssistantMissingSlot = {
+  slot: string;
+  alternatives: string[];
+  why: string;
+  agent: string;
+};
+
+export type AssistantStaleDownstream = {
+  type: string;
+  id: string;
+  reason: string;
+};
+
+export type AssistantPendingSelection = {
+  plan_id: string;
+  option_id: string;
+  option_snapshot: Record<string, unknown>;
+};
+
 export type AssistantAnswer = {
   question: string;
   answer: string;
@@ -333,6 +353,15 @@ export type AssistantAnswer = {
   authority: string;
   context: Record<string, unknown>;
   proposal_options?: ProposalOptions | null;
+  session_id?: string;
+  business_task_id?: string;
+  applied_context?: string;
+  context_updates?: string[];
+  needs_input?: boolean;
+  missing_slots?: AssistantMissingSlot[];
+  stale_downstream?: AssistantStaleDownstream[];
+  pending_selection?: AssistantPendingSelection | null;
+  handled_by?: string;
 };
 
 // 方案化协同（阶段六）：真实工具结果原样汇集，前端渲染方案对比卡片
@@ -766,10 +795,11 @@ export async function executeIssueRegistration(
 export async function askAssistant(
   question: string,
   context: Record<string, unknown> = {},
+  sessionId?: string | null,
 ): Promise<AssistantAnswer> {
   return api<AssistantAnswer>("/real-orders/assistant/ask", {
     method: "POST",
-    body: JSON.stringify({ question, context }),
+    body: JSON.stringify({ question, context, session_id: sessionId || undefined }),
   });
 }
 
@@ -778,7 +808,7 @@ export async function askAssistant(
 export async function askAssistantStream(
   question: string,
   context: Record<string, unknown> = {},
-  options: { onStep?: (step: AssistantCallStep) => void; signal?: AbortSignal } = {},
+  options: { onStep?: (step: AssistantCallStep) => void; signal?: AbortSignal; sessionId?: string | null } = {},
 ): Promise<AssistantAnswer> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const sessionToken = getRealSessionToken();
@@ -786,7 +816,7 @@ export async function askAssistantStream(
   const response = await fetch(`${API_BASE}/real-orders/assistant/ask/stream`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ question, context }),
+    body: JSON.stringify({ question, context, session_id: options.sessionId || undefined }),
     signal: options.signal,
   });
   if (!response.ok || !response.body) {

@@ -5,7 +5,7 @@
 - POST /api/real-orders/assistant/ask/stream：step 事件逐条推送 → done 事件携带完整结果；
   协调者关闭；content-type 为 text/event-stream
 - 协调者抛 IntegrationError 时推送 error 事件（不是静默挂死）
-- DEEPSEEK 未配置（build_coordinator 抛 IntegrationNotConfigured）时返回 503
+- DEEPSEEK 未配置时：同步端点 503；流式端点返回 error 事件（kind=llm_not_configured），确定性路径（追问/数量变更/方案选择）不依赖 LLM
 
 全部使用隔离测试数据库（见 conftest.py）与假协调者，不触真实系统。
 """
@@ -91,7 +91,7 @@ class _FakeStreamCoordinator:
         self._error = error
         self.closed = False
 
-    async def ask(self, question, context, on_step=None):
+    async def ask(self, question, context, on_step=None, run_meta=None):
         if self._error is not None:
             raise self._error
         if on_step is not None:
@@ -171,19 +171,19 @@ class AssistantStreamEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([kind for kind, _ in events], ["error"])
         self.assertIn("OpenMES 不可达", events[0][1]["message"])
 
-    async def test_stream_returns_503_when_llm_not_configured(self):
-        with patch.object(
-            coord_module,
-            "build_coordinator",
-            side_effect=IntegrationNotConfigured("协调智能体（DeepSeek LLM）", ["DEEPSEEK_API_KEY"]),
-        ):
-            transport = httpx.ASGITransport(app=self._app())
-            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(
-                    "/api/real-orders/assistant/ask/stream", json={"question": "测试"}
-                )
-        self.assertEqual(resp.status_code, 503)
-        self.assertEqual(resp.json()["detail"]["code"], "llm_not_configured")
+    async def test_stream_emits_llm_not_configured_error_event(self):
+        # 2026-10-01 起：确定性路径（追问/数量变更/方案选择）不依赖 LLM，
+        # 只有协调者分支真正需要 DeepSeek；未配置时以 error 事件如实告知。
+        def _raise():
+            raise IntegrationNotConfigured("协调智能体（DeepSeek LLM）", ["DEEPSEEK_API_KEY"])
+
+        with patch.object(coord_module, "build_coordinator", _raise):
+            status, raw, _ = await self._collect({"question": "测试问题"})
+
+        self.assertEqual(status, 200)
+        events = _parse_sse(raw)
+        self.assertEqual([kind for kind, _ in events], ["error"])
+        self.assertEqual(events[0][1]["kind"], "llm_not_configured")
 
     async def test_stream_rejects_empty_question(self):
         transport = httpx.ASGITransport(app=self._app())
