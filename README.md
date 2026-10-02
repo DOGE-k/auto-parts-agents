@@ -132,9 +132,18 @@ cd frontend && npm install && npm run dev -- --port 5173 --strictPort
 ## 8. 测试与 CI
 
 ```bash
-cd backend  && python -m pip install -e backend && python -m pytest tests -q   # 当前基线 154 passed
-cd frontend && npm ci && npx vitest run && npm run build
+cd backend
+python -m pip install -e .
+python -m pytest tests -q                                      # 当前基线 214 passed（2026-10-02 复核）
+python -m compileall -q app
+cd ../frontend
+npm ci
+npm run test -- --run
+npx tsc --noEmit --incremental false --project tsconfig.json
+npm run build
 ```
+
+2026-10-02 复核：后端 `tests` 为 214 passed，前端 Vitest 为 26 passed，源代码类型检查通过；`npm run build` 可能因 Windows 文件锁无法写入 `frontend/tsconfig.tsbuildinfo` 而返回 EPERM。遇到该错误时先释放项目相关进程或文件锁，再重跑，不要把构建失败写成成功。
 
 推送后 GitHub Actions（`.github/workflows/ci.yml`）自动跑同样的检查——测试自带假适配器，**不需要**真实 ERP/MES 即可运行。
 

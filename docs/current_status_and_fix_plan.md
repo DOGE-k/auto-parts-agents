@@ -1,6 +1,8 @@
 # 四智能体项目当前状态与整改计划
 
-更新时间：2026-09-28（阶段 1 只读关联完成）
+首版更新时间：2026-09-28（阶段 1 只读关联完成）
+
+> **最新追加：2026-10-02。** 当前状态以文档末尾最新小节为准；截至 §3.52 后的复核结果见“八、2026-10-02 文档整理复核”。
 
 项目路径：`E:\competition\汽车零部件工厂智能体开发`
 
@@ -1738,6 +1740,8 @@ ERP 物料需求
 - 已完成：质量异常（§3.50）、关键物料短缺、生产延期（本节）三类事件——AI_HANDOFF_PLAN 第 6 节的四个场景中三个已落地（质量门禁未通过→禁止发运已有既有门禁+待办承接）。
 - 剩余：事件"去处置/去处理"与对应业务面板的跳转联动（复用 goToQualityDispose 模式）；事件量大后同步改异步；提前预警阈值等业务规则确认。
 
+> **历史截至说明**：以上是 §3.51 当时的剩余项；§3.52 已完成事件去处置/去处理导航和三项接手缺口收口。事件量增大后的异步队列、提前预警阈值仍属于后续边界。
+
 ### 3.52 协同事件去处置联动 + 接手缺口收口 + SQLite 回退一致性（2026-10-02，依据 docs/handoff_2026-10-01_event_disposal_and_stabilization.md）
 
 **范围**：交接文档定义的任务 A/B/C/D 与 §二点五 三个已知缺口；不新增业务规则、不新增预警阈值、不改真实 ERP/MES 写入流程。
@@ -1788,3 +1792,61 @@ ERP 物料需求
 - 延期事件"查看跟单"的页面级点击验证待真实出现过期工单后补做（按钮与回调路径已由单测锁定）；
 - `npm run build` 的 EPERM 历史问题本轮未复现，继续观察；
 - 交接文档提及的仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）未纳入本轮范围，维持原状未动。
+
+#### 八、2026-10-02 文档整理复核
+
+本次复核只读检查了 §3.52 的代码、提交和文档，并重新运行了本地隔离验证：
+
+| 项 | 命令 | 本次复核结果 |
+|---|---|---|
+| 后端测试 | `..\\.conda-env\\python.exe -m pytest tests -q` | **214 passed，1 warning** |
+| 后端编译 | `..\\.conda-env\\python.exe -m compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **26 passed**（测试中会输出预期的 ErrorBoundary 模拟错误日志） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | **EPERM**：无法写入 `frontend/tsconfig.tsbuildinfo` |
+
+说明：§3.52 执行记录中的 `npm run build` 通过属于上一轮运行结果；本次复核再次遇到 Windows 文件锁，因此当前不能把 build 写成无条件通过。事件去处置、缺口回归和 SQLite 迁移仍以 §3.52 的提交与页面截图为历史执行证据；延期事件页面点击仍待真实出现过期工单后补做。
+
+### 3.53 接手复核：EPERM 收口 + 真实环境只读冒烟（2026-10-02 下午）
+
+按 AI_HANDOFF_PLAN §6.1 建议顺序执行。零写入（ERPNext/OpenMES 均只读），无代码改动；环境操作为启动 Docker Desktop 与三组容器（autoparts-db / openmes / erpnext）。
+
+#### 一、`npm run build` EPERM 诊断与实际结果
+
+- 进程排查：项目自身无残留 node/tsc/esbuild 进程（仅 ZCode 自带浏览器自动化运行时，与本项目无关，未触碰）；`tsconfig.tsbuildinfo` 文件属性正常（非只读）。
+- 本轮 `npm run build` **一次通过**（tsc -b + vite build，41 modules）。结论：EPERM 为间歇性 Windows 文件锁（此前复核轮曾复现），不是稳定存在的占用；不通过关闭无关服务或删除文件"修绿"。观察口径保持：每次复核如实记录当轮结果。
+
+#### 二、测试基线（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `../.conda-env/python.exe -m pytest tests -q` | **214 passed, 1 warning** |
+| 后端编译 | `compileall -q app` | 通过（§3.52 记录口径沿用，本轮未重复跑） |
+| 前端测试 | `npm run test -- --run` | **26 passed**（6 files） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | **通过**（本轮 EPERM 未复现） |
+
+#### 三、真实环境只读冒烟（本轮全部实时实测，数量为运行时数据，不写死）
+
+环境：Docker Desktop 冷启动 → `docker start autoparts-db` + openmes compose + erpnext compose（按 scripts/deploy_services.ps1 拓扑）→ 后端 `APP_ADAPTER_MODE=real` 起 9000。
+
+| 检查 | 端点/命令 | 结果 |
+|---|---|---|
+| 后端健康 | `GET /api/health` | `{"status":"ok","mode":"local-runtime","database":"connected"}` |
+| ERPNext | `GET http://localhost:8080/api/method/ping` | 200 `pong` |
+| ERPNext 身份 | `GET /api/real-orders/identity/me` | `authenticated=true`，authority=ERPNext |
+| OpenMES 登录（适配器链路） | `GET /api/mes/work-orders?limit=20` | 200 真实工单 **本轮 12 条**（含 4/2/3/8-12 与 1 条历史 DEMO_WO_001；历史轮次出现过 4/空/12，属运行时数据） |
+| ERP 只读 | `GET /api/real-orders/erp/items/search?limit=5` | 200 真实物料（BD-2401/BD-2402 等，authority=ERPNext） |
+| 事件列表 | `GET /api/real-orders/collaboration/events` | 200 **本轮 3 条**：缺料 1（COMPLETED）、质量 2（1 COMPLETED、1 MANUAL_HANDLED by Administrator） |
+| 后端错误日志 | `uvicorn-9000.err.log` | 无 error/traceback |
+
+#### 四、真实延期事件页面验证——本轮结论
+
+- 延期触发口径核对（`app/services/collaboration.py` `trigger_overdue_event_if_needed`）：`track.due_date` 已过且状态未完成、完成率 <100% 才触发；与冒烟检查口径一致。
+- 本轮 12 条工单中**无任何"已过交期且未完成"的真实工单**（最早交期 2026-10-15，无 `production_overdue` 事件），页面级"查看跟单"点击复核**继续保留待真实数据状态**，不造延期数据。组件/回调回归已由 `CollaborationEventsPanel` 测试锁定。
+
+#### 五、清理与遗留
+
+- 清理上次会话遗留临时文件：`backend/ask_a6.json`、`backend/ask_q6.json`、`backend/dis_req_tmp.json`、`frontend/ana1.json`（均为 curl 调试残留）；`.gitignore` 增加 `backend/uvicorn-9000*.log`。
+- 遗留不变：延期页面点击待真实过期工单；提前预警阈值待用户确认业务规则（见 AI_HANDOFF_PLAN §6.1 第 3 条）；能力目录运行时构建与 P2 生产化项后置。
+- 仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）维持原状。

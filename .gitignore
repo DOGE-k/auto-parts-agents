@@ -25,3 +25,4 @@ backend/app/services/**/__pycache__/
 # 临时运行文件
 backend/pid.txt
 backend/qid.txt
+backend/uvicorn-9000*.log
