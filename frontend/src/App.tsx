@@ -71,6 +71,8 @@ function App() {
   const [runtimeSurface, setRuntimeSurface] = useState<RuntimeSurface | null>(null);
   // 当前审批人（由 RealBusinessPage 解析后上报，供顶栏与侧栏展示）
   const [realIdentity, setRealIdentity] = useState<RealIdentity | null>(null);
+  // 真实连接状态（评审意见③：来自页面实际探测，顶栏/侧栏与系统连接页同一状态源）
+  const [connStatus, setConnStatus] = useState<{ erpnext: string; openmes: string } | null>(null);
   // 业务总览"去提问"带来的一条待发送问题（填入问答输入框后即消费）
   const [pendingQuestion, setPendingQuestion] = useState("");
   // Real mode is the safe initial state while the runtime surface is loading;
@@ -217,6 +219,18 @@ function App() {
     }
   };
 
+  // 统一连接文案（评审意见③）：区分"已连接"（真实探测通过）与"探测中/异常"，
+  // 审批账号登录状态单独由"当前审批人"表达，不混在连接文案里。
+  const connectionText = !isRealModule(page)
+    ? "Mock + OpenMES 只读"
+    : connStatus === null
+      ? "连接探测中…"
+      : connStatus.erpnext === "connected" && connStatus.openmes === "connected"
+        ? "ERPNext + OpenMES · 已连接"
+        : connStatus.erpnext === "connected"
+          ? "ERPNext 已连接 · OpenMES 异常"
+          : "连接异常 · 见系统连接页";
+
   const selectedProject = projects.find((item) => item.project_id === projectId);
   const currentApprovals = useMemo(() => approvals.filter((item) => item.project_id === projectId), [approvals, projectId]);
 
@@ -253,9 +267,9 @@ function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
-          <div className={`mode-indicator ${isRealModule(page) ? "real-mode" : ""}`}>
+          <div className={`mode-indicator ${isRealModule(page) && connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "real-mode" : ""}`}>
             <i />
-            {isRealModule(page) ? "ERPNext + OpenMES 已连接" : "Mock + OpenMES 只读"}
+            {connectionText}
           </div>
           <p className="sidebar-approver">
             当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b>
@@ -272,9 +286,9 @@ function App() {
         <header className="topbar">
           <div className="breadcrumbs"><span>汽车零部件</span><b>/</b><strong>{pageLabels[page] ?? page}</strong></div>
           <div className="topbar-actions">
-            <div className={`connection ${isRealModule(page) ? "real-mode" : ""}`}>
+            <div className={`connection ${isRealModule(page) && connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "real-mode" : ""}`}>
               <i />
-              {isRealModule(page) ? "ERPNext + OpenMES · 已连接" : "Mock + OpenMES 只读"}
+              {connectionText}
             </div>
             <span className="topbar-approver">当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b></span>
             {mockDemoEnabled && projects.length > 0 && !isRealModule(page) && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
@@ -290,6 +304,7 @@ function App() {
             activeModule={page}
             onNavigate={setPage}
             onIdentityChange={setRealIdentity}
+            onConnectionStatus={setConnStatus}
             pendingQuestion={pendingQuestion}
             onPendingQuestionConsumed={() => setPendingQuestion("")}
             onAskQuestion={(question) => {

@@ -2800,3 +2800,9 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .advanced-settings summary { cursor: pointer; color: var(--teal); margin-bottom: 8px; }
 .advanced-settings label { display: grid; gap: 4px; margin: 10px 0; }
 .panel-heading-actions { display: flex; align-items: center; gap: 8px; }
+
+/* 完整执行链折叠（评审意见②：默认只显示本阶段步骤条） */
+.full-chain-details { margin: 8px 0 2px; }
+.full-chain-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.full-chain-details[open] summary { margin-bottom: 6px; }
+.full-chain-details .stepper { opacity: 0.85; }

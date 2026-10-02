@@ -6,6 +6,7 @@ import AssistantPanel from "./components/AssistantPanel";
 import BusinessOverviewPanel from "./components/BusinessOverviewPanel";
 import ConnectionSettingsPanel from "./components/ConnectionSettingsPanel";
 import MesCompletionsPanel from "./components/MesCompletionsPanel";
+import PendingApprovalsPanel from "./components/PendingApprovalsPanel";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useNcrWorkflows } from "./hooks/useNcrWorkflows";
 import {
@@ -37,6 +38,7 @@ import {
   setRealWriteToken,
 } from "./api";
 import type {
+  AssistantJumpTarget,
   CollaborationEvent,
   QualityTodoItem,
   RealIdentity,
@@ -80,6 +82,18 @@ const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subti
   connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与审批账号会话；调试令牌收在高级联调设置里。" },
 };
 
+// 订单全流程 8 步（与后端审批链一致；各业务模块只展示自己的阶段）
+const FULL_ORDER_STEPS = [
+  { n: 1, label: "报价分析" },
+  { n: 2, label: "报价审批" },
+  { n: 3, label: "ERP 草稿" },
+  { n: 4, label: "采购分析" },
+  { n: 5, label: "方案审批" },
+  { n: 6, label: "PO 草稿" },
+  { n: 7, label: "跟单质量" },
+  { n: 8, label: "发运门禁" },
+];
+
 // ========== 页面组件 ==========
 type Props = {
   activeModule: RealModuleKey;
@@ -88,9 +102,16 @@ type Props = {
   pendingQuestion?: string;
   onPendingQuestionConsumed?: () => void;
   onAskQuestion?: (question: string) => void;
+  /** 连接状态上报（评审意见③：顶栏/侧栏/系统连接页共用同一真实探测状态源） */
+  onConnectionStatus?: (status: RealConnectionStatus) => void;
 };
 
-export default function RealBusinessPage({ activeModule, onNavigate, onIdentityChange, pendingQuestion, onPendingQuestionConsumed, onAskQuestion }: Props) {
+export type RealConnectionStatus = {
+  erpnext: "pending" | "connected" | "error";
+  openmes: "pending" | "connected" | "error";
+};
+
+export default function RealBusinessPage({ activeModule, onNavigate, onIdentityChange, pendingQuestion, onPendingQuestionConsumed, onAskQuestion, onConnectionStatus }: Props) {
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -130,33 +151,54 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     window.setTimeout(() => setToast(""), 3000);
   };
 
+  // 连接状态（评审意见③）：来自真实探测，不把"已配置"说成"已连接"。
+  // ERPNext=身份解析成功即已连接；OpenMES=工单列表真实可读即已连接。
+  const [connErp, setConnErp] = useState<"pending" | "connected" | "error">("pending");
+  const [connMes, setConnMes] = useState<"pending" | "connected" | "error">("pending");
+
+  useEffect(() => {
+    onConnectionStatus?.({ erpnext: connErp, openmes: connMes });
+  }, [connErp, connMes, onConnectionStatus]);
+
   // 审批人来自 ERPNext/OpenMES 当前登录用户；页面不再让操作者自报角色。
   // 仅初始解析一次：登录/保存/清除会话路径各自显式刷新身份；
   // 依赖 identity 会因每次返回新对象引用而无限循环请求 identity/me。
   useEffect(() => {
     void getRealIdentity()
-      .then(setIdentity)
-      .catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+      .then((id) => {
+        setIdentity(id);
+        setConnErp("connected");
+      })
+      .catch((e) => {
+        setConnErp("error");
+        setError(e instanceof Error ? e.message : "真实身份解析失败");
+      });
   }, []);
 
-  // 加载客户、物料和工单列表
+  // 加载客户、物料和工单列表（OpenMES 连通性单独探测，不与 ERP 数据互相掩盖）
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [custs, its, wos] = await Promise.all([
+        const [custs, its] = await Promise.all([
           api<Customer[]>("/real-orders/erp/customers/search?limit=20"),
           api<Item[]>("/real-orders/erp/items/search?limit=20"),
-          api<WorkOrder[]>("/mes/work-orders?limit=20"),
         ]);
         setCustomers(custs);
         setItems(its);
-        setWorkOrders(wos);
         if (custs.length) setSelectedCustomer(custs[0].customer_id);
         if (its.length) setSelectedItem(its[0].item_code);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "加载 ERP 数据失败");
+      }
+      try {
+        const wos = await api<WorkOrder[]>("/mes/work-orders?limit=20");
+        setWorkOrders(wos);
+        setConnMes("connected");
         // 工单不能默认选择第一条。正式流程必须按 customer_order_no
         // 与当前 ERP 销售订单号精确关联后才能进入跟单/质量门禁。
       } catch (e) {
-        setError(e instanceof Error ? e.message : "加载数据失败");
+        setConnMes("error");
+        setError(e instanceof Error ? e.message : "加载 OpenMES 工单失败");
       }
     };
     void loadData();
@@ -495,18 +537,26 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     if (hasOpenmesSession) void loadQualityTodo();
   }, [hasOpenmesSession, loadQualityTodo]);
 
-  // "去处置"：切到该工单的跟单质量视图并展开既有 NCR 操作面板（处置流程零改动）
-  const goToQualityDispose = useCallback(async (item: QualityTodoItem) => {
+  // 打开某工单的跟单视图（评审意见①：问答/事件/待办跳转都携带对象编号并自动定位，
+  // 不是只切到空模块）。反查报价审批状态（不猜）→ 三面板只读加载 → 生产跟单·跟单视图。
+  const openWorkOrderTracking = useCallback(async (
+    workOrderId: string,
+    workOrderNo: string,
+    opts?: { focusIssueId?: string; note?: string },
+  ) => {
+    if (!workOrderId && !workOrderNo) {
+      setError("缺少关联的工单编号，无法打开跟单视图");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      // 跨工单跳转不猜报价审批状态：先反查工单关联的 ERP 订单与已持久化报价
       let quotationApproved = false;
       try {
         const orders = await api<WorkOrder[]>("/mes/work-orders?limit=100");
         setWorkOrders(orders);
         const linkedOrder = orders
-          .find((wo) => String(wo.work_order_id) === String(item.work_order_id))
+          .find((wo) => String(wo.work_order_id) === String(workOrderId))
           ?.customer_order_no?.trim();
         if (linkedOrder) {
           const quotations = await api<Quotation[]>("/real-orders/quotations");
@@ -515,37 +565,99 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           );
         }
       } catch {
-        // 反查失败时发运门禁按"未审批"口径显示；NCR 处置面板不受影响
+        // 反查失败按"未审批"口径显示
       }
       const [track, qual, ship] = await Promise.all([
-        api<TrackingInfo>(`/real-orders/mes/track/${item.work_order_id}`),
-        api<QualityInfo>(`/real-orders/quality/package/${item.work_order_id}`),
-        api<ShipGateInfo>(`/real-orders/ship-gate/${item.work_order_id}?quotation_approved=${quotationApproved}`),
+        api<TrackingInfo>(`/real-orders/mes/track/${workOrderId}`),
+        api<QualityInfo>(`/real-orders/quality/package/${workOrderId}`),
+        api<ShipGateInfo>(`/real-orders/ship-gate/${workOrderId}?quotation_approved=${quotationApproved}`),
       ]);
       setTracking(track);
       setQuality(qual);
       setShipGate(ship);
-      setWorkOrderId(String(item.work_order_id));
+      setWorkOrderId(workOrderId);
       setStep(8);
       setProductionView("tracking");
-      setTodoFocusIssueId(String(item.issue_id));
+      if (opts?.focusIssueId) setTodoFocusIssueId(opts.focusIssueId);
+      onNavigate("production");
       void restoreNcrWorkflowStates(qual);
-      notify(`已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`);
+      notify(opts?.note ?? `已打开工单 ${workOrderNo || workOrderId} 的跟单视图`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "打开质量处置面板失败");
+      setError(e instanceof Error ? e.message : "打开跟单视图失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [notify, onNavigate, restoreNcrWorkflowStates]);
+
+  // "去处置"：打开该工单跟单视图并聚焦 NCR 卡片（处置流程零改动，评审意见①）
+  const goToQualityDispose = useCallback(async (item: QualityTodoItem) => {
+    await openWorkOrderTracking(String(item.work_order_id), String(item.work_order_no ?? ""), {
+      focusIssueId: String(item.issue_id ?? ""),
+      note: `已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`,
+    });
+  }, [openWorkOrderTracking]);
+
+  // 打开某方案的采购审批视图（缺料事件与问答跳转共用；只读加载，不执行审批）
+  const openProcurementPlanView = useCallback(async (
+    quotationId?: string,
+    planId?: string,
+    note?: string,
+  ) => {
+    if (!quotationId || !planId) {
+      setError("缺少关联的报价/采购方案编号，无法打开方案视图");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const loadedQuotation = await api<Quotation>(`/real-orders/quotations/${encodeURIComponent(quotationId)}`);
+      const plans = await api<ProcurementPlan[]>("/real-orders/procurement/plans");
+      const target = plans.find((pl) => pl.plan_id === planId) ?? null;
+      if (!target) {
+        setError(`采购方案 ${planId} 在当前业务库中不存在，无法跳转`);
+        return;
+      }
+      setQuotation(loadedQuotation);
+      setPlan(target);
+      if (target.net_requirement.has_shortage) {
+        setSelectedOptionId(target.recommended_option_id ?? target.supplier_options[0]?.option_id ?? "");
+        setStep(5);
+      } else {
+        setStep(4);
+      }
+      onNavigate("procurement");
+      notify(note ?? `已打开方案 ${planId} 的采购审批视图`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "打开采购方案视图失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [notify, onNavigate]);
+
+  // 打开某报价的审批视图（问答跳转定位到具体报价；评审意见①）
+  const openQuotationView = useCallback(async (quotationId: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const loaded = await api<Quotation>(`/real-orders/quotations/${encodeURIComponent(quotationId)}`);
+      setQuotation(loaded);
+      setPlan(null);
+      setSelectedOptionId("");
+      setStep(2);
+      onNavigate("sales");
+      notify(`已打开报价 ${quotationId}（当前状态 ${loaded.status}）`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "打开报价视图失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [notify, onNavigate]);
 
   // 协同事件"去处置/去处理"导航（P1 任务 A；只读导航，不执行任何审批/写入）
   const goToEventTarget = useCallback(async (event: CollaborationEvent) => {
     const payload = event.payload ?? {};
     if (event.event_type === "quality_issue_raised") {
       // 复用质量待办的处置跳转：加载工单三面板并聚焦该问题的 NCR 卡片
-      // （质量待办入口在外层先切到生产跟单模块再调 goToQualityDispose，此处保持一致）
-      onNavigate("production");
-      // goToQualityDispose 只消费工单/问题编号与标题；其余字段按类型契约补空
       await goToQualityDispose({
         issue_id: String(payload.issue_id ?? ""),
         work_order_id: String(payload.work_order_id ?? ""),
@@ -562,88 +674,44 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     if (event.event_type === "material_shortage") {
       const quotationId = event.result?.shortage?.quotation_id ?? payload.quotation_id;
       const planId = event.result?.shortage?.plan_id ?? payload.plan_id;
-      if (!quotationId || !planId) {
-        setError(`事件 ${event.event_id} 缺少关联的报价/采购方案编号，无法跳转`);
-        return;
-      }
-      setLoading(true);
-      setError("");
-      try {
-        // 只读加载已持久化的真实报价与方案，落到方案审批区（不执行审批）
-        const loadedQuotation = await api<Quotation>(`/real-orders/quotations/${encodeURIComponent(quotationId)}`);
-        const plans = await api<ProcurementPlan[]>("/real-orders/procurement/plans");
-        const target = plans.find((pl) => pl.plan_id === planId) ?? null;
-        if (!target) {
-          setError(`采购方案 ${planId} 在当前业务库中不存在，无法跳转`);
-          return;
-        }
-        setQuotation(loadedQuotation);
-        setPlan(target);
-        if (target.net_requirement.has_shortage) {
-          setSelectedOptionId(target.recommended_option_id ?? target.supplier_options[0]?.option_id ?? "");
-          setStep(5);
-        } else {
-          setStep(4);
-        }
-        onNavigate("procurement");
-        notify(`已打开方案 ${planId} 的采购审批视图（基于事件 ${event.event_id}）`);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "打开采购方案视图失败");
-      } finally {
-        setLoading(false);
-      }
+      await openProcurementPlanView(
+        quotationId ? String(quotationId) : undefined,
+        planId ? String(planId) : undefined,
+        `已打开方案 ${planId} 的采购审批视图（基于事件 ${event.event_id}）`,
+      );
       return;
     }
     if (event.event_type === "production_overdue" || event.event_type === "production_at_risk") {
-      const workOrderId = String(payload.work_order_id ?? "");
-      const workOrderNo = String(payload.work_order_no ?? "");
-      if (!workOrderId && !workOrderNo) {
-        setError(`事件 ${event.event_id} 缺少关联的工单编号，无法跳转`);
-        return;
-      }
-      setLoading(true);
-      setError("");
-      try {
-        // 复用质量待办跳转的加载路径：反查审批状态（不猜）→ 三面板只读加载
-        let quotationApproved = false;
-        try {
-          const orders = await api<WorkOrder[]>("/mes/work-orders?limit=100");
-          setWorkOrders(orders);
-          const linkedOrder = orders
-            .find((wo) => String(wo.work_order_id) === String(workOrderId))
-            ?.customer_order_no?.trim();
-          if (linkedOrder) {
-            const quotations = await api<Quotation[]>("/real-orders/quotations");
-            quotationApproved = quotations.some(
-              (q) => q.erp_draft_id?.trim() === linkedOrder && q.status === "APPROVED",
-            );
-          }
-        } catch {
-          // 反查失败按"未审批"口径显示
-        }
-        const [track, qual, ship] = await Promise.all([
-          api<TrackingInfo>(`/real-orders/mes/track/${workOrderId}`),
-          api<QualityInfo>(`/real-orders/quality/package/${workOrderId}`),
-          api<ShipGateInfo>(`/real-orders/ship-gate/${workOrderId}?quotation_approved=${quotationApproved}`),
-        ]);
-        setTracking(track);
-        setQuality(qual);
-        setShipGate(ship);
-        setWorkOrderId(workOrderId);
-        setStep(8);
-        setProductionView("tracking");
-        onNavigate("production");
-        void restoreNcrWorkflowStates(qual);
-        notify(`已打开工单 ${workOrderNo || workOrderId} 的跟单视图（生产延期事件）`);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "打开跟单视图失败");
-      } finally {
-        setLoading(false);
-      }
+      await openWorkOrderTracking(
+        String(payload.work_order_id ?? ""),
+        String(payload.work_order_no ?? ""),
+        { note: `已打开工单 ${payload.work_order_no || payload.work_order_id} 的跟单视图（生产延期事件）` },
+      );
       return;
     }
     setError(`事件 ${event.event_id} 类型未知（${event.event_type}），无法跳转`);
-  }, [goToQualityDispose, notify, onNavigate]);
+  }, [goToQualityDispose, openProcurementPlanView, openWorkOrderTracking]);
+
+  // 问答回答跳转：携带业务对象编号自动定位打开（评审意见①）。
+  // 只跳模块不定位对象的跳转被认为不像"打开这个订单"。
+  const handleAssistantNavigate = useCallback(async (
+    module: "sales" | "procurement" | "production" | "quality",
+    target?: AssistantJumpTarget,
+  ) => {
+    if (module === "production" && (target?.work_order_id || target?.work_order_no)) {
+      await openWorkOrderTracking(target?.work_order_id ?? "", target?.work_order_no ?? "");
+      return;
+    }
+    if (module === "procurement" && (target?.plan_id || target?.quotation_id)) {
+      await openProcurementPlanView(target?.quotation_id, target?.plan_id);
+      return;
+    }
+    if (module === "sales" && target?.quotation_id) {
+      await openQuotationView(target.quotation_id);
+      return;
+    }
+    onNavigate(module);
+  }, [openProcurementPlanView, openQuotationView, openWorkOrderTracking, onNavigate]);
 
   // 跳转后滚动并高亮目标 NCR 卡片（依赖 activeModule：去处置先切到生产跟单模块，渲染后再滚动）
   useEffect(() => {
@@ -762,7 +830,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             currentWorkOrderId={workOrderId}
             notify={notify}
             onError={setError}
-            onNavigate={onNavigate}
+            onNavigate={handleAssistantNavigate}
             initialQuestion={pendingQuestion}
             onQuestionConsumed={onPendingQuestionConsumed}
           />
@@ -804,26 +872,38 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           销售与订单=步骤1-3、采购与缺料=步骤4-6、生产跟单=步骤7-8；步骤状态机共享） */}
       {(activeModule === "sales" || activeModule === "procurement" || activeModule === "production") && (
         <>
-          <div className="stepper">
-            {[
-              { n: 1, label: "报价分析" },
-              { n: 2, label: "报价审批" },
-              { n: 3, label: "ERP 草稿" },
-              { n: 4, label: "采购分析" },
-              { n: 5, label: "方案审批" },
-              { n: 6, label: "PO 草稿" },
-              { n: 7, label: "跟单质量" },
-              { n: 8, label: "发运门禁" },
-            ].map((s) => (
-              <div
-                key={s.n}
-                className={`step-item ${step >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
-              >
-                <div className="step-number">{s.n}</div>
-                <span>{s.label}</span>
+          {(() => {
+            // 评审意见②：各模块只显示本业务阶段的步骤条；完整 8 步链收进折叠，
+            // 不再像手动 Demo 一样默认铺开整条流程。
+            const stageSteps =
+              activeModule === "sales"
+                ? FULL_ORDER_STEPS.filter((s) => s.n <= 3)
+                : activeModule === "procurement"
+                  ? FULL_ORDER_STEPS.filter((s) => s.n >= 4 && s.n <= 6)
+                  : FULL_ORDER_STEPS.filter((s) => s.n >= 7);
+            const renderStepper = (steps: typeof FULL_ORDER_STEPS) => (
+              <div className="stepper">
+                {steps.map((s) => (
+                  <div
+                    key={s.n}
+                    className={`step-item ${step >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
+                  >
+                    <div className="step-number">{s.n}</div>
+                    <span>{s.label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+            return (
+              <>
+                {renderStepper(stageSteps)}
+                <details className="full-chain-details">
+                  <summary>查看完整执行链（8 步）</summary>
+                  {renderStepper(FULL_ORDER_STEPS)}
+                </details>
+              </>
+            );
+          })()}
 
           {/* 销售与订单：步骤 1-3 */}
           {activeModule === "sales" && (
@@ -996,9 +1076,13 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         </>
       )}
 
-      {/* 审批与审计（信息架构改版 §七.5：原"运行记录"并入） */}
+      {/* 审批与审计（信息架构改版 §七.5；评审意见④：补待审批区块，像审批工作台而不只是运行记录） */}
       {activeModule === "audit" && (
         <ErrorBoundary name="审批与审计">
+          <PendingApprovalsPanel
+            onOpenQuotation={(quotationId) => void openQuotationView(quotationId)}
+            onOpenPlan={(quotationId, planId) => void openProcurementPlanView(quotationId, planId)}
+          />
           <AgentRunsPanel />
         </ErrorBoundary>
       )}
@@ -1008,6 +1092,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         <ErrorBoundary name="系统连接">
           <ConnectionSettingsPanel
             identity={identity}
+            connErp={connErp}
+            connMes={connMes}
             hasOpenmesSession={hasOpenmesSession}
             sessionExpiringSoon={sessionExpiringSoon}
             sessionToken={sessionToken}

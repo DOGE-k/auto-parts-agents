@@ -13,6 +13,7 @@ import {
 import type {
   AssistantAnswer,
   AssistantCallStep,
+  AssistantJumpTarget,
   ProposalSupplierOption,
   RealIdentity,
 } from "../api";
@@ -25,8 +26,11 @@ type Props = {
   currentWorkOrderId: string;
   notify: (message: string) => void;
   onError: (message: string) => void;
-  /** 信息架构改版 §4.3：回答中的业务对象跳转到对应模块（只读导航，不执行审批） */
-  onNavigate?: (module: "sales" | "procurement" | "production" | "quality") => void;
+  /** 回答中的业务对象跳转：携带对象编号自动定位打开（评审意见①），不只切模块 */
+  onNavigate?: (
+    module: "sales" | "procurement" | "production" | "quality",
+    target?: AssistantJumpTarget,
+  ) => void;
   /** 业务总览"去提问"带过来的问题：填入输入框待用户确认发送 */
   initialQuestion?: string;
   onQuestionConsumed?: () => void;
@@ -162,14 +166,40 @@ export default function AssistantPanel({
     onQuestionConsumed?.();
   }, [initialQuestion, onQuestionConsumed]);
 
-  // 回答涉及的业务对象 → 对应模块跳转按钮（信息架构改版 §4.3：回答中的操作入口调起业务详情）
-  const ctx = (assistantAnswer?.context ?? {}) as Record<string, unknown>;
-  const jumpButtons: { label: string; module: "sales" | "procurement" | "production" | "quality" }[] = [];
+  // 回答涉及的业务对象 → 携带编号的定位跳转（评审意见①）。
+  // 来源按可靠度排序：本轮调用链实参（协调者真实触碰的对象）> 结构化方案字段
+  // > 会话实体上下文（沿用_/页面_ 前缀键，键名以 assistant_context.py 字段集为准）。
+  const jumpTarget: AssistantJumpTarget = {};
+  if (assistantAnswer) {
+    for (const step of (assistantAnswer.call_chain ?? []) as AssistantCallStep[]) {
+      const args = (step.arguments ?? {}) as Record<string, unknown>;
+      if (args.work_order_id) jumpTarget.work_order_id = String(args.work_order_id);
+      if (args.work_order_no) jumpTarget.work_order_no = String(args.work_order_no);
+      if (args.quotation_id) jumpTarget.quotation_id = String(args.quotation_id);
+      if (args.erp_order_id) jumpTarget.erp_order_id = String(args.erp_order_id);
+    }
+    const proposal = assistantAnswer.proposal_options;
+    if (proposal?.plan_id) jumpTarget.plan_id = proposal.plan_id;
+    if (proposal?.quotation_id) jumpTarget.quotation_id = proposal.quotation_id;
+    const ctx = (assistantAnswer.context ?? {}) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(ctx)) {
+      if (typeof value !== "string" || !value.trim()) continue;
+      if (key.endsWith("work_order_id")) jumpTarget.work_order_id = value;
+      else if (key.endsWith("work_order_no")) jumpTarget.work_order_no = value;
+      else if (key.endsWith("quotation_id")) jumpTarget.quotation_id = value;
+      else if (key.endsWith("plan_id")) jumpTarget.plan_id = value;
+    }
+  }
+  const jumpButtons: { label: string; module: "sales" | "procurement" | "production" | "quality"; target?: AssistantJumpTarget }[] = [];
   if (assistantAnswer && onNavigate) {
-    if (ctx.quotation_id || ctx.报价号) jumpButtons.push({ label: "打开销售与订单", module: "sales" });
-    if (ctx.plan_id || ctx.方案号) jumpButtons.push({ label: "去采购与缺料", module: "procurement" });
-    if (ctx.work_order_id || ctx.工单id) jumpButtons.push({ label: "查看生产跟单", module: "production" });
-    if (ctx.issue_id || ctx.质量问题id) jumpButtons.push({ label: "去质量中心", module: "quality" });
+    if (jumpTarget.work_order_id || jumpTarget.work_order_no) {
+      jumpButtons.push({ label: "查看该工单跟单", module: "production", target: { work_order_id: jumpTarget.work_order_id, work_order_no: jumpTarget.work_order_no } });
+    }
+    if (jumpTarget.plan_id) {
+      jumpButtons.push({ label: "打开该方案审批", module: "procurement", target: { quotation_id: jumpTarget.quotation_id, plan_id: jumpTarget.plan_id } });
+    } else if (jumpTarget.quotation_id) {
+      jumpButtons.push({ label: "打开该报价", module: "sales", target: { quotation_id: jumpTarget.quotation_id } });
+    }
   }
 
   return (
@@ -286,7 +316,7 @@ export default function AssistantPanel({
             <div className="assistant-jump-row">
               <span>在业务模块中继续处理：</span>
               {jumpButtons.map((b) => (
-                <button key={b.module} className="button ghost" onClick={() => onNavigate?.(b.module)}>
+                <button key={b.label} className="button ghost" onClick={() => onNavigate?.(b.module, b.target)}>
                   {b.label} →
                 </button>
               ))}

@@ -86,6 +86,13 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     expect(text).toContain("销售与订单");
     expect(text).toContain("报价分析");
     expect(text).toContain("ERP 草稿");
+    // 评审意见②：可见步骤条只含本阶段 3 步，完整 8 步链收进折叠
+    expect(page.container.querySelector(".full-chain-details")).toBeTruthy();
+    const directStepper = page.container.querySelector(".page-content > .stepper");
+    expect(directStepper).toBeTruthy();
+    expect(directStepper!.querySelectorAll(".step-item").length).toBe(3);
+    const chainStepper = page.container.querySelector(".full-chain-details .stepper");
+    expect(chainStepper!.querySelectorAll(".step-item").length).toBe(8);
     // 页签时代的"运行记录"与"质量中心"面板不得同时展开（验收 7）
     expect(text).not.toContain("协同事件（自动协作）");
     expect(text).not.toContain("Agent 运行记录");

@@ -7,8 +7,13 @@ import type { RealIdentity } from "../api";
 
 const OPENMES_SESSION_TTL_MS = 15 * 60 * 1000;
 
+export type ConnState = "pending" | "connected" | "error";
+
 type Props = {
   identity: RealIdentity | null;
+  /** 真实探测的连接状态（与顶栏/侧栏同一状态源；评审意见③统一文案） */
+  connErp: ConnState;
+  connMes: ConnState;
   hasOpenmesSession: boolean;
   sessionExpiringSoon: boolean;
   sessionToken: string;
@@ -66,12 +71,23 @@ export default function ConnectionSettingsPanel(props: Props) {
           <div className="connection-row">
             <span className="source-tag erp">ERPNext</span>
             <span>客户 / 物料 / BOM / 价格 / 库存 · 只读 + 草稿写入</span>
-            <b className="text-green">{identity ? "已连接（身份已解析）" : "解析身份中…"}</b>
+            <b className={props.connErp === "connected" ? "text-green" : props.connErp === "error" ? "text-red" : ""}>
+              {props.connErp === "connected" ? "已连接（身份已解析）" : props.connErp === "error" ? "连接异常" : "探测中…"}
+            </b>
           </div>
           <div className="connection-row">
             <span className="source-tag mes">OpenMES</span>
             <span>工单 / 进度 / 质量 · 只读 + 审批执行</span>
-            <b className="text-green">已配置</b>
+            <b className={props.connMes === "connected" ? "text-green" : props.connMes === "error" ? "text-red" : ""}>
+              {props.connMes === "connected" ? "已连接（工单数据可读）" : props.connMes === "error" ? "连接异常" : "探测中…"}
+            </b>
+          </div>
+          <div className="connection-row">
+            <span className="source-tag erp">审批账号</span>
+            <span>只读查询无需登录；审批/报工/处置等写入门禁需要 OpenMES 登录会话</span>
+            <b className={props.hasOpenmesSession ? "text-green" : ""}>
+              {props.hasOpenmesSession ? "已登录" : "未登录（需要审批账号）"}
+            </b>
           </div>
         </div>
       </section>

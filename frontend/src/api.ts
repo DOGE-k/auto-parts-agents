@@ -324,6 +324,14 @@ export type AssistantCallStep = {
 };
 
 // 任务型协同问答（P0）：会话/业务任务上下文字段
+export type AssistantJumpTarget = {
+  work_order_id?: string;
+  work_order_no?: string;
+  quotation_id?: string;
+  plan_id?: string;
+  erp_order_id?: string;
+};
+
 export type AssistantMissingSlot = {
   slot: string;
   alternatives: string[];
