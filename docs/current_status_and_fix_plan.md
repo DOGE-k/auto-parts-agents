@@ -1850,3 +1850,42 @@ ERP 物料需求
 - 清理上次会话遗留临时文件：`backend/ask_a6.json`、`backend/ask_q6.json`、`backend/dis_req_tmp.json`、`frontend/ana1.json`（均为 curl 调试残留）；`.gitignore` 增加 `backend/uvicorn-9000*.log`。
 - 遗留不变：延期页面点击待真实过期工单；提前预警阈值待用户确认业务规则（见 AI_HANDOFF_PLAN §6.1 第 3 条）；能力目录运行时构建与 P2 生产化项后置。
 - 仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）维持原状。
+
+### 3.54 生产临期风险事件（规则 at_risk_v1，经用户确认后实现，2026-10-02 下午）
+
+**业务规则来源**：提前预警阈值此前一直未实现（AI_HANDOFF_PLAN §6.1 第 3 条要求先确认）。2026-10-02 下午用户在对话中明确选择：**交期前 3 天 + 完成率 <50%**、**进事件面板（新事件类型）**、**跟单读取时被动检查**。规则版本号 `at_risk_v1` 写入代码常量与事件 payload，改动须先经用户重新确认。
+
+#### 一、实现内容（最小改动，全部复用既有事件基础设施）
+
+- `backend/app/services/collaboration.py`：
+  - 新事件类型 `production_at_risk`（标签"生产临期风险协同"）+ 规则常量（`AT_RISK_RULE_VERSION`/`AT_RISK_DAYS_BEFORE_DUE=3`/`AT_RISK_COMPLETION_THRESHOLD=50.0`）；
+  - `trigger_at_risk_event_if_needed(track)`：未完成、完成率 <50%、`today <= due_date <= today+3` 才触发；**与延期事件互斥**（`due < today` 由 `production_overdue` 负责）；dedup 键 `production_at_risk:{wo}:{日期}` 每工单每天一条，复用 `_trigger_with_dedup` 幂等入口（含接管后 `#N` 后缀语义）；
+  - `_process_at_risk`：只读结论（剩余天数/完成率/规则版本 + ETA 缺口如实 + 人工决策边界），authority="OpenMES（只读协同，未写入）"；
+  - `process_event` 分发分支补 `EVENT_TYPE_AT_RISK`。
+- `backend/app/services/real_order.py`：track_order 钩子在延期检查后追加临期检查（同一 try，失败不影响跟单查询）。
+- 前端：`api.ts` 标签"生产临期"；`CollaborationEventsPanel.tsx` 增加"查看跟单"按钮与缺工单编号拦截（与延期共用 case）；`RealBusinessPage.tsx` 导航分支扩展到 `production_at_risk`（复用延期事件的跟单三面板加载路径）。
+
+#### 二、测试（先补用例再实现，全部通过）
+
+- 后端 `tests/test_collaboration_events.py` 新增 `AtRiskEventTests` **4 例**：触发含规则版本与事实结论 + 同日去重；交期当天边界（days_left=0）触发；窗口外/完成率 50%/已完成/无交期四类不触发；同一条逾期数据上延期触发且临期不触发（互斥）。用例间用独立工单号避免 dedup 互扰（沿用 §3.51 教训）。
+- 前端 `CollaborationEventsPanel.test.tsx` 新增 **2 例**：临期徽标 + "查看跟单"点击回调携带工单编号；缺工单编号时可见报错且不调导航回调。
+
+#### 三、全量验证（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `pytest tests -q` | **218 passed**（214 + 4） |
+| 后端编译 | `compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **28 passed**（26 + 2） |
+| 前端类型 | `npx tsc --noEmit --incremental false` | 通过 |
+| 前端构建 | `npm run build` | 通过 |
+
+#### 四、真实系统回归（只读，零 ERP/MES 写入；事件表零新写入）
+
+- 重启 9000 后端加载新代码后：`GET /api/health` ok；`GET /real-orders/mes/track/11` 200（工单 11 已完成，钩子不破坏跟单查询）；事件列表仍 3 条（正确阴性：无临期候选不产生事件）；uvicorn 错误日志 0 行。
+- 当前真实工单交期最早 2026-10-15（距今日 >3 天，窗口外），故临期事件**无真实触发对象**——与延期事件页面点击一样，真实触发对象出现后可在事件面板复核"生产临期"徽标与"查看跟单"跳转；逻辑已由 6 个新测试用例锁定，不造临期数据。
+
+#### 五、文档同步与边界
+
+- AI_HANDOFF_PLAN §6 事件协作清单补第 4 类事件；§6.1 第 3 条完成；demo_script.md 故事线 D3 补临期事件说明。
+- 边界：被动检查（无人查看跟单不预警）是用户选择，如需全覆盖需新增定时扫描基础设施（未做）；阈值 3 天/50% 是用户确认值，非系统默认值。

@@ -638,14 +638,16 @@ async def track_order(work_order_id: str) -> dict[str, Any]:
         "data_source": "openmes_api",
         "calculated_at": _utc_now().isoformat(),
     }
-    # P1 事件协作钩子：事实型延期检查（已过交期且未完成；每工单每天一条）。
+    # P1 事件协作钩子：事实型延期检查（已过交期且未完成）+ 临期风险检查
+    # （用户确认规则 at_risk_v1：距交期 0-3 天且完成率<50%；均每工单每天一条）。
     # 检查失败不影响跟单查询本身。
     try:
         from app.services import collaboration
 
         await collaboration.trigger_overdue_event_if_needed(track_result)
+        await collaboration.trigger_at_risk_event_if_needed(track_result)
     except Exception:
-        logger.exception("延期事件检查失败（不影响跟单查询）wo=%s", work_order_id)
+        logger.exception("延期/临期事件检查失败（不影响跟单查询）wo=%s", work_order_id)
     return track_result
 
 

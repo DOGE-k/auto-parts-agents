@@ -17,6 +17,7 @@ vi.mock("../../api", () => ({
     quality_issue_raised: "质量异常",
     material_shortage: "物料短缺",
     production_overdue: "生产延期",
+    production_at_risk: "生产临期",
   },
   collaborationEventStatusLabels: {
     PENDING: "待处理",
@@ -216,6 +217,25 @@ const overdueEvent = {
   },
 };
 
+const atRiskEvent = {
+  ...completedEvent,
+  event_id: "EVT-ATRISK0001",
+  event_type: "production_at_risk",
+  dedup_key: "production_at_risk:12:2026-10-02",
+  payload: {
+    work_order_id: "12", work_order_no: "WO-SO-2026-00026", source: "track_order",
+    completion_rate: 10.0, due_date: "2026-10-04", days_left: 2, rule_version: "at_risk_v1",
+  },
+  result: {
+    conclusions: ["生产维度：工单距交期还有 2 天，完成率 10.0%（低于预警阈值 50%，规则 at_risk_v1）"],
+    days_left: 2,
+    rule_version: "at_risk_v1",
+    tracking: { completion_rate: 10.0, due_date: "2026-10-04" },
+    data_gaps: [],
+    authority: "OpenMES（只读协同，未写入）",
+  },
+};
+
 function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll("button")).find(
     (b) => b.textContent?.includes(text),
@@ -338,5 +358,47 @@ describe("CollaborationEventsPanel 去处置/去处理导航（任务 A 回归�
     });
     await flush();
     expect(onGoTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("临期事件显示生产临期徽标与查看跟单按钮，点击回调携带工单编号", async () => {
+    getCollaborationEventsMock.mockResolvedValue({ items: [atRiskEvent], count: 1 });
+    const onGoTarget = vi.fn();
+    const panel = mountPanel(onGoTarget);
+    cleanups.push(panel.cleanup);
+    await flush();
+    expect(panel.container.textContent).toContain("生产临期");
+    expect(panel.container.textContent).toContain("WO-SO-2026-00026");
+    const button = findButton(panel.container, "查看跟单");
+    expect(button).toBeTruthy();
+    act(() => {
+      button!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(onGoTarget).toHaveBeenCalledTimes(1);
+    const arg = onGoTarget.mock.calls[0][0];
+    expect(arg.event_type).toBe("production_at_risk");
+    expect(arg.payload.work_order_id).toBe("12");
+  });
+
+  it("临期事件缺工单编号时显示可见错误且不调用导航回调", async () => {
+    const noWo = {
+      ...atRiskEvent,
+      event_id: "EVT-ATRISKNOID",
+      payload: { source: "track_order", rule_version: "at_risk_v1" },
+    };
+    getCollaborationEventsMock.mockResolvedValue({ items: [noWo], count: 1 });
+    const onGoTarget = vi.fn();
+    const errors: string[] = [];
+    const panel = mountPanel(onGoTarget, (m) => errors.push(m));
+    cleanups.push(panel.cleanup);
+    await flush();
+    const button = findButton(panel.container, "查看跟单");
+    expect(button).toBeTruthy();
+    act(() => {
+      button!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(onGoTarget).not.toHaveBeenCalled();
+    expect(errors.some((m) => m.includes("缺少关联的工单编号"))).toBe(true);
   });
 });

@@ -566,7 +566,7 @@ export default function RealBusinessPage() {
       }
       return;
     }
-    if (event.event_type === "production_overdue") {
+    if (event.event_type === "production_overdue" || event.event_type === "production_at_risk") {
       const workOrderId = String(payload.work_order_id ?? "");
       const workOrderNo = String(payload.work_order_no ?? "");
       if (!workOrderId && !workOrderNo) {

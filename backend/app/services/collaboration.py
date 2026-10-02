@@ -35,11 +35,13 @@ logger = logging.getLogger(__name__)
 EVENT_TYPE_QUALITY_ISSUE = "quality_issue_raised"
 EVENT_TYPE_SHORTAGE = "material_shortage"
 EVENT_TYPE_OVERDUE = "production_overdue"
+EVENT_TYPE_AT_RISK = "production_at_risk"
 
 _EVENT_TYPE_LABELS = {
     EVENT_TYPE_QUALITY_ISSUE: "质量异常协同",
     EVENT_TYPE_SHORTAGE: "关键物料短缺协同",
     EVENT_TYPE_OVERDUE: "生产延期预警协同",
+    EVENT_TYPE_AT_RISK: "生产临期风险协同",
 }
 
 EVENT_STATUS_PENDING = "PENDING"
@@ -216,6 +218,8 @@ async def process_event(event_id: str) -> dict[str, Any]:
         return await _finish_event(event_id, await _process_shortage(payload))
     if event_type == EVENT_TYPE_OVERDUE:
         return await _finish_event(event_id, await _process_overdue(payload))
+    if event_type == EVENT_TYPE_AT_RISK:
+        return await _finish_event(event_id, await _process_at_risk(payload))
     return await _finish_event(event_id, await _process_quality_issue(payload))
 
 
@@ -671,6 +675,105 @@ async def trigger_overdue_event_if_needed(track: dict[str, Any]) -> dict[str, An
     except Exception:
         logger.exception("延期事件检查失败（不影响跟单查询）")
         return None
+
+
+# ========== P1 扩展：生产临期风险事件（阈值规则经用户确认：2026-10-02） ==========
+# 规则版本 at_risk_v1：距交期 0-3 天、未完成、完成率 <50% 时预警。
+# 阈值不是系统默认值，是用户显式确认的业务规则；改动必须先经用户重新确认。
+AT_RISK_RULE_VERSION = "at_risk_v1"
+AT_RISK_DAYS_BEFORE_DUE = 3
+AT_RISK_COMPLETION_THRESHOLD = 50.0
+
+
+async def trigger_at_risk_event_if_needed(track: dict[str, Any]) -> dict[str, Any] | None:
+    """跟单读取后的临期风险检查（track_order 钩子调用，与延期检查同点位）。
+
+    与事实型延期事件的边界：已过交期（due < 今天）由 production_overdue 负责；
+    本事件只覆盖"尚未逾期但已临期"的窗口（today <= due <= today+3）。
+    去重：每工单每天一条，复用 _trigger_with_dedup 幂等入口。
+    """
+    try:
+        status = str(track.get("status", "")).upper()
+        completion = float(track.get("completion_rate") or 0.0)
+        due = _parse_due_date(track.get("due_date"))
+        if due is None or status in _DONE_STATUSES or completion >= AT_RISK_COMPLETION_THRESHOLD:
+            return None
+        today = date.today()
+        if due < today or due > today + timedelta(days=AT_RISK_DAYS_BEFORE_DUE):
+            return None
+        wo_id = str(track.get("work_order_id", ""))
+        wo_no = str(track.get("work_order_no", ""))
+        days_left = (due - today).days
+        dedup_key = f"{EVENT_TYPE_AT_RISK}:{wo_id or wo_no}:{today.isoformat()}"
+
+        def make_row(row_dedup_key: str) -> CollaborationEventRow:
+            return CollaborationEventRow(
+                event_id=_new_event_id(),
+                event_type=EVENT_TYPE_AT_RISK,
+                dedup_key=row_dedup_key,
+                status=EVENT_STATUS_PENDING,
+                payload_json={
+                    "work_order_id": wo_id,
+                    "work_order_no": wo_no,
+                    "status": track.get("status", ""),
+                    "completion_rate": track.get("completion_rate"),
+                    "completed_qty": track.get("completed_qty", ""),
+                    "quantity": track.get("quantity", ""),
+                    "due_date": track.get("due_date", ""),
+                    "days_left": days_left,
+                    "eta_status": track.get("eta_status", ""),
+                    "rule_version": AT_RISK_RULE_VERSION,
+                    "source": "track_order",
+                },
+                max_retries=DEFAULT_MAX_RETRIES,
+            )
+
+        result = await _trigger_with_dedup(dedup_key, make_row)
+        return None if result.get("deduplicated") else result
+    except Exception:
+        logger.exception("临期风险事件检查失败（不影响跟单查询）")
+        return None
+
+
+async def _process_at_risk(payload: dict[str, Any]) -> dict[str, Any]:
+    """临期风险事件协同：事实汇总 + 如实边界（是否加急/调整排程需人工决策）。"""
+    try:
+        due = _parse_due_date(payload.get("due_date"))
+        days_left = (due - date.today()).days if due else payload.get("days_left")
+        completion = payload.get("completion_rate")
+        conclusions = [
+            f"生产维度：工单 {payload.get('work_order_no') or payload.get('work_order_id')} "
+            f"距交期还有 {days_left if days_left is not None else '?'} 天，"
+            f"完成率 {completion}%（低于预警阈值 {AT_RISK_COMPLETION_THRESHOLD:.0f}%，"
+            f"规则 {payload.get('rule_version') or AT_RISK_RULE_VERSION}，已过交期则转延期事件）"
+        ]
+        if payload.get("eta_status") == "DATA_MISSING":
+            conclusions.append("ETA 口径：DATA_MISSING（无实际速率记录，系统不做固定天数预测）")
+        conclusions.append(
+            "是否加急、调整排程或通知客户需人工决策；"
+            "相关写入（如加急采购）仍须走审批门禁，系统不代承诺客户"
+        )
+        result = {
+            "tracking": {
+                "work_order_id": payload.get("work_order_id", ""),
+                "work_order_no": payload.get("work_order_no", ""),
+                "status": payload.get("status", ""),
+                "completion_rate": completion,
+                "completed_qty": payload.get("completed_qty", ""),
+                "quantity": payload.get("quantity", ""),
+                "due_date": payload.get("due_date", ""),
+                "eta_status": payload.get("eta_status", ""),
+            },
+            "days_left": days_left,
+            "rule_version": payload.get("rule_version") or AT_RISK_RULE_VERSION,
+            "conclusions": conclusions,
+            "data_gaps": [],
+            "generated_at": _now().isoformat(),
+            "authority": "OpenMES（只读协同，未写入）",
+        }
+        return {"result": result}
+    except Exception as exc:
+        return {"error": {"message": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now().isoformat()}}
 
 
 async def _process_overdue(payload: dict[str, Any]) -> dict[str, Any]:

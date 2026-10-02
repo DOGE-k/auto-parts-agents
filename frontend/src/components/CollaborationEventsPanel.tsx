@@ -14,6 +14,7 @@ const GO_TARGET_LABELS: Record<string, string> = {
   quality_issue_raised: "去处置",
   material_shortage: "去处理方案",
   production_overdue: "查看跟单",
+  production_at_risk: "查看跟单",
 };
 
 // 事件跳转所需的关联编号检查：缺失时给出可见错误，不调用导航回调
@@ -35,6 +36,7 @@ function missingTargetReason(ev: CollaborationEvent): string {
       return "";
     }
     case "production_overdue":
+    case "production_at_risk":
       if (!payload.work_order_id && !payload.work_order_no) {
         return "缺少关联的工单编号";
       }
@@ -112,7 +114,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
       </div>
       {events !== null && events.length === 0 && (
         <p className="field-hint">
-          当前没有协同事件。质量异常（登记质量问题）、物料短缺（含缺料的采购分析）、生产延期（工单过交期未完成）发生后会自动产生对应事件。
+          当前没有协同事件。质量异常（登记质量问题）、物料短缺（含缺料的采购分析）、生产延期（工单过交期未完成）、生产临期（交期前 3 天内完成率低于 50%）发生后会自动产生对应事件。
         </p>
       )}
       {(events ?? []).map((ev) => {

@@ -548,6 +548,7 @@ export const collaborationEventTypeLabels: Record<string, string> = {
   quality_issue_raised: "质量异常",
   material_shortage: "物料短缺",
   production_overdue: "生产延期",
+  production_at_risk: "生产临期",
 };
 
 export const collaborationEventStatusLabels: Record<string, string> = {

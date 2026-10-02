@@ -362,3 +362,77 @@ class OverdueEventTests(unittest.IsolatedAsyncioTestCase):
             self._overdue_track(completion=100.0)))  # 完成率 100%
         self.assertIsNone(await collaboration.trigger_overdue_event_if_needed(
             self._overdue_track(due="")))  # 无交期数据如实跳过
+
+
+class AtRiskEventTests(unittest.IsolatedAsyncioTestCase):
+    """临期风险事件：阈值规则 at_risk_v1（用户确认 2026-10-02：距交期 0-3 天且完成率<50%）。
+
+    各测试用独立工单号——dedup 键含工单与当天日期，同日同工单会互相去重
+    （unittest 按方法名字母序执行，见 ShortageEventTests 同类教训）。
+    """
+
+    def _at_risk_track(self, *, wo_id="91", due_offset_days=2, completion=30.0, status="IN_PROGRESS"):
+        from datetime import date, timedelta
+
+        due = date.today() + timedelta(days=due_offset_days)
+        return {
+            "work_order_id": wo_id, "work_order_no": f"WO-AT-RISK-{wo_id}", "status": status,
+            "quantity": "500.00", "completed_qty": "150.00", "completion_rate": completion,
+            "due_date": due.isoformat(), "eta_status": "DATA_MISSING",
+        }
+
+    async def test_at_risk_triggers_event_with_facts_and_rule_version(self):
+        event = await collaboration.trigger_at_risk_event_if_needed(self._at_risk_track(wo_id="91"))
+        self.assertIsNotNone(event)
+        self.assertEqual(event["event_type"], "production_at_risk")
+        self.assertEqual(event["status"], "COMPLETED")
+        detail = collaboration.get_event(event["event_id"])
+        self.assertEqual(detail["result"]["rule_version"], "at_risk_v1")
+        self.assertGreaterEqual(detail["result"]["days_left"], 0)
+        self.assertLessEqual(detail["result"]["days_left"], 3)
+        conclusions = " ".join(detail["result"]["conclusions"])
+        self.assertIn("距交期还有", conclusions)
+        self.assertIn("30.0%", conclusions)
+        self.assertIn("at_risk_v1", conclusions)
+        self.assertIn("不代承诺客户", conclusions)
+        # 同工单同日去重
+        again = await collaboration.trigger_at_risk_event_if_needed(self._at_risk_track(wo_id="91"))
+        self.assertIsNone(again)
+
+    async def test_at_risk_on_due_date_boundary_triggers(self):
+        # 交期当天（days_left=0）仍在临期窗口内
+        event = await collaboration.trigger_at_risk_event_if_needed(
+            self._at_risk_track(wo_id="92", due_offset_days=0))
+        self.assertIsNotNone(event)
+
+    async def test_at_risk_not_triggered_outside_window_or_conditions(self):
+        # 已逾期 → 由 production_overdue 负责，临期事件不重复报
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(
+            self._at_risk_track(wo_id="93", due_offset_days=-1)))
+        # 距交期 4 天 → 窗口外
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(
+            self._at_risk_track(wo_id="94", due_offset_days=4)))
+        # 完成率已达阈值 50% → 不预警
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(
+            self._at_risk_track(wo_id="95", completion=50.0)))
+        # 已完成 → 不预警
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(
+            self._at_risk_track(wo_id="96", status="DONE")))
+        # 无交期 → 如实跳过
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(
+            self._track_without_due()))
+
+    def _track_without_due(self):
+        track = self._at_risk_track(wo_id="97")
+        track["due_date"] = ""
+        return track
+
+    async def test_overdue_and_at_risk_are_mutually_exclusive_on_same_track(self):
+        # 同一条跟单数据上两个钩子都跑：逾期数据只产延期事件，临期事件不触发
+        overdue_track = {
+            "work_order_id": "98", "work_order_no": "WO-AT-RISK-98", "status": "IN_PROGRESS",
+            "quantity": "500.00", "completed_qty": "150.00", "completion_rate": 30.0,
+            "due_date": "2026-09-01T00:00:00.000000Z", "eta_status": "DATA_MISSING",
+        }
+        self.assertIsNotNone(await collaboration.trigger_overdue_event_if_needed(overdue_track))
+        self.assertIsNone(await collaboration.trigger_at_risk_event_if_needed(overdue_track))
