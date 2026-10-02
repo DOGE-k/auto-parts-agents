@@ -115,6 +115,10 @@ class MockERPAdapter:
                 })
         return results
 
+    async def list_inventory_overview(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Mock 演示环境：无真实 Bin 数据，返回空列表（不伪造库存数字）。"""
+        return []
+
     async def search_suppliers(self, keyword: str, limit: int) -> list[dict[str, Any]]:
         """搜索供应商（Mock）。"""
         all_suppliers = [

@@ -2119,3 +2119,48 @@ ERP 物料需求
 
 - 新增 `docs/功能介绍.md`（使用者功能总账：功能地图/口径区分/编号速查/诚实性边界），`docs/README.md` 索引首位；交接文档追加实施记录。
 - 遗留：后端 `resolve_real_identity` 的 auto 回落策略保留（identity/me 展示需要），仅写路由收紧；生产跟单"全厂跟单"与流程面板同屏时的语境已在文案中区分，视觉层级后续可再优化。
+
+### 3.61 质量闭环补链 + 门禁可操作化 + 跨历史继续操作 + 库存总览技能（2026-10-03 凌晨）
+
+依据用户页面实测连续反馈 4 项。除验证性写回（issue #3 解决写回，见一）外零新增 ERPNext/OpenMES 写入。
+
+#### 一、NCR"解决"通道补前端缺口（P0，用户卡死点）
+
+- 用户让步接收（use_as_is）写回后，关闭前置条件"问题已解决"（OpenMES issue 状态须 RESOLVED）在界面上无解——后端 resolution 三步通道（resolution-request → 批准 → resolve 写回）早已存在，前端未接线。
+- 修复：api.ts 补三个函数；useNcrWorkflows 补解决状态机（requestNcrResolution/approveNcrResolution/writeNcrResolution，写回后刷新质量包）；NCR 卡片补"解决"块（解决说明必填——让步接收也要写明放行依据）。
+- 页面实测：#3（让步接收）三步走完，OPEN → **RESOLVED**，未关闭 3→2，closure_ready=true。三态语义（处置≠解决≠关闭）写入功能文档。
+
+#### 二、发运门禁阻塞行可操作化 + 未关联/未审批分支
+
+- 报价审批 ✗：显示关联订单号 + "去报价审批 →"（直达该订单报价审批面板）；无报价记录时如实提示"尚无报价记录（系统不伪造审批入口）"。
+- 未关联工单（customer_order_no 为空，如种子工单 WO-2026-002/003）：行文案改为补救指引 + "到 OpenMES 建立关联 ↗"（OPENMES_UI_URL，可用 VITE_OPENMES_URL 覆盖）。
+- 质量门禁 ✗：提示"上方 NCR 卡片走'解决 → 关闭'" + "去质量中心 →"。
+
+#### 三、缺料类 NCR 引导（用户问"不能选补充库存的吗"）
+
+- NCR 处置出口是 OpenMES 上游 API 白名单四种（scrap/rework/return_to_supplier/use_as_is），不含"补库存"——不伪造第五种。
+- Material Shortage 类卡片新增引导块：补库存在「采购与缺料」模块处理（跳转按钮）；到货后一般按"让步接收"关闭并把采购单号写进遏制措施留痕。
+
+#### 四、全厂跟单口径修正 + 继续已有订单选择器
+
+- 全厂跟单排除口径修正：生产完工（DONE）≠ 发运完成，完工单仍需质量关闭与发运判定——只排除 CANCELLED/CLOSED 与 DEMO_ 演示单。
+- 销售与订单空态新增"继续已有订单"（最近 20 条报价：客户/物料/数量/状态/ERP 草稿号）；采购与缺料空态新增"继续已有采购方案"（最近 20 条：所属报价/审批状态/缺料情况）——与全厂跟单对称，三个模块都支持跨历史记录继续操作。
+
+#### 五、全厂库存总览技能（用户问"不能调用 ERP 查库存吗"）
+
+- 缺口本质：`/api/erp/inventory` 接口一直存在，但协调者能力目录未注册"库存总览"技能，LLM 工具箱里没有。
+- 新增 `procurement.inventory_overview`（read_only）：ERPNext Bin 实时余量（actual/reserved/ordered/projected 各自独立口径，不做扣减合并）；ERP 不可达时如实返回 ERP_UNREACHABLE。接入全链路：real_order 服务函数 → ERPNext 适配器（Bin 全列）→ procurement AIP 注册 → coordinator 声明 → 能力目录（17→18）→ ACS 契约重生成（generate_acs.py，防漂移测试通过）。
+- 页面实测：问答"给我看看现在我们所有库存" → 调用链 1 步（239ms）→ 回答为真实 Bin 表格（M10-BOLT 5000 / CI-RAW 800 / BRG-6204 1500 / SEAL-RING 2000，Stores - APM）。
+
+#### 六、测试与验证
+
+| 项 | 结果 |
+|---|---|
+| 后端 | **252 passed**（248 → 252：技能声明/目录包含/真实返回/ERP 不可达 4 例） |
+| 前端 | **45 passed** + 类型 + `npm run build` |
+| 页面实测 | 解决通道全链（#3 OPEN→RESOLVED→closure_ready）；门禁未关联分支（OpenMES 链接）与未审批分支；销售/采购选择器载入；问答库存总览真实返回 |
+
+#### 七、遗留
+
+- ACS 其余三个文件仅时间戳字段重生成差异（2 行），无内容漂移。
+- 全厂跟单与流程面板同屏语境已用文案区分，视觉层级优化后置。

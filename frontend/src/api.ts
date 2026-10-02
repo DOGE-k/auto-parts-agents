@@ -32,6 +32,9 @@ export function getSessionIssuedAt(): number {
   return Number(window.sessionStorage.getItem(REAL_SESSION_ISSUED_KEY) || 0);
 }
 
+// OpenMES 原生页面地址（工单补填 customer_order_no 关联等操作在此进行；可用 VITE_OPENMES_URL 覆盖）
+export const OPENMES_UI_URL = (import.meta.env.VITE_OPENMES_URL as string | undefined) ?? "http://127.0.0.1/";
+
 // OpenMES Sanctum 登录会话 TTL（与上游默认一致；临期黄条倒计时/系统连接页共用同一口径）
 export const OPENMES_SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -231,6 +234,40 @@ export async function writeQualityIssueDisposition(issueId: string, workOrderId:
     method: "POST",
     headers: writeHeaders(),
     body: JSON.stringify({ work_order_id: workOrderId, approval_id: approvalId }),
+  });
+}
+
+// 解决质量问题（2026-10-02 补前端缺口）：处置写回 ≠ 问题解决——OpenMES 的 issue
+// 状态需经"解决审批 → resolve 写回"翻成 RESOLVED，关闭前置条件"问题已解决"才满足。
+export async function requestQualityIssueResolution(issueId: string, payload: {
+  requested_by?: string;
+  notes?: string;
+}): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/resolution-request`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function approveQualityIssueResolution(approvalId: string): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/resolution-approvals/${encodeURIComponent(approvalId)}/approve`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify({}),
+  });
+}
+
+export async function resolveQualityIssue(issueId: string, payload: {
+  work_order_id: string;
+  resolution_notes: string;
+  approval_id: string;
+  approved_by?: string;
+}): Promise<QualityWorkflowResult> {
+  return api<QualityWorkflowResult>(`/real-orders/quality/issues/${encodeURIComponent(issueId)}/resolve`, {
+    method: "POST",
+    headers: writeHeaders(),
+    body: JSON.stringify(payload),
   });
 }
 

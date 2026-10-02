@@ -142,6 +142,11 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const [productionView, setProductionView] = useState<"tracking" | "completions">("tracking");
   // 全厂跟单（2026-10-02 用户建议）：跨订单选择任意未完工工单直接跟单，不绑定当前流程
   const [globalWorkOrderId, setGlobalWorkOrderId] = useState("");
+  // 继续已有订单（2026-10-02 用户建议）：销售/采购空态时可选历史报价或采购方案载入流程
+  const [salesQuotationOptions, setSalesQuotationOptions] = useState<Quotation[] | null>(null);
+  const [salesPickQuotationId, setSalesPickQuotationId] = useState("");
+  const [planOptions, setPlanOptions] = useState<ProcurementPlan[] | null>(null);
+  const [procurementPickPlanId, setProcurementPickPlanId] = useState("");
   // 阶段九：跨工单质量待办（仅 OpenMES 登录会话可见）
   const [qualityTodo, setQualityTodo] = useState<QualityTodoItem[] | null>(null);
   const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
@@ -421,6 +426,9 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     requestNcrDisposition,
     approveNcrDisposition,
     writeNcrDisposition,
+    requestNcrResolution,
+    approveNcrResolution,
+    writeNcrResolution,
     checkNcrClosure,
     requestNcrClose,
     approveNcrClose,
@@ -601,7 +609,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   // 全厂跟单（用户建议 2026-10-02）：选择任意未完工工单直接跟单。
   // 复用 openWorkOrderTracking 的守卫链路（工单反查报价审批状态 → 三面板只读加载）。
   const unfinishedWorkOrders = workOrders
-    .filter((wo) => !["COMPLETED", "DONE", "CANCELLED", "CLOSED"].includes(String(wo.status ?? "").toUpperCase())
+    // 口径：生产完工（DONE）≠ 发运完成——完工单仍需质量关闭与发运门禁，只排除已取消/已关闭与 DEMO 演示单
+    .filter((wo) => !["CANCELLED", "CLOSED"].includes(String(wo.status ?? "").toUpperCase())
       && !String(wo.work_order_no ?? "").startsWith("DEMO_"))
     .sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));
   const trackGlobalWorkOrder = useCallback(async () => {
@@ -612,6 +621,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     });
     setGlobalWorkOrderId("");
   }, [globalWorkOrderId, workOrders, openWorkOrderTracking]);
+
 
   // 打开某方案的采购审批视图（缺料事件与问答跳转共用；只读加载，不执行审批）
   const openProcurementPlanView = useCallback(async (
@@ -668,6 +678,53 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       setLoading(false);
     }
   }, [notify, onNavigate]);
+
+  // 发运门禁阻塞行的"去处理"入口（2026-10-02 用户反馈）：报价审批 ✗ → 直达该订单的报价审批
+  const linkedErpOrderNo = workOrders.find((wo) => String(wo.work_order_id) === String(workOrderId))?.customer_order_no?.trim() ?? "";
+  const goQuotationApprovalForCurrentWorkOrder = useCallback(async () => {
+    if (!linkedErpOrderNo) {
+      notify("该工单未关联 ERP 销售订单，没有可打开的报价审批");
+      return;
+    }
+    try {
+      const quotations = await api<Quotation[]>("/real-orders/quotations");
+      const match = quotations.find((q) => q.erp_draft_id?.trim() === linkedErpOrderNo);
+      if (!match) {
+        setError(`ERP 订单 ${linkedErpOrderNo} 尚无报价记录（系统不伪造审批入口）；可在「销售与订单」为该订单重新走报价流程。`);
+        return;
+      }
+      await openQuotationView(match.quotation_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "打开报价审批失败");
+    }
+  }, [linkedErpOrderNo, openQuotationView, notify]);
+
+  // 继续已有订单（用户建议 2026-10-02）：销售页选历史报价载入、采购页选历史方案载入
+  useEffect(() => {
+    if (activeModule === "sales" && salesQuotationOptions === null) {
+      void api<Quotation[]>("/real-orders/quotations")
+        .then((list) => setSalesQuotationOptions([...list].reverse().slice(0, 20)))
+        .catch(() => setSalesQuotationOptions([]));
+    }
+    if (activeModule === "procurement" && planOptions === null) {
+      void api<ProcurementPlan[]>("/real-orders/procurement/plans")
+        .then((list) => setPlanOptions([...list].reverse().slice(0, 20)))
+        .catch(() => setPlanOptions([]));
+    }
+  }, [activeModule, salesQuotationOptions, planOptions]);
+
+  const loadPickedQuotation = useCallback(async () => {
+    if (!salesPickQuotationId) return;
+    await openQuotationView(salesPickQuotationId);
+    setSalesPickQuotationId("");
+  }, [salesPickQuotationId, openQuotationView]);
+
+  const loadPickedPlan = useCallback(async () => {
+    if (!procurementPickPlanId) return;
+    const picked = planOptions?.find((pl) => pl.plan_id === procurementPickPlanId);
+    await openProcurementPlanView(picked?.quotation_id ?? "", procurementPickPlanId);
+    setProcurementPickPlanId("");
+  }, [procurementPickPlanId, planOptions, openProcurementPlanView]);
 
   // 协同事件"去处置/去处理"导航（P1 任务 A；只读导航，不执行任何审批/写入）
   const goToEventTarget = useCallback(async (event: CollaborationEvent) => {
@@ -979,6 +1036,30 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           {activeModule === "sales" && (
             <>
               {renderFlowToolbar()}
+              {!quotation && (
+                <section className="panel global-track-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>继续已有订单</h2>
+                      <p>选择一条已有报价载入流程（最近 20 条，含历史记录）；或用下方表单开始新订单。</p>
+                    </div>
+                    <span className="badge blue-badge">{salesQuotationOptions?.length ?? "…"}</span>
+                  </div>
+                  <div className="global-track-row">
+                    <select value={salesPickQuotationId} onChange={(e) => setSalesPickQuotationId(e.target.value)} aria-label="选择已有报价">
+                      <option value="">选择报价 / 订单…</option>
+                      {(salesQuotationOptions ?? []).map((q) => (
+                        <option key={q.quotation_id} value={q.quotation_id}>
+                          {q.quotation_id} · {q.customer?.customer_name ?? "未知客户"} · {q.item?.item_id ?? "?"} × {q.quantity} · {q.status}{q.erp_draft_id ? ` · ${q.erp_draft_id}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="button primary" disabled={!salesPickQuotationId || loading} onClick={() => void loadPickedQuotation()}>
+                      {loading ? "载入中..." : "载入该订单 →"}
+                    </button>
+                  </div>
+                </section>
+              )}
               {!quotation ? (
                 <QuotationInputStep
                   customers={customers}
@@ -1027,6 +1108,30 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           {activeModule === "procurement" && (
             <>
               {renderFlowToolbar()}
+              {!quotation && (
+                <section className="panel global-track-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>继续已有采购方案</h2>
+                      <p>选择一条已有采购方案载入（最近 20 条，含历史记录），查看供应商选项与审批状态。</p>
+                    </div>
+                    <span className="badge blue-badge">{planOptions?.length ?? "…"}</span>
+                  </div>
+                  <div className="global-track-row">
+                    <select value={procurementPickPlanId} onChange={(e) => setProcurementPickPlanId(e.target.value)} aria-label="选择已有采购方案">
+                      <option value="">选择采购方案…</option>
+                      {(planOptions ?? []).map((pl) => (
+                        <option key={pl.plan_id} value={pl.plan_id}>
+                          {pl.plan_id} · 报价 {pl.quotation_id} · {pl.status}{pl.net_requirement?.has_shortage ? ` · 缺料 ${pl.net_requirement.shortage_count} 项` : " · 无缺料"}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="button primary" disabled={!procurementPickPlanId || loading} onClick={() => void loadPickedPlan()}>
+                      {loading ? "载入中..." : "载入该方案 →"}
+                    </button>
+                  </div>
+                </section>
+              )}
               {!quotation ? (
                 <div className="module-hint-card">
                   <strong>尚未选择报价或采购方案</strong>
@@ -1185,7 +1290,14 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                         onRequestNcrDisposition={(issue) => void requestNcrDisposition(issue)}
                         onApproveNcrDisposition={(id) => void approveNcrDisposition(id)}
                         onWriteNcrDisposition={(id) => void writeNcrDisposition(id)}
+                        onRequestNcrResolution={(id, notes) => void requestNcrResolution(id, notes)}
+                        onApproveNcrResolution={(id) => void approveNcrResolution(id)}
+                        onWriteNcrResolution={(id, notes) => void writeNcrResolution(id, notes)}
                         onCheckNcrClosure={(id) => void checkNcrClosure(id)}
+                        linkedErpOrderNo={linkedErpOrderNo}
+                        onGoQuotationApproval={() => void goQuotationApprovalForCurrentWorkOrder()}
+                        onGoQualityCenter={() => onNavigate("quality")}
+                        onGoProcurementModule={() => onNavigate("procurement")}
                         onRequestNcrClose={(id) => void requestNcrClose(id)}
                         onApproveNcrClose={(id) => void approveNcrClose(id)}
                         onWriteNcrClose={(id) => void writeNcrClose(id)}

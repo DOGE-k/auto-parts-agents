@@ -1,7 +1,7 @@
 {
   "aic": "TBD-PROCUREMENT-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-10-02T05:13:06.934939+00:00",
+  "lastModifiedTime": "2026-10-02T17:00:37.278615+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件采购智能体",
   "description": "负责物料需求计算、供应商方案对比和采购订单草稿生成。只提供采购建议和方案对比，供应商定标和PO发布需人工审批。",
@@ -56,6 +56,24 @@
       "id": "procurement.find_real_plan_by_quotation",
       "name": "真实find_real_plan_by_quotation",
       "description": "按报价编号查找最新采购方案的状态（审批状态/选定选项/PO 草稿号）。回答“方案批准了吗/PO 草稿生成没有”时，先反查报价再用本工具查方案状态。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "procurement"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "procurement.inventory_overview",
+      "name": "真实inventory_overview",
+      "description": "查询全厂库存总览：ERPNext Bin 中各物料在各仓库的实时余量（actual_qty=实时余量、reserved_qty=已预留、ordered_qty=在途、projected_qty=预计可用）。用户问'所有库存/库存总览/原料还剩多少/仓里有什么'等全仓类问题时使用；limit 可控制返回条数（默认 50）。按单一物料精确询价或做缺料分析时不要用本工具（走 analyze_real）。",
       "version": "1.0.0",
       "tags": [
         "真实数据",

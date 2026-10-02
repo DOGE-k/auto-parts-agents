@@ -103,6 +103,9 @@ export type NcrWorkflow = {
   dispositionApprovalId?: string;
   dispositionApproved?: boolean;
   dispositionResult?: { status?: string; error?: string; read_back_verified?: boolean; idempotent?: boolean };
+  resolutionApprovalId?: string;
+  resolutionApproved?: boolean;
+  resolutionResult?: { status?: string; error?: string; read_back_verified?: boolean; idempotent?: boolean };
   closureCheck?: QualityClosureCheck;
   closeApprovalId?: string;
   closeApproved?: boolean;

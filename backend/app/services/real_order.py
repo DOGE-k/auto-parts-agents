@@ -504,6 +504,36 @@ async def _estimate_delivery_from_mes(mes, item_code: str) -> dict[str, Any]:
     }
 
 
+# ========== 库存总览（2026-10-02 用户需求：全厂库存查询） ==========
+
+async def inventory_overview(limit: int = 50) -> dict[str, Any]:
+    """全厂库存总览：ERPNext Bin 实时余量列表（只读，不做聚合假设）。
+
+    字段口径：actual_qty=实时余量，reserved_qty=已预留，ordered_qty=在途，
+    projected_qty=预计可用。数据缺失/连接失败时如实返回错误，不伪造数字。
+    """
+    erp = get_erp_adapter()
+    try:
+        rows = await erp.list_inventory_overview(limit=limit)
+    except Exception as exc:
+        return {
+            "status": "ERP_UNREACHABLE",
+            "count": 0,
+            "bins": [],
+            "error": f"{type(exc).__name__}: {exc}",
+            "authority": "ERPNext",
+            "data_source": "erpnext_api",
+        }
+    return {
+        "status": "ok",
+        "count": len(rows),
+        "bins": rows,
+        "note": "来源 ERPNext Bin 实时余量；reserved/ordered/projected 为各自独立口径字段，不做扣减合并",
+        "authority": "ERPNext",
+        "data_source": "erpnext_api",
+    }
+
+
 # ========== 跟单 Agent ==========
 
 @_agent_run("tracking", "track")

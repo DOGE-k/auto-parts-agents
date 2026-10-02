@@ -5,6 +5,9 @@ import {
   requestQualityIssueDisposition,
   approveQualityIssueDisposition,
   writeQualityIssueDisposition,
+  requestQualityIssueResolution,
+  approveQualityIssueResolution,
+  resolveQualityIssue,
   checkQualityIssueClosure,
   requestQualityIssueClose,
   approveQualityIssueClose,
@@ -155,6 +158,80 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
     }
   }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId, onError, notify]);
 
+  // 解决质量问题（2026-10-02 补前端缺口）：处置写回 ≠ 问题解决——关闭前置条件
+  // "问题已解决"要求 OpenMES 的 issue 状态翻成 RESOLVED，走"解决审批 → resolve 写回"。
+  const requestNcrResolution = useCallback(async (issueId: string, resolutionNotes: string) => {
+    if (!issueId) return;
+    if (!resolutionNotes.trim()) {
+      onError("请填写解决说明：解决写回 OpenMES 必须留痕（让步接收也要写明依据）。");
+      return;
+    }
+    updateNcrWorkflow(issueId, { busy: "requesting_resolution" });
+    onError("");
+    try {
+      const result = await requestQualityIssueResolution(issueId, { notes: resolutionNotes.trim() });
+      updateNcrWorkflow(issueId, {
+        resolutionApprovalId: result.approval?.approval_id,
+        resolutionApproved: false,
+        resolutionResult: { status: result.status ?? "待审批", error: result.error },
+        busy: "",
+      });
+      notify(`NCR ${issueId} 解决审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "创建解决审批失败" } });
+      onError(e instanceof Error ? e.message : "创建解决审批失败");
+    }
+  }, [updateNcrWorkflow, onError, notify]);
+
+  const approveNcrResolution = useCallback(async (issueId: string) => {
+    const approvalId = ncrWorkflows[issueId]?.resolutionApprovalId;
+    if (!approvalId) return;
+    updateNcrWorkflow(issueId, { busy: "approving_resolution" });
+    onError("");
+    try {
+      await approveQualityIssueResolution(approvalId);
+      updateNcrWorkflow(issueId, { resolutionApproved: true, resolutionResult: { status: "已批准" }, busy: "" });
+      notify(`NCR ${issueId} 解决审批已批准`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "解决审批失败" } });
+      onError(e instanceof Error ? e.message : "解决审批失败");
+    }
+  }, [ncrWorkflows, updateNcrWorkflow, onError, notify]);
+
+  const writeNcrResolution = useCallback(async (issueId: string, resolutionNotes: string) => {
+    const workflow = ncrWorkflows[issueId];
+    const approvalId = workflow?.resolutionApprovalId;
+    if (!approvalId || !workflow.resolutionApproved || !workOrderId) return;
+    if (!resolutionNotes.trim()) {
+      onError("缺少解决说明，拒绝写入 OpenMES。");
+      return;
+    }
+    updateNcrWorkflow(issueId, { busy: "writing_resolution" });
+    onError("");
+    try {
+      const result = await resolveQualityIssue(issueId, {
+        work_order_id: workOrderId,
+        resolution_notes: resolutionNotes.trim(),
+        approval_id: approvalId,
+      });
+      updateNcrWorkflow(issueId, {
+        resolutionResult: {
+          status: result.status,
+          error: result.success ? undefined : result.error,
+          read_back_verified: result.read_back_verified,
+          idempotent: result.idempotent,
+        },
+        busy: "",
+      });
+      await refreshQualityAndGate();
+      if (!result.success) throw new Error(result.error ?? "NCR 解决写回未验证");
+      notify(`NCR ${issueId} 已解决并完成回读验证`);
+    } catch (e) {
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "NCR 解决写回失败" } });
+      onError(e instanceof Error ? e.message : "NCR 解决写回失败");
+    }
+  }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId, onError, notify]);
+
   const checkNcrClosure = useCallback(async (issueId: string) => {
     if (!workOrderId) return;
     updateNcrWorkflow(issueId, { busy: "checking_closure" });
@@ -230,6 +307,9 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
     requestNcrDisposition,
     approveNcrDisposition,
     writeNcrDisposition,
+    requestNcrResolution,
+    approveNcrResolution,
+    writeNcrResolution,
     checkNcrClosure,
     requestNcrClose,
     approveNcrClose,

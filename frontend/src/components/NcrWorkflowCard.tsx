@@ -1,4 +1,7 @@
 // NCR 人工处置与关闭卡片（阶段八-十：处置/关闭双审批线，写回后回读；10.5 从 RealBusinessPage 抽出为展示组件）
+// 2026-10-02 补"解决"通道：处置写回 ≠ 问题解决——issue 状态需经"解决审批 → resolve 写回"
+// 翻成 RESOLVED，关闭前置条件"问题已解决"才满足（此前前端未暴露该通道，用户卡在让步接收后）。
+import { useState } from "react";
 import type { NcrForm, NcrWorkflow } from "../types/realBusiness";
 import type { RealIdentity, RealQualityIssue } from "../api";
 
@@ -12,10 +15,15 @@ type Props = {
   onRequestDisposition: (issue: RealQualityIssue) => void;
   onApproveDisposition: (issueId: string) => void;
   onWriteDisposition: (issueId: string) => void;
+  onRequestResolution: (issueId: string, resolutionNotes: string) => void;
+  onApproveResolution: (issueId: string) => void;
+  onWriteResolution: (issueId: string, resolutionNotes: string) => void;
   onCheckClosure: (issueId: string) => void;
   onRequestClose: (issueId: string) => void;
   onApproveClose: (issueId: string) => void;
   onWriteClose: (issueId: string) => void;
+  /** 缺料类问题跳转采购与缺料模块（补库存在采购侧处理，非 NCR 处置出口） */
+  onGoProcurement?: () => void;
 };
 
 const CLOSURE_CHECK_LABELS: Record<string, string> = {
@@ -36,15 +44,22 @@ export default function NcrWorkflowCard({
   onRequestDisposition,
   onApproveDisposition,
   onWriteDisposition,
+  onRequestResolution,
+  onApproveResolution,
+  onWriteResolution,
   onCheckClosure,
   onRequestClose,
   onApproveClose,
   onWriteClose,
+  onGoProcurement,
 }: Props) {
   const issueId = String(issue.record_id);
+  const [resolutionNotes, setResolutionNotes] = useState("");
   const form = workflow?.form ?? { disposition: "", non_conforming_qty: "", root_cause: "", containment_action: "", nc_source: "" };
   const busy = Boolean(workflow?.busy);
-  const isClosed = String(issue.status ?? "").toUpperCase() === "CLOSED";
+  const statusUpper = String(issue.status ?? "").toUpperCase();
+  const isClosed = statusUpper === "CLOSED";
+  const isResolved = statusUpper === "RESOLVED" || isClosed;
   const dispositionRecorded = ["scrap", "rework", "return_to_supplier", "use_as_is"].includes(String(issue.disposition ?? "").toLowerCase());
   return (
     <div key={issueId} id={`ncr-issue-${issueId}`} className={`ncr-workflow-card ${focused ? "ncr-issue-focus" : ""}`}>
@@ -60,6 +75,15 @@ export default function NcrWorkflowCard({
       {issue.description && <p className="ncr-description">{issue.description}</p>}
       {!isClosed && (
         <>
+          {String(issue.record_type ?? "").toLowerCase().includes("shortage") && (
+            <div className="ncr-shortage-hint">
+              <strong>缺料类问题（{issue.record_type}）：补库存走采购，不走 NCR 处置出口</strong>
+              <span>OpenMES 的 NCR 处置出口只有四种（报废/返工/退供应商/让步接收），不含"补库存"——这是上游 API 的定义，系统不伪造第五种。补库存的业务动作在「采购与缺料」模块：缺料分析 → 供应商方案 → PO 采购补货 → 到货。物料到位后，本 NCR 一般按"让步接收（use_as_is）"关闭，并把采购单号写进遏制措施留痕。</span>
+              {onGoProcurement && (
+                <button className="button ghost" onClick={onGoProcurement}>去采购与缺料（补库存）→</button>
+              )}
+            </div>
+          )}
           <div className="ncr-form-grid">
             <label>
               处置方案（人工选择）
@@ -115,6 +139,46 @@ export default function NcrWorkflowCard({
               {workflow.dispositionResult.read_back_verified ? " · 回读已验证" : ""}
               {workflow.dispositionResult.idempotent ? " · 幂等命中" : ""}
             </div>
+          )}
+          {/* 解决通道：处置已登记但 issue 状态仍是 OPEN 时，"问题已解决"前置条件
+              必须走"解决审批 → resolve 写回"才能满足（让步接收也不例外） */}
+          {!isResolved && dispositionRecorded && (
+            <div className="ncr-resolution-block">
+              <small>处置已登记，但问题状态仍为 {issue.status ?? "OPEN"}——关闭前需先"解决"（状态翻成 RESOLVED）。让步接收也要写明放行依据。</small>
+              <textarea
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                rows={2}
+                placeholder="解决说明（必填，例如：让步接收 use_as_is，经评审放行入库）"
+                disabled={busy || Boolean(workflow?.resolutionApprovalId)}
+              />
+              <div className="ncr-action-row">
+                <button className="button ghost" disabled={busy || Boolean(workflow?.resolutionApprovalId)} onClick={() => onRequestResolution(issueId, resolutionNotes)}>
+                  {workflow?.busy === "requesting_resolution" ? "建立审批中…" : "① 建立解决审批"}
+                </button>
+                {workflow?.resolutionApprovalId && <code>审批号 {workflow.resolutionApprovalId}</code>}
+                {workflow?.resolutionApprovalId && !workflow.resolutionApproved && (
+                  <button className="button ghost" disabled={busy} onClick={() => onApproveResolution(issueId)}>
+                    {workflow?.busy === "approving_resolution" ? "审批中…" : "② 批准解决"}
+                  </button>
+                )}
+                {workflow?.resolutionApprovalId && workflow.resolutionApproved && (
+                  <button className="button primary" disabled={busy} onClick={() => onWriteResolution(issueId, resolutionNotes)}>
+                    {workflow?.busy === "writing_resolution" ? "写回并回读中…" : "③ 写回解决"}
+                  </button>
+                )}
+              </div>
+              {workflow?.resolutionResult && (
+                <div className={`ncr-result ${workflow.resolutionResult.error ? "error" : "ok"}`}>
+                  解决状态：{workflow.resolutionResult.error ?? workflow.resolutionResult.status ?? "未知"}
+                  {workflow.resolutionResult.read_back_verified ? " · 回读已验证" : ""}
+                  {workflow.resolutionResult.idempotent ? " · 幂等命中" : ""}
+                </div>
+              )}
+            </div>
+          )}
+          {isResolved && !isClosed && (
+            <div className="ncr-result ok">问题已解决（{statusUpper}）——可继续走下方关闭链路。</div>
           )}
           <div className="ncr-close-row">
             <button className="button ghost" disabled={busy} onClick={() => onCheckClosure(issueId)}>

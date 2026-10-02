@@ -203,6 +203,27 @@ class ERPNextAdapter:
             pass
         return results
 
+    async def list_inventory_overview(self, limit: int = 50) -> list[dict[str, Any]]:
+        """全仓库存总览：直接列出 Bin 文档（不按物料过滤）。"""
+        rows = await self._client.list_documents(
+            "Bin",
+            fields=["name", "item_code", "warehouse", "actual_qty", "reserved_qty", "ordered_qty", "projected_qty"],
+            filters=[],
+            limit=max(1, min(int(limit), 200)),
+        )
+        return [
+            {
+                "item_id": row.get("item_code", ""),
+                "warehouse": row.get("warehouse", ""),
+                "actual_qty": str(row.get("actual_qty", "0")),
+                "reserved_qty": str(row.get("reserved_qty", "0")),
+                "ordered_qty": str(row.get("ordered_qty", "0")),
+                "projected_qty": str(row.get("projected_qty", "0")),
+                "authority": self.authority,
+            }
+            for row in rows
+        ]
+
     async def search_suppliers(self, keyword: str, limit: int) -> list[dict[str, Any]]:
         """搜索供应商。"""
         try:

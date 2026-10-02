@@ -72,6 +72,18 @@ def create_procurement_aip_service(aic: str = "local-procurement-001") -> AipAge
         handler=real_find_plan_by_quotation,
     )
 
+    # 全厂库存总览（2026-10-02 用户需求）
+    async def real_inventory_overview(inputs: dict) -> dict:
+        """全厂库存总览：ERPNext Bin 实时余量（只读）。"""
+        limit = inputs.get("limit") or 50
+        return await real_order.inventory_overview(int(limit))
+
+    service.register_skill(
+        skill_id="procurement.inventory_overview",
+        skill_name="全厂库存总览（ERPNext Bin 实时余量）",
+        handler=real_inventory_overview,
+    )
+
     # ===== Mock 场景演示技能 =====
 
     # 净需求计算

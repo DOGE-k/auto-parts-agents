@@ -2569,6 +2569,17 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .ncr-action-row .button, .ncr-close-row .button { font-size: 10px; padding: 6px 9px; }
 .ncr-action-row code { padding: 4px 6px; border-radius: 4px; background: var(--surface); color: var(--ink-2); font: 10px var(--mono); }
 .ncr-result { margin-top: 7px; padding: 6px 8px; border-radius: 4px; font-size: 10px; }
+/* 解决通道块（2026-10-02 补前端缺口）：处置写回 ≠ 问题解决 */
+.ncr-resolution-block {
+  margin-top: 9px; padding: 9px 10px; border: 1px dashed rgba(10, 125, 116, 0.4);
+  border-radius: var(--r-sm); display: flex; flex-direction: column; gap: 7px;
+  background: var(--surface);
+}
+.ncr-resolution-block > small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.ncr-resolution-block textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  font-size: 12px; font-family: inherit; color: var(--ink-2); background: var(--surface); resize: vertical;
+}
 .ncr-result.ok { background: var(--teal-light); color: var(--teal-dark); }
 .ncr-result.error { background: rgba(196, 69, 60, 0.08); color: #a8352d; }
 .ncr-check-status { font-size: 10px; font-weight: 700; }
@@ -2880,3 +2891,12 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .full-chain-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .full-chain-details[open] summary { margin-bottom: 6px; }
 .full-chain-details .stepper { opacity: 0.85; }
+/* 缺料类 NCR 引导块（2026-10-02）：补库存在采购侧，NCR 出口只有上游四种 */
+.ncr-shortage-hint {
+  margin-bottom: 10px; padding: 10px 12px; border: 1px solid #e0c8a0;
+  background: rgba(224, 168, 0, 0.06); border-radius: var(--r-sm);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ncr-shortage-hint strong { font-size: 12.5px; color: #8a6414; }
+.ncr-shortage-hint span { font-size: 12px; line-height: 1.55; color: var(--muted); }
+.ncr-shortage-hint .button { align-self: flex-start; }

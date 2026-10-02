@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUOTATION-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-10-02T05:13:06.934939+00:00",
+  "lastModifiedTime": "2026-10-02T17:00:37.277613+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件报价智能体",
   "description": "负责汽车零部件订单的报价处理，包括询价信息抽取、成本计算、报价草稿生成和成本评估。只负责报价建议和草稿生成，不做最终定价批准。",

@@ -1,9 +1,11 @@
 // 跟单质量环节面板（步骤 7-8：工单选择 / 跟单 + 质量 NCR + 发运门禁；阶段十 10.5 从 RealBusinessPage 抽出）
+// 2026-10-02：发运门禁阻塞行按"未关联 / 未审批"两种情况给出不同处理入口
 import { useEffect, useState } from "react";
 import NcrWorkflowCard from "../NcrWorkflowCard";
 import type { NcrForm, NcrWorkflow, QualityInfo, Quotation, ShipGateInfo, TrackingInfo, WorkOrder } from "../../types/realBusiness";
 import type { RealIdentity, RealQualityIssue, WorkOrderDispatchPlan, WorkOrderDispatchResult } from "../../api";
 import {
+  OPENMES_UI_URL,
   approveProductionReport,
   executeProductionReport,
   requestProductionReport,
@@ -195,7 +197,14 @@ export function TrackingQualityGatePanels({
   onRequestNcrDisposition,
   onApproveNcrDisposition,
   onWriteNcrDisposition,
+  onRequestNcrResolution,
+  onApproveNcrResolution,
+  onWriteNcrResolution,
   onCheckNcrClosure,
+  linkedErpOrderNo,
+  onGoQuotationApproval,
+  onGoQualityCenter,
+  onGoProcurementModule,
   onRequestNcrClose,
   onApproveNcrClose,
   onWriteNcrClose,
@@ -214,7 +223,15 @@ export function TrackingQualityGatePanels({
   onRequestNcrDisposition: (issue: RealQualityIssue) => void;
   onApproveNcrDisposition: (issueId: string) => void;
   onWriteNcrDisposition: (issueId: string) => void;
+  onRequestNcrResolution: (issueId: string, resolutionNotes: string) => void;
+  onApproveNcrResolution: (issueId: string) => void;
+  onWriteNcrResolution: (issueId: string, resolutionNotes: string) => void;
   onCheckNcrClosure: (issueId: string) => void;
+  /** 当前工单关联的 ERP 销售订单号（用于门禁阻塞行的"去处理"入口） */
+  linkedErpOrderNo?: string;
+  onGoQuotationApproval?: () => void;
+  onGoQualityCenter?: () => void;
+  onGoProcurementModule?: () => void;
   onRequestNcrClose: (issueId: string) => void;
   onApproveNcrClose: (issueId: string) => void;
   onWriteNcrClose: (issueId: string) => void;
@@ -527,10 +544,14 @@ export function TrackingQualityGatePanels({
                   onRequestDisposition={onRequestNcrDisposition}
                   onApproveDisposition={onApproveNcrDisposition}
                   onWriteDisposition={onWriteNcrDisposition}
+                  onRequestResolution={onRequestNcrResolution}
+                  onApproveResolution={onApproveNcrResolution}
+                  onWriteResolution={onWriteNcrResolution}
                   onCheckClosure={onCheckNcrClosure}
                   onRequestClose={onRequestNcrClose}
                   onApproveClose={onApproveNcrClose}
                   onWriteClose={onWriteNcrClose}
+                  onGoProcurement={onGoProcurementModule}
                 />
               ))}
             </div>
@@ -638,15 +659,36 @@ export function TrackingQualityGatePanels({
             <span className="gate-icon">{shipGate.quotation_approved ? "✓" : "✗"}</span>
             <div>
               <strong>报价审批</strong>
-              <small>{shipGate.quotation_approved ? "已通过" : "未审批"}</small>
+              <small>
+                {shipGate.quotation_approved
+                  ? "已通过"
+                  : linkedErpOrderNo
+                    ? `关联订单 ${linkedErpOrderNo} 未审批`
+                    : "工单未关联 ERP 销售订单——到 OpenMES 给工单补填 customer_order_no 后，回来点'重新加载跟单与门禁'"}
+              </small>
             </div>
+            {!shipGate.quotation_approved && linkedErpOrderNo && onGoQuotationApproval && (
+              <button className="button ghost" onClick={onGoQuotationApproval}>
+                去报价审批 →
+              </button>
+            )}
+            {!shipGate.quotation_approved && !linkedErpOrderNo && (
+              <a className="button ghost" href={OPENMES_UI_URL} target="_blank" rel="noreferrer">
+                到 OpenMES 建立关联 ↗
+              </a>
+            )}
           </div>
           <div className={`gate-row ${shipGate.quality_gate_passed ? "pass" : "block"}`}>
             <span className="gate-icon">{shipGate.quality_gate_passed ? "✓" : "✗"}</span>
             <div>
               <strong>质量门禁</strong>
-              <small>{shipGate.quality_gate_passed ? "已通过" : "未通过"}</small>
+              <small>{shipGate.quality_gate_passed ? "已通过" : "未通过——在上方 NCR 卡片走'解决 → 关闭'"}</small>
             </div>
+            {!shipGate.quality_gate_passed && onGoQualityCenter && (
+              <button className="button ghost" onClick={onGoQualityCenter}>
+                去质量中心 →
+              </button>
+            )}
           </div>
           <div className={`gate-row ${shipGate.production_ready ? "pass" : "block"}`}>
             <span className="gate-icon">{shipGate.production_ready ? "✓" : "✗"}</span>

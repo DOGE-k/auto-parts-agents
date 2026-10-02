@@ -315,7 +315,30 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
             "required": ["work_order_id", "material_ready_date"],
         },
     },
-    {
+        {
+        "agent_type": "procurement",
+        "aip_agent": "procurement",
+        "skill_id": "procurement.inventory_overview",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
+        "description": (
+            "查询全厂库存总览：ERPNext Bin 中各物料在各仓库的实时余量"
+            "（actual_qty=实时余量、reserved_qty=已预留、ordered_qty=在途、projected_qty=预计可用）。"
+            "用户问'所有库存/库存总览/原料还剩多少/仓里有什么'等全仓类问题时使用；"
+            "limit 可控制返回条数（默认 50）。按单一物料精确询价或做缺料分析时不要用本工具（走 analyze_real）。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数上限（默认 50，最大 200）",
+                },
+            },
+            "required": [],
+        },
+    },
+{
         "agent_type": "procurement",
         "aip_agent": "procurement",
         "skill_id": "procurement.analyze_real",
