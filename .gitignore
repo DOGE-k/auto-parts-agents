@@ -26,3 +26,4 @@ backend/app/services/**/__pycache__/
 backend/pid.txt
 backend/qid.txt
 backend/uvicorn-9000*.log
+frontend/vite-dev.log

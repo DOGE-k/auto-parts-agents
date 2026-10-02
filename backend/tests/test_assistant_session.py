@@ -115,6 +115,45 @@ class SignalExtractionTests(unittest.TestCase):
         self.assertEqual(extract_signals("TEST_WO_PAGE_00022 进度如何").work_order_no, "TEST_WO_PAGE_00022")
         self.assertEqual(extract_signals("WO-SO-2026-00025 什么时候能做完？").work_order_no, "WO-SO-2026-00025")
 
+    def test_cjk_adjacent_codes_are_recognized(self):
+        """评审 P1：编号紧贴中文时（无空格分隔）必须完整识别。
+        旧正则用 \b——Python re 把汉字当 \w，中文相邻时边界判定失效（截断/失败）。"""
+        s = extract_signals("工单WO-2026-001什么时候能做完?")
+        self.assertEqual(s.work_order_no, "WO-2026-001")
+        self.assertEqual(s.item_code, "")
+        s = extract_signals("WO-2026-001什么时候能做完？")
+        self.assertEqual(s.work_order_no, "WO-2026-001")
+        s = extract_signals("销售订单SAL-ORD-2026-00001什么时候能做完?")
+        self.assertEqual(s.erp_order_id, "SAL-ORD-2026-00001")
+        s = extract_signals("物料BD-2401多少钱")
+        self.assertEqual(s.item_code, "BD-2401")
+        s = extract_signals("报价QUO-ABCDEF12多少钱")
+        self.assertEqual(s.quotation_id, "QUO-ABCDEF12")
+        s = extract_signals("方案PROC-ABCDEF12缺料吗")
+        self.assertEqual(s.plan_id, "PROC-ABCDEF12")
+
+    def test_codes_inside_ascii_words_are_not_false_positives(self):
+        """边界断言只放宽中文侧：嵌在更长 ASCII 词内的编号仍不误报。"""
+        self.assertEqual(extract_signals("XWO-2026-001 不是工单").work_order_no, "")
+        self.assertEqual(extract_signals("见文档ABD-2401附录").item_code, "")
+
+    def test_applied_context_does_not_duplicate_page_and_task_values(self):
+        """回显去重：页面流程上下文与任务沿用重复的字段只回显一次。"""
+        echo = session_module._build_applied_context(
+            {"work_order_id": "2", "work_order_no": "WO-2026-001"},
+            [],
+            {"work_order_id": "2"},
+        )
+        self.assertEqual(echo.count("工单ID=2"), 1)
+        self.assertIn("工单=WO-2026-001", echo)
+        # 页面独有的字段仍会回显
+        echo2 = session_module._build_applied_context(
+            {"work_order_id": "2"},
+            [],
+            {"work_order_id": "2", "erp_draft_id": "SAL-ORD-2026-00001"},
+        )
+        self.assertIn("ERP 草稿=SAL-ORD-2026-00001", echo2)
+
     def test_intent_and_missing_slots(self):
         signals = extract_signals("BD-2401 500 件多少钱？")
         merged, _ = merge_context({}, signals)

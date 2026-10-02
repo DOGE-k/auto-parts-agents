@@ -23,13 +23,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-# 编号模式（全部来自项目已验证的真实编号格式，不做猜测）
-_ERP_ORDER_RE = re.compile(r"\bSAL-ORD-\d{4}-\d{4,6}\b")
-_PO_ORDER_RE = re.compile(r"\bPUR-ORD-\d{4}-\d{4,6}\b")
-_WORK_ORDER_RE = re.compile(r"\b(?:TEST_)?WO[-_][A-Za-z0-9\-_]*\d[A-Za-z0-9\-_]*\b")
-_QUOTATION_RE = re.compile(r"\bQUO-[0-9A-F]{8,16}\b")
-_PLAN_RE = re.compile(r"\bPROC-[0-9A-F]{8,16}\b")
-_ITEM_RE = re.compile(r"\b[A-Z]{2}-\d{3,5}\b")
+# 编号模式（全部来自项目已验证的真实编号格式，不做猜测）。
+# 边界断言不能用 \b：Python re 把汉字当 \w，编号紧贴中文时（如"工单WO-2026-001什么时候"）
+# \b 判定失效导致识别截断或失败。这里用 ASCII 字母数字下划线邻接断言：
+# 编号不能嵌在更长的 ASCII 词内，紧贴中文可完整识别（评审 P1：中文紧贴编号）。
+_ID_L = r"(?<![A-Za-z0-9_])"
+_ID_R = r"(?![A-Za-z0-9_])"
+_ERP_ORDER_RE = re.compile(_ID_L + r"SAL-ORD-\d{4}-\d{4,6}" + _ID_R)
+_PO_ORDER_RE = re.compile(_ID_L + r"PUR-ORD-\d{4}-\d{4,6}" + _ID_R)
+_WORK_ORDER_RE = re.compile(_ID_L + r"(?:TEST_)?WO[-_][A-Za-z0-9\-_]*\d[A-Za-z0-9\-_]*" + _ID_R)
+_QUOTATION_RE = re.compile(_ID_L + r"QUO-[0-9A-F]{8,16}" + _ID_R)
+_PLAN_RE = re.compile(_ID_L + r"PROC-[0-9A-F]{8,16}" + _ID_R)
+_ITEM_RE = re.compile(_ID_L + r"[A-Z]{2}-\d{3,5}" + _ID_R)
 _QUANTITY_CHANGE_RE = re.compile(
     r"(?:数量|Qty|qty)\s*(?:改成|改为|变更为|调整为|换成)\s*([\d,]+)"
     r"|(?:改成|改为|变更为|调整为|换成)\s*([\d,]+)\s*件"

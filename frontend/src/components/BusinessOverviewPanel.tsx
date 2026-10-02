@@ -10,6 +10,8 @@ type Props = {
   qualityTodoCount: number | null;
   onNavigateAssistant: (question: string) => void;
   onNavigate: (module: "sales" | "procurement" | "production" | "quality" | "audit") => void;
+  /** 评审复检：需要处理的行携带事件编号定位打开对应对象，而不是只切模块 */
+  onOpenEvent?: (event: CollaborationEvent) => void;
 };
 
 type RunRow = {
@@ -21,7 +23,7 @@ type RunRow = {
   started_at?: string;
 };
 
-export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCount, onNavigateAssistant, onNavigate }: Props) {
+export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCount, onNavigateAssistant, onNavigate, onOpenEvent }: Props) {
   const [quotationPending, setQuotationPending] = useState<number | null>(null);
   const [planPending, setPlanPending] = useState<number | null>(null);
   const [events, setEvents] = useState<CollaborationEvent[] | null>(null);
@@ -114,7 +116,10 @@ export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCo
                 <code>{e.event_id}</code>
                 <span className="badge type-badge">{e.event_type}</span>
                 <span className="attention-meta">{e.status} · {e.payload?.work_order_no ? `工单 ${e.payload.work_order_no}` : e.payload?.quotation_id ? `报价 ${e.payload.quotation_id}` : "—"}</span>
-                <button className="button ghost" onClick={() => onNavigate(attentionTarget[e.event_type] ?? "quality")}>
+                <button
+                  className="button ghost"
+                  onClick={() => (onOpenEvent ? onOpenEvent(e) : onNavigate(attentionTarget[e.event_type] ?? "quality"))}
+                >
                   {attentionHint[e.event_type] ?? "去查看"}
                 </button>
               </div>

@@ -203,9 +203,19 @@ def _update_context_from_call_chain(entity_context: dict[str, Any], call_chain: 
 def _build_applied_context(
     merged: dict[str, Any], updates: list[str], page_context: dict[str, Any] | None
 ) -> str:
-    """回显文案 = 页面流程上下文（如有）+ 任务沿用上下文。"""
+    """回显文案 = 任务沿用上下文 + 页面流程上下文（仅列与沿用不一致的页面字段）。
+
+    页面上下文与任务沿用重复的字段不再二次回显
+    （此前"当前沿用工单ID=2"会在两段各出现一次）。
+    """
+    page_context = page_context or {}
+    page_only = {
+        key: value
+        for key, value in page_context.items()
+        if key in CONTEXT_FIELDS and value not in (None, "") and merged.get(key) != value
+    }
     echo_parts: list[str] = []
-    page_echo = format_context_echo(page_context or {})
+    page_echo = format_context_echo(page_only)
     if page_echo:
         echo_parts.append(page_echo.replace("；如果需要修改请直接说明。", ""))
     task_echo = format_context_echo(merged)

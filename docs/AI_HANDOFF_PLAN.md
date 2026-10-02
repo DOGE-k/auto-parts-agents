@@ -11,7 +11,7 @@
 2. `docs/handoff_2026-10-01_event_disposal_and_stabilization.md`：§3.52 去处置联动、SQLite 回退和收口验收记录。
 3. `docs/handoff_2026-10-02_dynamic_capability_catalog.md`：下一阶段能力目录运行时构建专项交接。
 4. `docs/handoff_2026-10-02_frontend_information_architecture.md`：真实业务前端信息架构改版专项交接（已于 2026-10-02 下午按 §3.56 实施，§八验收 14 条逐条通过）。
-5. `docs/handoff_2026-10-02_work_order_intent_fix.md`：当前最高优先级的工单号自然语言识别修复交接（§3.57 遗留；先处理此项）。
+5. `docs/handoff_2026-10-02_work_order_intent_fix.md`：工单号自然语言识别修复交接（已于 §3.58 完成）。
 6. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
 7. `docs/demo_script.md`：当前演示路径和已验证记录编号。
 8. `README.md`：环境、部署、启动、故障排查。

@@ -845,6 +845,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             qualityTodoCount={qualityTodo?.length ?? null}
             onNavigateAssistant={(question) => onAskQuestion?.(question)}
             onNavigate={onNavigate}
+            onOpenEvent={(event) => void goToEventTarget(event)}
           />
         </ErrorBoundary>
       )}
