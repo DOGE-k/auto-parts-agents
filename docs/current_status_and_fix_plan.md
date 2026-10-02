@@ -2008,3 +2008,36 @@ ERP 物料需求
 
 - 追问行为观察（既有后端逻辑，非本轮引入）：问 "WO-2026-001 什么时候能做完？" 时槽位检查先追问销售订单号，且把 WO- 前缀误归入物料上下文（回显"当前沿用物料=WO-2026"）；属 `assistant_context.py` 意图分类/实体提取的口径问题，记录为后续后端待办，不在前端改版范围。
 - 事件/待办/问答三类跳转已统一走定位 helper；"业务总览"的"需要处理"跳转仍只切模块（该处无对象编号上下文，保持现状）。
+
+### 3.58 工单号自然语言识别修复（2026-10-02 晚）
+
+依据 `docs/handoff_2026-10-02_work_order_intent_fix.md`；修复 §3.57 遗留的后端确定性解析口径问题。零 ERPNext/OpenMES 写入，零审批/认证/前端改动。
+
+#### 一、根因与修复（backend/app/services/assistant_context.py）
+
+- 复现（与交接文档一致）：`extract_signals("WO-2026-001 什么时候能做完？")` → `work_order_no=''`、`item_code='WO-2026'`，页面追问销售订单号并回显"物料=WO-2026"。
+- 根因：`extract_signals()` 显式过滤 `WO-2026-*` 工单号（历史口径把 SAL-ORD-2026-00023 与 WO-2026-001 当同字段歧义），过滤后 `_ITEM_RE`（`\b[A-Z]{2}-\d{3,5}\b`）把前缀 `WO-2026` 吃成物料。
+- 修复：① 删除 `WO-2026-*` 特殊过滤，工单号照 `_WORK_ORDER_RE` 原样进 `Signals.work_order_no`；② **工单号优先于物料号**——用匹配区间重叠排除，与工单号重叠的物料候选（WO-2026-001 中的 WO-2026）不作为物料；不重叠时物料与工单属不同字段可并存（BD-2401 + WO-2026-001 各自提取）；③ 多个不同工单号时仍整体不猜（保持空由上层追问）；ERP 订单号正则独立，不受影响。格式范围未扩大，`TEST_WO_*`/`WO-SO-*` 行为不回归。
+
+#### 二、测试（先改旧断言再实现；`tests/test_assistant_session.py`）
+
+- 替换旧断言 `test_entity_codes_extracted`（其注释"同字段歧义过滤工单号"即错误口径来源）为 `test_erp_order_and_work_order_can_coexist`；
+- 新增提取用例 4 例：`test_work_order_number_is_not_material`（修复主断言）、`test_multiple_work_orders_do_not_guess`、`test_material_and_work_order_coexist_when_not_overlapping`、`test_existing_work_order_prefixes_still_extracted`；
+- 新增协调者路径回归 `test_work_order_question_reaches_coordinator_without_clarify`：直接报工单号 → 不追问（`needs_input=false`、非 clarify）→ 协调者上下文带 `沿用_work_order_no=WO-2026-001` 且无 `沿用_item_code` → 任务实体上下文持久化 work_order_no，并随后续调用链补上 work_order_id=2。
+- 全量：**后端 235 passed**（230 + 5 净增）。
+
+#### 三、页面级验收（真实模式、只读，一次真实 LLM 问答）
+
+| 步骤 | 结果 |
+|---|---|
+| 新会话直接输入 `WO-2026-001 什么时候能做完？` | **不再追问销售订单号**；回显"沿用工单ID=2、工单=WO-2026-001"，**无"物料=WO-2026"**；回答带真实证据（work_order_id=2、BD-2401、500、SAL-ORD-2026-00001、OpenMES ETA 数据缺口如实说明） |
+| 点击"查看该工单跟单 →" | 落到生产跟单·跟单视图，本阶段步骤条 ⑦⑧，WO-2026-001 三面板真实加载 |
+| 回归：`SAL-ORD-2026-00001 什么时候能做完？` | 正常关联工单回答（无追问、无物料误识别）、跳转按钮可用 |
+| 构建 | 前端 dev server 关闭后 `npm run build` 通过（EPERM 未复现）；前端测试 39 passed 未受影响 |
+
+全程零写入（问答只读 + 跟单视图只读加载）。
+
+#### 四、遗留
+
+- 沿用回显的双段措辞（"当前沿用工单ID=2；当前沿用工单ID=2、工单=…"）是页面上下文回显拼接的展示小瑕疵，不影响语义，后续顺手项。
+- 本轮未触碰 `assistant_context.py` 以外的意图/实体口径（如 PUR-ORD、报价号等）。

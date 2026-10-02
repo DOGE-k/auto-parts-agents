@@ -86,11 +86,34 @@ class SignalExtractionTests(unittest.TestCase):
         self.assertEqual(extract_signals("选第二个方案").ordinal_selection, 2)
         self.assertEqual(extract_signals("选第 3 个采购方案").ordinal_selection, 3)
 
-    def test_entity_codes_extracted(self):
+    def test_work_order_number_is_not_material(self):
+        """工单号识别修复（handoff_2026-10-02_work_order_intent_fix.md）：
+        WO-2026-001 必须进 work_order_no，其前缀 WO-2026 不得再被物料正则吃掉。"""
+        signals = extract_signals("WO-2026-001 什么时候能做完？")
+        self.assertEqual(signals.work_order_no, "WO-2026-001")
+        self.assertEqual(signals.item_code, "")
+        self.assertIn("tracking", signals.intents)
+
+    def test_erp_order_and_work_order_can_coexist(self):
+        """ERP 销售订单号与 MES 工单号属不同字段，同时出现不互相清空（不猜口径不变）。"""
         signals = extract_signals("SAL-ORD-2026-00023 什么时候能做完？WO-2026-001 呢？")
         self.assertEqual(signals.erp_order_id, "SAL-ORD-2026-00023")
-        # 同一条消息两个编号时过滤掉歧义工单号（不猜测）
+        self.assertEqual(signals.work_order_no, "WO-2026-001")
+        self.assertEqual(signals.item_code, "")
+
+    def test_multiple_work_orders_do_not_guess(self):
+        signals = extract_signals("WO-2026-001 和 WO-SO-2026-00024 哪个先做完？")
         self.assertEqual(signals.work_order_no, "")
+
+    def test_material_and_work_order_coexist_when_not_overlapping(self):
+        signals = extract_signals("BD-2401 用 WO-2026-001 什么时候能做完？")
+        self.assertEqual(signals.work_order_no, "WO-2026-001")
+        self.assertEqual(signals.item_code, "BD-2401")
+
+    def test_existing_work_order_prefixes_still_extracted(self):
+        """既有已验证编号格式不回归：TEST_WO_* / WO-SO-*。"""
+        self.assertEqual(extract_signals("TEST_WO_PAGE_00022 进度如何").work_order_no, "TEST_WO_PAGE_00022")
+        self.assertEqual(extract_signals("WO-SO-2026-00025 什么时候能做完？").work_order_no, "WO-SO-2026-00025")
 
     def test_intent_and_missing_slots(self):
         signals = extract_signals("BD-2401 500 件多少钱？")
@@ -376,6 +399,36 @@ class ClarifyFlowTests(unittest.IsolatedAsyncioTestCase):
         slots = [m["slot"] for m in result["missing_slots"]]
         self.assertIn("customer_id", slots)
         self.assertIn("报价智能体", result["answer"])
+
+    async def test_work_order_question_reaches_coordinator_without_clarify(self):
+        """工单号识别修复的协调者路径回归（handoff_2026-10-02_work_order_intent_fix.md §五）：
+        直接报工单号时槽位即满足，不再追问销售订单号，也不得把工单号当物料沿用。"""
+        coordinator = _FakeCoordinator({
+            "answer": "计划交期 2026-10-15，当前完成率 0%。",
+            "call_chain": [
+                {"seq": 1, "skill_id": "tracking.find_real_by_no", "status": "ok",
+                 "arguments": {"work_order_no": "WO-2026-001"}},
+                {"seq": 2, "skill_id": "tracking.track_real", "status": "ok",
+                 "arguments": {"work_order_id": "2"}},
+            ],
+            "rounds": 2,
+            "tool_count": 2,
+            "coordination_run_id": "RUN-COORD-WO",
+        })
+        result = await session_module.handle_ask("WO-2026-001 什么时候能做完？", lambda: coordinator)
+        self.assertFalse(result.get("needs_input"))
+        self.assertNotEqual(result.get("handled_by"), "clarify")
+        self.assertEqual(coordinator.calls[0]["question"], "WO-2026-001 什么时候能做完？")
+        # 协调者收到的上下文携带工单号（沿用工单号而非物料前缀）
+        ask_ctx = coordinator.calls[0]["context"]
+        self.assertEqual(ask_ctx.get("沿用_work_order_no"), "WO-2026-001")
+        self.assertNotIn("沿用_item_code", ask_ctx)
+        # 任务实体上下文持久化工单号，且随后续调用链补上数字工单 id
+        with SessionLocal() as db:
+            row = db.get(BusinessTaskRow, result["business_task_id"])
+            self.assertEqual(row.entity_context.get("work_order_no"), "WO-2026-001")
+            self.assertIsNone(row.entity_context.get("item_code"))
+            self.assertEqual(row.entity_context.get("work_order_id"), "2")
 
     async def test_entity_context_updated_from_call_chain(self):
         coordinator = _FakeCoordinator({

@@ -152,7 +152,8 @@ def extract_signals(text: str) -> Signals:
     if len(set(pos)) == 1:
         signals.purchase_order_id = pos[0]
 
-    wos = [wo for wo in _WORK_ORDER_RE.findall(text) if not wo.startswith("WO-2026-")]
+    wo_matches = list(_WORK_ORDER_RE.finditer(text))
+    wos = [m.group(0) for m in wo_matches]
     if wos:
         unique = sorted(set(wos))
         if len(unique) == 1:
@@ -166,7 +167,14 @@ def extract_signals(text: str) -> Signals:
     if len(set(plans)) == 1:
         signals.plan_id = plans[0]
 
-    items = _ITEM_RE.findall(text)
+    # 工单号优先于物料号：与工单号匹配区间重叠的物料候选（如 WO-2026-001 中的
+    # WO-2026）不作为物料；不重叠时两者属不同字段，可并存（如 BD-2401 + WO-2026-001）。
+    wo_spans = [m.span() for m in wo_matches]
+    items = [
+        m.group(0)
+        for m in _ITEM_RE.finditer(text)
+        if not any(start < m.end() and m.start() < end for start, end in wo_spans)
+    ]
     if len(set(items)) == 1:
         signals.item_code = items[0]
 
