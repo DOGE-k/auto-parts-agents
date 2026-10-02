@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUALITY-DOC-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:59:35.739053+00:00",
+  "lastModifiedTime": "2026-10-02T05:13:06.934939+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件质量文档智能体",
   "description": "负责质量证据收集、资料清单管理、完整性校验、资料包组卷和版本追溯。只负责文档管理和证据关联，不执行检验、不做质量放行、不确认根因。",

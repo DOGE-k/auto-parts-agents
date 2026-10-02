@@ -79,6 +79,10 @@ class AipAgentService(CommandHandlers):
             for sid in self._skill_handlers
         ]
 
+    def registered_skill_ids(self) -> list[str]:
+        """运行时已注册的技能 ID（能力目录交叉验证的运行时事实来源）。"""
+        return list(self._skill_handlers.keys())
+
     def restrict_skills(self, allowed_ids: set[str]) -> None:
         """在真实运行表面移除 Mock 技能，防止 AIP 路由越过业务边界。"""
         for skill_id in list(self._skill_handlers):

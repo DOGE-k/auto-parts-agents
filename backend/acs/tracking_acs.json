@@ -1,7 +1,7 @@
 {
   "aic": "TBD-TRACKING-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-09-29T17:59:35.739053+00:00",
+  "lastModifiedTime": "2026-10-02T05:13:06.934939+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件跟单智能体",
   "description": "负责订单交期跟踪、生产进度监控、风险识别和ETA计算。只提供风险预警和进度分析，不做生产调度和质量放行决策。",

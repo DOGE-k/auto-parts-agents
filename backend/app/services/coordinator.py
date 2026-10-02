@@ -35,6 +35,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.find_real_by_no",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "按用户提供的 MES 工单编号（如 WO-2026-001）精确查询数字 work_order_id。"
             "用户给出 WO- 开头的工单编号时，必须先调用本工具完成编号到数字 ID 的转换，"
@@ -55,6 +57,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.lookup_order_link",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "根据 ERP 销售订单号（如 SAL-ORD-2026-00023）查询正式关联的 MES 工单。"
             "返回 LINKED（含 work_order_id）或 NOT_LINKED。回答任何关于某个订单的生产进度、"
@@ -75,6 +79,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.track_real",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "查询 MES 工单的真实生产进度：状态、完成率、完工数量、计划数量、交期、风险预警。"
         ),
@@ -93,6 +99,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quality",
         "aip_agent": "quality-document",
         "skill_id": "quality.get_real_package",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "查询工单的真实质量资料包：质量问题及状态、SOP/Control Plan 文档、检验记录、"
             "质量门禁是否通过及原因。判断能否发运或质量是否异常时使用。"
@@ -112,6 +120,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quality",
         "aip_agent": "quality-document",
         "skill_id": "quality.assess_quality_impact",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "质量异常影响分析：质量问题清单（状态/严重度）、批次关联、质量门禁与生产进度交叉，"
             "输出对发运/交期的影响结论、可执行处理选项与数据缺口。"
@@ -129,6 +139,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quality",
         "aip_agent": "quality-document",
         "skill_id": "quality.check_issue_closure",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "只读校验指定 NCR 是否满足关闭前置条件：问题已 RESOLVED、已登记 disposition、"
             "根因和遏制措施齐全、所有纠正/预防/遏制措施均为 VERIFIED。"
@@ -147,6 +159,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quality",
         "aip_agent": "quality-document",
         "skill_id": "quality.list_open_issues",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "列出全厂所有未关闭质量问题（跨工单队列：工单号/标题/严重度/状态/处置/已报告天数）。"
             "用户问\"现在有哪些质量问题/最紧急的质量问题/全厂质量状况\"时使用，无需指定工单；"
@@ -158,6 +172,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.check_real_ship_gate",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "发运门禁综合判断：报价审批状态 + 质量门禁 + 生产完成率（≥90%）是否全部满足，"
             "返回 can_ship 与阻塞原因。问“能不能发运/为什么不能发运”时使用。"
@@ -178,6 +194,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quotation",
         "aip_agent": "quotation",
         "skill_id": "quotation.analyze_real",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "对给定客户/物料/数量做真实报价分析：ERP 真实价格、BOM 成本、库存、"
             "基于 MES 排程的交期参考。问“这个件多少钱/多久能交”或需要报价与缺料分析时使用；"
@@ -205,6 +223,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quotation",
         "aip_agent": "quotation",
         "skill_id": "quotation.get_real",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": "查询已保存报价的状态与内容（价格、审批状态、ERP 草稿号）。",
         "parameters": {
             "type": "object",
@@ -218,6 +238,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quotation",
         "aip_agent": "quotation",
         "skill_id": "quotation.find_real_by_erp_order",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "按 ERP 销售订单号查找已保存的真实报价（返回 quotation_id/价格/审批状态，"
             "并附带该报价最新采购方案的状态摘要）。"
@@ -236,6 +258,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "procurement",
         "aip_agent": "procurement",
         "skill_id": "procurement.find_real_plan_by_quotation",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "按报价编号查找最新采购方案的状态（审批状态/选定选项/PO 草稿号）。"
             "回答“方案批准了吗/PO 草稿生成没有”时，先反查报价再用本工具查方案状态。"
@@ -252,6 +276,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "quotation",
         "aip_agent": "quotation",
         "skill_id": "quotation.assess_cost_impact",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "成本影响评估：缺料换供应商方案对订单收入/毛利的影响（材料成本口径，真实价格记录）。"
             "输入 plan_id 与 option_id（来自采购分析结果）。问“换供应商要多花多少钱/还赚不赚钱”时使用。"
@@ -270,6 +296,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.assess_delivery_impact",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "交期影响评估：物料到货时间（由采购方案 lead_time_days 推算 YYYY-MM-DD）"
             "与工单交期的差值，判断该方案下订单是否延期。问“换供应商还来不来得及/会不会延期”时使用。"
@@ -291,6 +319,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "procurement",
         "aip_agent": "procurement",
         "skill_id": "procurement.analyze_real",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "对已有报价做真实采购分析：BOM 净需求、缺料清单、供应商方案与推荐。"
             "问“缺不缺料/物料什么时候到/选哪家供应商”时使用。"
@@ -307,6 +337,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "procurement",
         "aip_agent": "procurement",
         "skill_id": "procurement.get_real_plan",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": "查询已保存采购方案的状态（选定供应商、审批状态、PO 草稿号）。",
         "parameters": {
             "type": "object",
@@ -320,6 +352,8 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
         "agent_type": "procurement",
         "aip_agent": "procurement",
         "skill_id": "procurement.assess_combination",
+        "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+        "requires_approval": False,
         "description": (
             "分单采购组合的确定性评估：给定多个供应商选项（来自同一采购方案），"
             "计算组合成本（真实价格记录合计）、缺料覆盖并集、最长交期，并对重复覆盖物料告警。"
@@ -366,7 +400,28 @@ def _llm_tool_name(skill_id: str) -> str:
     return skill_id.replace(".", "__")
 
 
-_LLM_NAME_TO_SKILL = {t["skill_id"].replace(".", "__"): t["skill_id"] for t in REAL_SKILL_TOOLS}
+def _active_tools() -> list[dict[str, Any]]:
+    """当前生效的能力目录条目（统一目录 → 协调者工具结构）。
+
+    优先运行时已验证目录（AIP 注册 ∩ 声明），未构建时回退声明目录；
+    两个来源都不把本地声明冒充外部注册结果（见 capability_catalog）。
+    """
+    from app.services.capability_catalog import catalog_or_declared
+
+    return [
+        {
+            "agent_type": entry["agent_type"],
+            "aip_agent": entry["aip_agent"],
+            "skill_id": entry["skill_id"],
+            "description": entry["description"],
+            "parameters": entry["parameters"],
+        }
+        for entry in catalog_or_declared()["entries"]
+    ]
+
+
+def _llm_name_to_skill() -> dict[str, str]:
+    return {t["skill_id"].replace(".", "__"): t["skill_id"] for t in _active_tools()}
 
 
 def _tool_specs() -> list[dict[str, Any]]:
@@ -379,12 +434,12 @@ def _tool_specs() -> list[dict[str, Any]]:
                 "parameters": t["parameters"],
             },
         }
-        for t in REAL_SKILL_TOOLS
+        for t in _active_tools()
     ]
 
 
 def _tool_index() -> dict[str, dict[str, Any]]:
-    return {_llm_tool_name(t["skill_id"]): t for t in REAL_SKILL_TOOLS}
+    return {_llm_tool_name(t["skill_id"]): t for t in _active_tools()}
 
 
 def _summarize_result(result: dict[str, Any], limit: int = 400) -> str:
@@ -490,7 +545,7 @@ class BusinessCoordinator:
             for call in tool_calls:
                 function = call.get("function", {})
                 llm_name = function.get("name", "")
-                skill_id = _LLM_NAME_TO_SKILL.get(llm_name, llm_name)
+                skill_id = _llm_name_to_skill().get(llm_name, llm_name)
                 try:
                     import json
 

@@ -50,21 +50,36 @@ def init_aip_agents(app: FastAPI) -> None:
     _tracking_service = create_tracking_aip_service()
     _quality_document_service = create_quality_document_aip_service()
 
-    # 真实表面只公开协调者能力目录中的真实技能；Mock 技能仍可在开发
+    # 统一能力目录：声明元数据（REAL_SKILL_TOOLS）∩ AIP 运行时注册，
+    # 带字段校验与双向差异报告；协调者选择、真实表面白名单、ACS 生成
+    # 共用这一份目录（P0-5 收口）。
+    from app.services.capability_catalog import (
+        allowed_skill_ids_by_agent,
+        build_capability_catalog,
+        store_runtime_catalog,
+    )
+    from app.services.coordinator import REAL_SKILL_TOOLS
+
+    registered_by_agent = {
+        "quotation": set(_quotation_service.registered_skill_ids()),
+        "procurement": set(_procurement_service.registered_skill_ids()),
+        "tracking": set(_tracking_service.registered_skill_ids()),
+        "quality-document": set(_quality_document_service.registered_skill_ids()),
+    }
+    capability_catalog = build_capability_catalog(REAL_SKILL_TOOLS, registered_by_agent)
+    for rejection in capability_catalog["rejections"]:
+        logger.warning("能力目录拒绝条目: [%s] %s", rejection["kind"], rejection["reason"])
+    store_runtime_catalog(capability_catalog)
+
+    # 真实表面只公开目录中的真实只读技能；Mock 技能仍可在开发
     # 表面（MOCK_DEMO_ENABLED=true 或非 real 适配器）使用。
     from app.runtime.surface import mock_demo_enabled
     if not mock_demo_enabled():
-        from app.services.coordinator import REAL_SKILL_TOOLS
-        allowed = {
-            "quotation": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "quotation"},
-            "procurement": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "procurement"},
-            "tracking": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "tracking"},
-            "quality_document": {t["skill_id"] for t in REAL_SKILL_TOOLS if t["aip_agent"] == "quality-document"},
-        }
+        allowed = allowed_skill_ids_by_agent(capability_catalog)
         _quotation_service.restrict_skills(allowed["quotation"])
         _procurement_service.restrict_skills(allowed["procurement"])
         _tracking_service.restrict_skills(allowed["tracking"])
-        _quality_document_service.restrict_skills(allowed["quality_document"])
+        _quality_document_service.restrict_skills(allowed["quality-document"])
 
     # 注册到 FastAPI
     register_aip_agent_router(
@@ -121,6 +136,18 @@ def init_aip_agents(app: FastAPI) -> None:
             ],
             "note": "本地开发模式，身份绑定已禁用。生产环境应启用 mTLS 和身份绑定。",
         }
+
+    # 注册统一能力目录端点（目录来源、构建时间与拒绝报告可追溯）
+    @app.get("/aip/capability-catalog", tags=["AIP"])
+    async def aip_capability_catalog():
+        from app.services.capability_catalog import get_runtime_catalog
+
+        current = get_runtime_catalog()
+        if current is None:
+            from app.services.capability_catalog import declared_only_catalog
+
+            return declared_only_catalog()
+        return current
 
     logger.info("✅ 所有 AIP 智能体服务已初始化并注册")
 

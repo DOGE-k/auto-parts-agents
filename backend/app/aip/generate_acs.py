@@ -25,8 +25,13 @@ def _aip_endpoint(agent_path: str) -> str:
 
 
 def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
-    """从协调者真实能力目录生成 ACS 技能，避免 ACS 与 AIP 注册表漂移。"""
+    """从统一能力目录生成 ACS 技能，避免 ACS 与目录漂移。
+
+    走声明目录构建 + 字段校验：声明校验失败时直接报错退出，
+    不产出与真实目录漂移的 ACS 文件。
+    """
     # 延迟导入：生成脚本本身仍可在没有启动 FastAPI 的情况下运行。
+    from app.services.capability_catalog import build_capability_catalog
     from app.services.coordinator import REAL_SKILL_TOOLS
 
     aip_agent_key = {
@@ -35,17 +40,21 @@ def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
         "tracking": "tracking",
         "quality_document": "quality-document",
     }[agent_key]
+    catalog = build_capability_catalog(REAL_SKILL_TOOLS, None)
+    if catalog["rejections"]:
+        details = "; ".join(f"[{r['kind']}] {r['reason']}" for r in catalog["rejections"])
+        raise ValueError(f"能力目录声明校验失败，拒绝生成漂移 ACS：{details}")
     result: list[AgentSkill] = []
-    for tool in REAL_SKILL_TOOLS:
-        if tool["aip_agent"] != aip_agent_key:
+    for entry in catalog["entries"]:
+        if entry["aip_agent"] != aip_agent_key:
             continue
         result.append(
             AgentSkill(
-                id=tool["skill_id"],
-                name=f"真实{tool['skill_id'].split('.', 1)[1]}",
-                description=tool["description"],
-                version="1.0.0",
-                tags=["真实数据", "AIP", tool["agent_type"]],
+                id=entry["skill_id"],
+                name=f"真实{entry['skill_id'].split('.', 1)[1]}",
+                description=entry["description"],
+                version=entry["version"],
+                tags=["真实数据", "AIP", entry["agent_type"]],
                 examples=[],
                 input_modes=["application/json"],
                 output_modes=["application/json"],

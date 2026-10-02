@@ -1889,3 +1889,45 @@ ERP 物料需求
 
 - AI_HANDOFF_PLAN §6 事件协作清单补第 4 类事件；§6.1 第 3 条完成；demo_script.md 故事线 D3 补临期事件说明。
 - 边界：被动检查（无人查看跟单不预警）是用户选择，如需全覆盖需新增定时扫描基础设施（未做）；阈值 3 天/50% 是用户确认值，非系统默认值。
+
+### 3.55 统一能力目录运行时构建（P0-5 收口，2026-10-02 下午）
+
+依据 `docs/handoff_2026-10-02_dynamic_capability_catalog.md`（第 1 步只读盘点 → 先补测试 → 最小改动实施）。零 ERP/MES 写入；Wutong Registry 不参与目录构建（维持可选外部只读发现，未配置时端点照旧 503 明确报错）。
+
+#### 一、第 1 步盘点结论（实际代码关系，非假定）
+
+| 来源 | 实际字段 | 用途 |
+|---|---|---|
+| AIP 服务注册（`AipAgentService.register_skill`，运行时可经 `list_skills()`/`/aip/overview` 观察） | `skill_id`、`skill_name`、handler；无 description/parameters/version/权限字段 | 可执行性事实来源 |
+| `REAL_SKILL_TOOLS`（coordinator.py，17 条） | `skill_id`、`agent_type`、`aip_agent`、`description`、`parameters`（object JSON Schema）；本轮补显式 `read_only: True`/`requires_approval: False` | LLM 选择所需元数据（本地受信任声明） |
+| ACS 文件（`backend/acs/*.json`，generate_acs.py 生成的产物，交接文档表格中的 `app/aip/acs/` 为空残留目录） | id/name/description/version(1.0.0)/tags/modes；运行时无代码读取 | 外部发现发布物 |
+| Wutong Registry（可选，未配置） | 现有端点 503 `registry_not_configured`，不冒充外部注册 | 长期遗留（勿擅自推进） |
+
+未知项处理（不发明字段）：输出 schema 无任何来源 → 条目 `output_schema=null`；version 无注册来源 → 声明级常量 `1.0.0`（与 ACS 现值一致）；`authority`/`data_source` 是技能结果级字段 → 目录不声明。
+
+#### 二、实现（回退策略从既有部署契约推导，逐技能拒绝、不吞空成功）
+
+- 新增 `backend/app/services/capability_catalog.py`：`build_capability_catalog(声明, 运行时注册|None)`——必填字段/权限属性校验（缺失 `read_only=True` 或 `requires_approval=False` 即拒绝）、重复 skill_id、未知 aip_agent、声明未注册（拒绝入目录）、注册未声明（Mock 技能，报告暴露且不获得任何写入权限）；来源标记 `aip_runtime+declared_local` / `declared_local`（绝不标 external/registry）；进程内缓存 + `catalog_or_declared()` 使用方入口。
+- 使用方逐个替换：① 协调者 `_tool_specs`/`_tool_index`/`_llm_name_to_skill`（原 import 期模块常量改惰性）读统一目录；② `init_aip_agents` 真实表面白名单改读目录（lifespan 启动时构建并缓存）；③ `generate_acs.py` 改读声明目录，校验失败直接报错不产出漂移 ACS；④ Mock 表面隔离语义不变（Mock 技能不在目录 → 真实表面照旧剔除）。
+- 可观察性：`GET /aip/capability-catalog` 返回 entries/rejections/meta（来源、built_at、计数）；构建时拒绝逐条 warning 日志。
+- `REAL_SKILL_TOOLS` 保留为声明元数据源与安全回退（交接文档 §六 允许），17 条技能 ID、描述、参数与调用行为全部未变。
+
+#### 三、测试（先补用例再实现）
+
+- 新增 `tests/test_capability_catalog.py` **12 例**：真实四服务构建 17 条目（权限属性/来源/端点/版本/output_schema 缺口标记）；声明未注册拒绝；Mock 注册未声明报告且不进目录；重复 ID 首条保留余拒绝；未知智能体/缺 parameters/权限属性缺失或为写 三类拒绝且留可读原因；纯声明目录来源标记（不冒充外部）；全非法声明可见失败（entries 空 + rejections 非空）；缓存 store/get/reset；协调者消费（回退与运行时两种状态下 specs/index/名称映射一致）；目录端点（TestClient + init_aip_agents）与 Mock 隔离。
+- 修正测试自身 4 处断言错误（重复 ID 首条合法、meta.runtime 恒存在、built_at 位置、lifespan 路由需启动期注册——后者以 init_aip_agents 直连测试覆盖）。
+
+#### 四、全量验证（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `pytest tests -q` | **230 passed**（218 + 12） |
+| 后端编译 | `compileall -q app` | 通过 |
+| ACS 零漂移 | 重新生成 4 个 ACS 文件 | 除生成时间戳外逐字节一致 |
+| 前端（未改动，记录现状） | vitest / tsc / build | 28 passed / 通过 / 通过 |
+| 真实系统 | 重启 9000 后端 | `/api/health` ok；`GET /aip/capability-catalog` 200：meta runtime=True、source=`aip_runtime+declared_local`、**17 条目**（tracking 5 / quotation 4 / procurement 4 / quality-document 4）、**14 条拒绝全部为 Mock 技能的 registered_not_declared**（真实表面隔离证据）；`/aip/overview` 正常；错误日志 0 行 |
+
+#### 五、遗留与边界
+
+- 协调者运行时目录为进程内缓存（随 lifespan 构建随进程终止），无 TTL 刷新需求（技能注册只发生在启动期）；注册表接入目录仍属长期遗留（外部依赖，勿擅自推进）。
+- `app/aip/acs/` 空目录为历史残留，未删除（不在本阶段范围）。
