@@ -11,6 +11,8 @@ import { createRoot, type Root } from "react-dom/client";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const askAssistantMock = vi.fn();
+const getMessagesMock = vi.fn();
+const getSessionsMock = vi.fn();
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
@@ -19,23 +21,28 @@ vi.mock("../../api", async (importOriginal) => {
     askAssistant: (...args: unknown[]) => askAssistantMock(...args),
     // 面板流式优先：这里模拟传输层失败，走真实回退路径到 askAssistant
     askAssistantStream: vi.fn(() => Promise.reject(new Error("transport failure"))),
+    getAssistantSessionMessages: (...args: unknown[]) => getMessagesMock(...args),
+    getAssistantSessions: (...args: unknown[]) => getSessionsMock(...args),
   };
 });
 
 import AssistantPanel from "../AssistantPanel";
 
-const identity = null;
-
-function mountPanel(): { container: HTMLElement; root: Root; container_removed: () => void } {
+function mountPanel(
+  props: Partial<{ currentWorkOrderId: string; currentErpDraftId: string }> = {},
+  opts: { presetSessionId?: string } = {},
+): { container: HTMLElement; root: Root; container_removed: () => void } {
+  sessionStorage.clear();
+  if (opts.presetSessionId) sessionStorage.setItem("assistant_session_id", opts.presetSessionId);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
     root.render(
       <AssistantPanel
-        identity={identity}
-        currentErpDraftId=""
-        currentWorkOrderId=""
+        identity={null}
+        currentErpDraftId={props.currentErpDraftId ?? ""}
+        currentWorkOrderId={props.currentWorkOrderId ?? ""}
         notify={() => undefined}
         onError={() => undefined}
       />,
@@ -84,6 +91,8 @@ describe("AssistantPanel 会话化渲染（P0 回归）", () => {
   afterEach(() => {
     for (const fn of cleanups.splice(0).reverse()) fn();
     askAssistantMock.mockReset();
+    getMessagesMock.mockReset();
+    sessionStorage.clear();
   });
 
   it("确定性回答（无 call_chain 字段）不崩溃，并显示确定性处理标识", async () => {
@@ -163,5 +172,137 @@ describe("AssistantPanel 会话化渲染（P0 回归）", () => {
     expect(panel.container.textContent).toContain("当前沿用订单=SAL-ORD-2026-00023");
     expect(panel.container.textContent).toContain("OPT-2");
     expect(panel.container.textContent).not.toContain("模块暂时不可用");
+  });
+});
+
+// 2026-10-02 会话体验修复回归（交接文档 §3/§4）：连续聊天保留、切页不丢（组件
+// 保持挂载由 RealBusinessPage 负责，这里验证多轮状态）、新会话切断页面上下文、
+// 刷新后按 sessionStorage 恢复历史。
+describe("AssistantPanel 连续聊天与页面上下文（交接文档回归）", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const fn of cleanups.splice(0).reverse()) fn();
+    askAssistantMock.mockReset();
+    getMessagesMock.mockReset();
+    getSessionsMock.mockReset();
+    sessionStorage.clear();
+  });
+
+  function answer(text: string, sessionId: string) {
+    return {
+      question: "q",
+      answer: text,
+      call_chain: [],
+      rounds: 0,
+      tool_count: 0,
+      coordination_run_id: "",
+      authority: "ERPNext + OpenMES",
+      context: {},
+      session_id: sessionId,
+    };
+  }
+
+  it("连续两问：第一轮问答保留在消息列表中，输入框可继续提问", async () => {
+    const panel = mountPanel();
+    cleanups.push(panel.container_removed);
+    askAssistantMock
+      .mockResolvedValueOnce(answer("第一轮回答：工单 9 进度 0%。", "ASST-ROUNDTEST01"))
+      .mockResolvedValueOnce(answer("第二轮回答：质量门禁通过。", "ASST-ROUNDTEST01"));
+    await typeAndSubmit(panel, "工单 9 进度怎么样？");
+    await flush();
+    await typeAndSubmit(panel, "那质量门禁呢？");
+    await flush();
+    const text = panel.container.textContent ?? "";
+    expect(text).toContain("第一轮回答：工单 9 进度 0%。");
+    expect(text).toContain("第二轮回答：质量门禁通过。");
+    expect(text).toContain("工单 9 进度怎么样？");
+    expect(text).toContain("那质量门禁呢？");
+    // 两轮提问后输入框已清空，可继续输入
+    const textarea = panel.container.querySelector("textarea");
+    expect(textarea?.value).toBe("");
+  });
+
+  it("正常提问把页面当前工单注入上下文", async () => {
+    const panel = mountPanel({ currentWorkOrderId: "9" });
+    cleanups.push(panel.container_removed);
+    askAssistantMock.mockResolvedValue(answer("ok", "ASST-CTXTEST0001"));
+    await typeAndSubmit(panel, "为什么还不能发运？");
+    await flush();
+    const call = askAssistantMock.mock.calls[0];
+    expect(call[1]).toMatchObject({ 当前流程MES工单id: "9" });
+  });
+
+  it("新会话后首轮不再注入页面当前工单，也不回显旧对象（交接文档 §4 验收）", async () => {
+    const panel = mountPanel({ currentWorkOrderId: "9" });
+    cleanups.push(panel.container_removed);
+    askAssistantMock.mockResolvedValue(answer("请提供工单或质量问题编号。", "ASST-NEWSESS0001"));
+    // 点击"新会话"
+    const newSessionBtn = Array.from(panel.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("新会话"),
+    );
+    expect(newSessionBtn).toBeTruthy();
+    act(() => {
+      newSessionBtn!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    // 新会话首轮提问（不带编号）
+    await typeAndSubmit(panel, "质量不过关怎么办？");
+    await flush();
+    // 页面上下文未被注入：后端收到空 context，不会命中工单 9
+    const call = askAssistantMock.mock.calls[0];
+    expect(call[1]).toEqual({});
+    expect(panel.container.textContent).toContain("本轮未自动带入页面当前工单/订单");
+    // 新会话首问结束后恢复正常策略：第二轮重新注入页面上下文
+    askAssistantMock.mockResolvedValueOnce(answer("ok2", "ASST-NEWSESS0001"));
+    await typeAndSubmit(panel, "那工单 9 呢？");
+    await flush();
+    const secondCall = askAssistantMock.mock.calls[1];
+    expect(secondCall[1]).toMatchObject({ 当前流程MES工单id: "9" });
+  });
+
+  it("刷新后按 sessionStorage 的会话号恢复历史消息（交接文档 §3.4）", async () => {
+    getMessagesMock.mockResolvedValue([
+      { id: 1, role: "user", content: "刷新前的问题", created_at: "2026-10-02T00:00:00Z" },
+      { id: 2, role: "assistant", content: "刷新前的回答", created_at: "2026-10-02T00:00:01Z" },
+    ]);
+    const panel = mountPanel({}, { presetSessionId: "ASST-RESTORED001" });
+    cleanups.push(panel.container_removed);
+    await flush();
+    expect(getMessagesMock).toHaveBeenCalledWith("ASST-RESTORED001");
+    const text = panel.container.textContent ?? "";
+    expect(text).toContain("刷新前的问题");
+    expect(text).toContain("刷新前的回答");
+  });
+
+  it("历史会话：展开列表、点选旧会话即恢复其消息（2026-10-02 新增）", async () => {
+    const panel = mountPanel();
+    cleanups.push(panel.container_removed);
+    getSessionsMock.mockResolvedValue([
+      { session_id: "ASST-OLDSESSION1", title: "旧会话标题", created_at: "2026-10-01T00:00:00Z", last_active_at: "2026-10-01T12:00:00Z" },
+    ]);
+    getMessagesMock.mockResolvedValue([
+      { id: 1, role: "user", content: "旧会话里的问题", created_at: "2026-10-01T00:00:00Z" },
+      { id: 2, role: "assistant", content: "旧会话里的回答", created_at: "2026-10-01T00:00:01Z" },
+    ]);
+    // 展开历史会话：点击 summary 触发按需加载（不依赖 details 的 open 默认行为）
+    const sessionsSummary = panel.container.querySelector("details.assistant-sessions summary");
+    expect(sessionsSummary).toBeTruthy();
+    act(() => {
+      sessionsSummary!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    // 点选列表中的旧会话
+    const row = Array.from(panel.container.querySelectorAll("button.assistant-session-row"))
+      .find((b) => b.textContent?.includes("旧会话标题"));
+    expect(row).toBeTruthy();
+    act(() => {
+      row!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(getMessagesMock).toHaveBeenCalledWith("ASST-OLDSESSION1");
+    const text = panel.container.textContent ?? "";
+    expect(text).toContain("旧会话里的问题");
+    expect(text).toContain("旧会话里的回答");
   });
 });

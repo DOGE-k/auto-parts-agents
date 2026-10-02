@@ -12,9 +12,10 @@
 3. `docs/handoff_2026-10-02_dynamic_capability_catalog.md`：下一阶段能力目录运行时构建专项交接。
 4. `docs/handoff_2026-10-02_frontend_information_architecture.md`：真实业务前端信息架构改版专项交接（已于 2026-10-02 下午按 §3.56 实施，§八验收 14 条逐条通过）。
 5. `docs/handoff_2026-10-02_work_order_intent_fix.md`：工单号自然语言识别修复交接（已于 §3.58 完成）。
-6. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
-7. `docs/demo_script.md`：当前演示路径和已验证记录编号。
-8. `README.md`：环境、部署、启动、故障排查。
+6. `docs/handoff_2026-10-02_session_identity_chat_ux.md`：当前待修复的审批身份语义、连续问答、OpenMES 30 分钟会话、回答层级和销售/采购页面空状态。
+7. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
+8. `docs/demo_script.md`：当前演示路径和已验证记录编号。
+9. `README.md`：环境、部署、启动、故障排查。
 
 `docs/next_development_plan.md` 保留为阶段历史资料。本文件中的后续路线优先于其中未勾选的旧任务；如果两份文件冲突，以当前代码和最新真实验证为准。
 

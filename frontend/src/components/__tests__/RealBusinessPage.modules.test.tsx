@@ -98,7 +98,7 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     expect(text).not.toContain("Agent 运行记录");
   });
 
-  it("页头审批身份为紧凑摘要：完整角色折叠在身份详情中（验收 12）", async () => {
+  it("页头审批身份区分审批账号与数据连接账号（交接文档 §1）", async () => {
     const page = mountPage("sales");
     cleanups.push(page.cleanup);
     await act(async () => {
@@ -106,22 +106,35 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
       await Promise.resolve();
     });
     const text = textOf(page.container);
-    // 摘要只有 display_name（authority），不整段铺角色列表
-    expect(text).toContain("Administrator");
+    // ERPNext 服务端集成账号不能显示为审批身份；必须明确标注"未登录"
+    expect(text).toContain("审批账号未登录");
+    expect(text).toContain("ERPNext 数据连接账号：Administrator");
+    expect(text).toContain("服务端集成账号");
+    expect(text).not.toContain("当前审批人：Administrator");
+    // 身份详情折叠存在（无 OpenMES 会话时展示只读说明与数据连接账号）
     const roles = page.container.querySelector(".identity-roles");
     expect(roles).toBeTruthy();
-    expect(roles!.textContent).toContain("Accounts Manager");
     // 会话设置不占页头（验收 8）：Bearer 输入框不存在
     expect(page.container.querySelectorAll("input[placeholder*='Bearer'], input[placeholder*='令牌']").length).toBe(0);
   });
 
-  it("采购与缺料模块：流程未到时显示接续提示卡引导先完成报价（验收 13 链路接续）", () => {
+  it("无报价对象时销售页显示报价表单，不显示'已完成'空壳（交接文档 §8.2）", () => {
+    const page = mountPage("sales");
+    cleanups.push(page.cleanup);
+    const text = textOf(page.container);
+    expect(text).toContain("销售与订单");
+    expect(text).not.toContain("报价与订单草稿已完成");
+  });
+
+  it("采购与缺料模块：无报价/方案对象时显示空态卡与待审批入口（交接文档 §8.3）", () => {
     const page = mountPage("procurement");
     cleanups.push(page.cleanup);
     const text = textOf(page.container);
     expect(text).toContain("采购与缺料");
-    expect(text).toContain("还没有可分析的净需求");
+    expect(text).toContain("尚未选择报价或采购方案");
     expect(text).toContain("去销售与订单");
+    expect(text).toContain("去审批与审计");
+    expect(text).not.toContain("采购链路已完成");
   });
 
   it("生产跟单模块：包含跟单视图与 MES 完工数据二级视图（原独立导航项并入）", () => {

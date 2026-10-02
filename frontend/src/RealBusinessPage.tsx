@@ -27,9 +27,10 @@ import {
   api,
   approveWorkOrderDispatch,
   dispatchWorkOrder,
+  formatSessionRemaining,
   getQualityTodo,
   getRealIdentity,
-  getSessionIssuedAt,
+  getSessionRemainingMs,
   getRealSessionToken,
   getRealWriteToken,
   loginRealSession,
@@ -139,12 +140,13 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const [loginError, setLoginError] = useState("");
   // 生产跟单模块的二级视图（信息架构改版：MES 完工数据并入生产跟单）
   const [productionView, setProductionView] = useState<"tracking" | "completions">("tracking");
+  // 全厂跟单（2026-10-02 用户建议）：跨订单选择任意未完工工单直接跟单，不绑定当前流程
+  const [globalWorkOrderId, setGlobalWorkOrderId] = useState("");
   // 阶段九：跨工单质量待办（仅 OpenMES 登录会话可见）
   const [qualityTodo, setQualityTodo] = useState<QualityTodoItem[] | null>(null);
   const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
   const [qualityTodoError, setQualityTodoError] = useState("");
   const [todoFocusIssueId, setTodoFocusIssueId] = useState("");
-  const [sessionExpiringSoon, setSessionExpiringSoon] = useState(false);
 
   const notify = (message: string) => {
     setToast(message);
@@ -224,6 +226,9 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         }),
       });
       setQuotation(result);
+      // 新报价开始新的订单上下文：旧采购方案与新报价可能不是同一笔业务，立即清除
+      setPlan(null);
+      setSelectedOptionId("");
       setStep(2);
       notify("报价分析完成");
     } catch (e) {
@@ -502,21 +507,17 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   // ========== 阶段九：跨工单质量待办 ==========
   const hasOpenmesSession = identity?.provider === "openmes";
 
-  // 阶段十：OpenMES 会话 15 分钟 TTL，过期前 90 秒提醒重新登录，避免演示中断
+  // 阶段十：OpenMES 会话 15 分钟 TTL（交接文档 §6：保留上游 TTL 不改，但临期必须
+  // 显示实时倒计时）。过期前 90 秒进入临期提醒；无签发时间的历史会话按保守口径立即提醒。
+  const [sessionNowMs, setSessionNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (!hasOpenmesSession) {
-      setSessionExpiringSoon(false);
-      return;
-    }
-    const check = () => {
-      const issued = getSessionIssuedAt();
-      // 无签发时间的历史会话按保守口径立即提醒（重新登录总是安全的）
-      setSessionExpiringSoon(issued === 0 || Date.now() - issued > 13.5 * 60 * 1000);
-    };
-    check();
-    const timer = window.setInterval(check, 20000);
+    if (!hasOpenmesSession) return;
+    setSessionNowMs(Date.now());
+    const timer = window.setInterval(() => setSessionNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [hasOpenmesSession]);
+  const sessionRemainingMs = hasOpenmesSession ? getSessionRemainingMs() : null;
+  const sessionExpiringSoon = hasOpenmesSession && (sessionRemainingMs === null || sessionRemainingMs <= 90 * 1000);
 
   const loadQualityTodo = useCallback(async () => {
     if (identity?.provider !== "openmes") return;
@@ -596,6 +597,21 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       note: `已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`,
     });
   }, [openWorkOrderTracking]);
+
+  // 全厂跟单（用户建议 2026-10-02）：选择任意未完工工单直接跟单。
+  // 复用 openWorkOrderTracking 的守卫链路（工单反查报价审批状态 → 三面板只读加载）。
+  const unfinishedWorkOrders = workOrders
+    .filter((wo) => !["COMPLETED", "DONE", "CANCELLED", "CLOSED"].includes(String(wo.status ?? "").toUpperCase())
+      && !String(wo.work_order_no ?? "").startsWith("DEMO_"))
+    .sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));
+  const trackGlobalWorkOrder = useCallback(async () => {
+    if (!globalWorkOrderId) return;
+    const wo = workOrders.find((w) => String(w.work_order_id) === globalWorkOrderId);
+    await openWorkOrderTracking(globalWorkOrderId, wo?.work_order_no ?? "", {
+      note: `已打开工单 ${wo?.work_order_no ?? globalWorkOrderId} 的跟单视图（全厂跟单）`,
+    });
+    setGlobalWorkOrderId("");
+  }, [globalWorkOrderId, workOrders, openWorkOrderTracking]);
 
   // 打开某方案的采购审批视图（缺料事件与问答跳转共用；只读加载，不执行审批）
   const openProcurementPlanView = useCallback(async (
@@ -741,7 +757,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         notify(
           result.force_password_change
             ? "登录成功，但上游要求先修改密码，该会话仅能改密"
-            : `已登录为 ${result.identity?.display_name ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
+            : `已登录为 ${result.identity?.actor_id ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
         );
       })
       .catch((e) => setLoginError(e instanceof Error ? e.message : "OpenMES 登录失败"))
@@ -763,9 +779,11 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
   };
 
-  // 身份上报给 App：顶栏/侧栏显示当前审批人（信息架构改版 §4.2）
+  // 身份上报给 App：顶栏/侧栏显示当前审批人（信息架构改版 §4.2）。
+  // 交接文档 §1：ERPNext 服务端集成账号是数据连接身份，不是浏览器审批用户——
+  // 只有 OpenMES 登录会话的身份才能作为"当前审批人"上报，否则顶栏一律显示未登录。
   useEffect(() => {
-    onIdentityChange?.(identity);
+    onIdentityChange?.(identity?.provider === "openmes" ? identity : null);
   }, [identity, onIdentityChange]);
 
   const resetFlow = () => {
@@ -776,8 +794,40 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     setTracking(null);
     setQuality(null);
     setShipGate(null);
+    setWorkOrderId("");
+    setDispatchFlow(null);
     resetNcrWorkflows();
   };
+
+  // 返回初始状态（2026-10-02 用户反馈：没有入口开始下一笔订单）。
+  // 只清空页面流程状态；已创建的审批记录、ERP 草稿与审计留痕仍保留。
+  const confirmStartNewOrder = () => {
+    if (!window.confirm("开始一笔新订单？将清空当前页面流程（报价 / 采购方案 / 工单选择）。\n\n已创建的审批记录、ERP 草稿和审计留痕仍保留在系统与「审批与审计」中，不受影响。")) return;
+    resetFlow();
+    notify("已返回初始状态，可开始新订单");
+  };
+
+  // 流程工具条：有任一流程对象时显示"返回初始状态"入口（销售与订单 / 采购与缺料共用）
+  const renderFlowToolbar = () => (
+    (quotation || plan || workOrderId) ? (
+      <div className="module-actions">
+        <button className="button ghost" onClick={confirmStartNewOrder}>↺ 返回初始状态（开始新订单）</button>
+      </div>
+    ) : null
+  );
+
+  // ========== 流程步骤与业务对象的一致性（交接文档 §8） ==========
+  // 单一 step 状态会被跨模块跳转改写（如打开工单跟单 setStep(8)），步骤条与
+  // "已完成"卡必须由已加载对象证明进度，不能仅凭 step 残留值渲染：
+  // - 无报价 → 最多亮到第 1 步；有报价无 ERP 草稿 → 最多第 3 步；
+  // - 有草稿且方案已批准 → 允许到第 8 步；有草稿无已批方案 → 最多第 7 步。
+  const planApproved = plan?.status === "APPROVED";
+  const objectProvenMaxStep = !quotation
+    ? 1
+    : quotation.erp_draft_id
+      ? (planApproved ? 8 : 7)
+      : 3;
+  const displayStep = Math.min(step, objectProvenMaxStep);
 
   return (
     <div className="page-content">
@@ -788,21 +838,36 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           <p>{MODULE_META[activeModule].subtitle}</p>
           <div className="real-identity-compact">
             <span className="source-tag erp">审批身份</span>
-            {identity ? (
+            {identity === null && connErp === "error" ? (
+              // 身份解析已失败（如 OpenMES 会话过期——后端安全设计：失效会话不回退
+              // 集成账号，直接报错），不能显示成"正在解析"误导用户
+              <span className="ds-label">审批账号会话已失效，请到「系统连接」重新登录</span>
+            ) : identity === null ? (
+              <span className="ds-label">正在解析当前登录用户…</span>
+            ) : hasOpenmesSession ? (
               <>
-                <span className="ds-label">{identity.display_name}（{identity.authority}）</span>
+                <span className="ds-label">{identity.actor_id}（OpenMES）</span>
                 <details className="identity-roles">
                   <summary>身份详情</summary>
                   <p>{identity.actor_id} · 角色：{identity.roles.join("、") || "未返回"}</p>
                 </details>
               </>
             ) : (
-              <span className="ds-label">正在解析当前登录用户…</span>
+              <>
+                <span className="ds-label">审批账号未登录</span>
+                <details className="identity-roles">
+                  <summary>身份详情</summary>
+                  <p>只读查询无需登录；审批、报工、NCR 处置等写入门禁需要 OpenMES 审批账号会话（去「系统连接」登录）。</p>
+                  {identity && (
+                    <p>ERPNext 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）</p>
+                  )}
+                </details>
+              </>
             )}
           </div>
           {hasOpenmesSession && sessionExpiringSoon && (
             <div className="session-expiry-warning">
-              OpenMES 会话即将过期（15 分钟 TTL）——请到「系统连接」重新登录，以继续审批与处置操作。
+              OpenMES 会话即将过期（{formatSessionRemaining(sessionRemainingMs)}）——请到「系统连接」重新登录，以继续审批与处置操作。
               <button className="button ghost" onClick={() => onNavigate("connection")}>去系统连接</button>
             </div>
           )}
@@ -821,8 +886,9 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         </div>
       )}
 
-      {/* AI 协同问答（默认主入口；信息架构改版 §4.3） */}
-      {activeModule === "assistant" && (
+      {/* AI 协同问答（默认主入口；信息架构改版 §4.3）。
+          交接文档 §3：面板保持挂载（切模块时隐藏而非卸载），切换返回后聊天记录仍在 */}
+      <div className={activeModule === "assistant" ? "assistant-pane" : "assistant-pane hidden-module-pane"}>
         <ErrorBoundary name="智能协同问答">
           <AssistantPanel
             identity={identity}
@@ -835,7 +901,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             onQuestionConsumed={onPendingQuestionConsumed}
           />
         </ErrorBoundary>
-      )}
+      </div>
 
       {/* 业务总览（信息架构改版 §4.4：第二入口，只给概览与"需要处理"） */}
       {activeModule === "overview" && (
@@ -876,6 +942,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           {(() => {
             // 评审意见②：各模块只显示本业务阶段的步骤条；完整 8 步链收进折叠，
             // 不再像手动 Demo 一样默认铺开整条流程。
+            // 交接文档 §8.6：步骤条高亮用 displayStep（对象可证明的进度），跳转残留的
+            // step 不能把无对象的模块高亮到第 8 步。
             const stageSteps =
               activeModule === "sales"
                 ? FULL_ORDER_STEPS.filter((s) => s.n <= 3)
@@ -887,7 +955,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                 {steps.map((s) => (
                   <div
                     key={s.n}
-                    className={`step-item ${step >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
+                    className={`step-item ${displayStep >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
                   >
                     <div className="step-number">{s.n}</div>
                     <span>{s.label}</span>
@@ -906,10 +974,12 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             );
           })()}
 
-          {/* 销售与订单：步骤 1-3 */}
+          {/* 销售与订单：步骤 1-3（交接文档 §8.2：内容由已加载报价对象决定，
+              无报价时显示报价表单而不是"已完成"空壳） */}
           {activeModule === "sales" && (
             <>
-              {step === 1 && (
+              {renderFlowToolbar()}
+              {!quotation ? (
                 <QuotationInputStep
                   customers={customers}
                   items={items}
@@ -924,76 +994,93 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                   loading={loading}
                   onGenerate={() => void generateQuotation()}
                 />
-              )}
-              {step >= 2 && quotation && (
-                <QuotationReviewPanel
-                  step={step}
-                  quotation={quotation}
-                  loading={loading}
-                  onApprove={(approved) => void approveQuotation(approved)}
-                />
-              )}
-              {step >= 3 && quotation && (
-                <ErpDraftPanel
-                  step={step}
-                  quotation={quotation}
-                  loading={loading}
-                  onCreateDraft={() => void createErpDraft()}
-                />
-              )}
-              {step >= 4 && (
-                <div className="module-hint-card">
-                  <strong>报价与订单草稿已完成</strong>
-                  <span>采购分析、供应商方案审批和 PO 草稿在「采购与缺料」模块继续。</span>
-                  <button className="button primary" onClick={() => onNavigate("procurement")}>去采购与缺料 →</button>
-                </div>
+              ) : (
+                <>
+                  <QuotationReviewPanel
+                    step={quotation.status === "DRAFT" ? 2 : step}
+                    quotation={quotation}
+                    loading={loading}
+                    onApprove={(approved) => void approveQuotation(approved)}
+                  />
+                  {(quotation.status === "APPROVED" || quotation.erp_draft_id) && (
+                    <ErpDraftPanel
+                      step={quotation.erp_draft_id ? 7 : 3}
+                      quotation={quotation}
+                      loading={loading}
+                      onCreateDraft={() => void createErpDraft()}
+                    />
+                  )}
+                  {step >= 4 && quotation.erp_draft_id && (
+                    <div className="module-hint-card">
+                      <strong>报价与订单草稿已完成（{quotation.erp_draft_id}）</strong>
+                      <span>采购分析、供应商方案审批和 PO 草稿在「采购与缺料」模块继续。</span>
+                      <button className="button primary" onClick={() => onNavigate("procurement")}>去采购与缺料 →</button>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
 
-          {/* 采购与缺料：步骤 4-6 */}
+          {/* 采购与缺料：步骤 4-6（交接文档 §8.3：无报价/方案对象时显示明确空态，
+              提供待审批方案入口；"采购链路已完成"必须由已批准方案证明） */}
           {activeModule === "procurement" && (
             <>
-              {step < 4 && (
+              {renderFlowToolbar()}
+              {!quotation ? (
                 <div className="module-hint-card">
-                  <strong>还没有可分析的净需求</strong>
-                  <span>先在「销售与订单」完成报价分析并创建 ERP 订单草稿，这里才能做采购分析。</span>
-                  <button className="button primary" onClick={() => onNavigate("sales")}>去销售与订单 →</button>
+                  <strong>尚未选择报价或采购方案</strong>
+                  <span>先在「销售与订单」完成报价、审批并创建 ERP 订单草稿，这里才能做采购分析；也可从待审批方案列表进入（该列表为全局口径，含历史记录）。</span>
+                  <div className="hint-actions">
+                    <button className="button primary" onClick={() => onNavigate("sales")}>去销售与订单 →</button>
+                    <button className="button ghost" onClick={() => onNavigate("audit")}>去审批与审计（待审批方案）→</button>
+                  </div>
                 </div>
-              )}
-              {step >= 4 && quotation && (
-                <ProcurementAnalyzePanel
-                  step={step}
-                  quotation={quotation}
-                  plan={plan}
-                  loading={loading}
-                  selectedOptionId={selectedOptionId}
-                  onSelectOption={setSelectedOptionId}
-                  onAnalyze={() => void analyzeProcurement()}
-                />
-              )}
-              {step === 5 && plan && plan.net_requirement.has_shortage && (
-                <PlanApprovalPanel
-                  plan={plan}
-                  loading={loading}
-                  hasSelectedOption={Boolean(selectedOptionId)}
-                  onApprove={(approved) => void approveProcurement(approved)}
-                />
-              )}
-              {step >= 6 && plan && plan.net_requirement.has_shortage && (
-                <PoDraftPanel
-                  step={step}
-                  plan={plan}
-                  loading={loading}
-                  onCreatePo={() => void createPoDraft()}
-                />
-              )}
-              {step >= 7 && (
+              ) : plan && plan.quotation_id !== quotation.quotation_id ? (
+                /* 方案与当前报价不同单（跨订单状态残留防护，2026-10-02）：明确提示并给出出路 */
                 <div className="module-hint-card">
-                  <strong>采购链路已完成</strong>
-                  <span>工单下达、生产跟单与发运门禁在「生产跟单」模块继续。</span>
-                  <button className="button primary" onClick={() => onNavigate("production")}>去生产跟单 →</button>
+                  <strong>当前采购方案与报价不是同一笔订单</strong>
+                  <span>方案 {plan.plan_id} 属于报价 {plan.quotation_id}，而当前报价是 {quotation.quotation_id}（{quotation.erp_draft_id || "尚未创建 ERP 草稿"}）。可为当前报价重新执行采购分析（将生成新方案），或返回初始状态重开一笔。</span>
+                  <div className="hint-actions">
+                    <button className="button primary" disabled={loading} onClick={() => void analyzeProcurement()}>为当前报价重新执行采购分析 →</button>
+                    <button className="button ghost" onClick={confirmStartNewOrder}>返回初始状态</button>
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <ProcurementAnalyzePanel
+                    step={plan ? step : 4}
+                    quotation={quotation}
+                    plan={plan}
+                    loading={loading}
+                    selectedOptionId={selectedOptionId}
+                    onSelectOption={setSelectedOptionId}
+                    onAnalyze={() => void analyzeProcurement()}
+                  />
+                  {plan && plan.net_requirement.has_shortage && plan.status === "PENDING_APPROVAL" && (
+                    <PlanApprovalPanel
+                      plan={plan}
+                      loading={loading}
+                      hasSelectedOption={Boolean(selectedOptionId)}
+                      onApprove={(approved) => void approveProcurement(approved)}
+                    />
+                  )}
+                  {plan && plan.net_requirement.has_shortage && (plan.status === "APPROVED" || plan.po_draft_id) && (
+                    <PoDraftPanel
+                      step={plan.po_draft_id ? 7 : 6}
+                      plan={plan}
+                      loading={loading}
+                      onCreatePo={() => void createPoDraft()}
+                    />
+                  )}
+                  {step >= 7 && plan && plan.status === "APPROVED" && (
+                    <div className="module-hint-card">
+                      <strong>采购链路已完成（方案 {plan.plan_id}）</strong>
+                      <span>工单下达、生产跟单与发运门禁在「生产跟单」模块继续。</span>
+                      <button className="button primary" onClick={() => onNavigate("production")}>去生产跟单 →</button>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -1023,16 +1110,53 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                 <MesCompletionsPanel />
               ) : (
                 <>
+                  {/* 全厂跟单（2026-10-02 用户建议）：跨订单选择任意未完工工单，不绑定当前流程 */}
+                  <section className="panel global-track-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>全厂跟单（跨订单）</h2>
+                        <p>选择任意未完工工单直接查看进度、质量与发运门禁；审批身份照常生效，不必先在销售流程中选中该订单。</p>
+                      </div>
+                      <span className="badge blue-badge">{unfinishedWorkOrders.length} 张未完工</span>
+                    </div>
+                    <div className="global-track-row">
+                      <select
+                        value={globalWorkOrderId}
+                        onChange={(e) => setGlobalWorkOrderId(e.target.value)}
+                        aria-label="选择未完工工单"
+                      >
+                        <option value="">
+                          {unfinishedWorkOrders.length
+                            ? `选择未完工工单（按交期排序，共 ${unfinishedWorkOrders.length} 张）`
+                            : "当前没有未完工的工单"}
+                        </option>
+                        {unfinishedWorkOrders.map((wo) => (
+                          <option key={wo.work_order_id} value={String(wo.work_order_id)}>
+                            {wo.work_order_no} · {wo.product_name || wo.product_id}（{wo.status}）
+                            {wo.customer_order_no?.trim() ? ` · 关联 ${wo.customer_order_no}` : " · 未关联 ERP 订单"}
+                            {wo.due_date ? ` · 交期 ${wo.due_date.slice(0, 10)}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="button primary"
+                        disabled={!globalWorkOrderId || loading}
+                        onClick={() => void trackGlobalWorkOrder()}
+                      >
+                        {loading ? "加载中..." : "加载该工单跟单 →"}
+                      </button>
+                    </div>
+                  </section>
                   {step < 7 && (
                     <div className="module-hint-card">
                       <strong>还没有选定的工单</strong>
-                      <span>完成报价与采购方案后可下达新工单；协同事件跳转也会直接打开对应工单的跟单视图。</span>
+                      <span>完成报价与采购方案后可下达新工单；协同事件/问答跳转也会直接打开对应工单的跟单视图。</span>
                       <button className="button ghost" onClick={() => onNavigate("sales")}>回销售与订单</button>
                     </div>
                   )}
                   {step >= 7 && (
                     <WorkOrderSelectPanel
-                      step={step}
+                      step={tracking ? step : 7}
                       quotation={quotation}
                       workOrders={workOrders}
                       workOrderId={workOrderId}

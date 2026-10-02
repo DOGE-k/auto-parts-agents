@@ -32,6 +32,26 @@ export function getSessionIssuedAt(): number {
   return Number(window.sessionStorage.getItem(REAL_SESSION_ISSUED_KEY) || 0);
 }
 
+// OpenMES Sanctum 登录会话 TTL（与上游默认一致；临期黄条倒计时/系统连接页共用同一口径）
+export const OPENMES_SESSION_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * 会话剩余毫秒数。返回 null 表示历史会话没有签发时间记录（无法计算，
+ * 调用方按"剩余时间未知，请重新登录"口径处理），0 表示已过期。
+ */
+export function getSessionRemainingMs(): number | null {
+  const issued = getSessionIssuedAt();
+  if (!issued) return null;
+  return Math.max(0, OPENMES_SESSION_TTL_MS - (Date.now() - issued));
+}
+
+export function formatSessionRemaining(remainingMs: number | null): string {
+  if (remainingMs === null) return "剩余时间未知（历史会话），请重新登录";
+  const minutes = Math.floor(remainingMs / 60000);
+  const seconds = Math.floor((remainingMs % 60000) / 1000);
+  return `剩余 ${minutes} 分 ${seconds} 秒`;
+}
+
 export function getRealWriteToken(): string {
   if (typeof window === "undefined") return "";
   return window.sessionStorage.getItem(REAL_WRITE_TOKEN_KEY) ?? "";
@@ -892,6 +912,34 @@ export async function askAssistant(
     method: "POST",
     body: JSON.stringify({ question, context, session_id: sessionId || undefined }),
   });
+}
+
+// 会话历史消息（刷新后按 sessionStorage 的 session_id 恢复聊天记录；只读）
+export type AssistantHistoryMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export async function getAssistantSessionMessages(sessionId: string): Promise<AssistantHistoryMessage[]> {
+  const data = await api<{ session_id: string; messages: AssistantHistoryMessage[] }>(
+    `/real-orders/assistant/sessions/${encodeURIComponent(sessionId)}/messages`,
+  );
+  return data.messages ?? [];
+}
+
+// 历史会话列表（"历史会话"切换器；按最近活跃倒序）
+export type AssistantSessionSummary = {
+  session_id: string;
+  title: string;
+  created_at: string;
+  last_active_at: string;
+};
+
+export async function getAssistantSessions(limit = 20): Promise<AssistantSessionSummary[]> {
+  const data = await api<{ sessions: AssistantSessionSummary[] }>(`/real-orders/assistant/sessions?limit=${limit}`);
+  return data.sessions ?? [];
 }
 
 export async function getCollaborationEvents(limit = 20): Promise<{ items: CollaborationEvent[]; count: number }> {

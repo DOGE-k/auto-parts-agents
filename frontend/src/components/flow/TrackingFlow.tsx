@@ -83,48 +83,21 @@ export function WorkOrderSelectPanel({
           <p>从 OpenMES 读取工单进度、质量记录和发运门禁状态</p>
         </div>
       </div>
-      {step === 7 && (
-        <div className="form-grid">
-          <div className="form-group">
-            <label>工单号 (来自 OpenMES)</label>
-            <select
-              value={workOrderId}
-              onChange={(e) => onSelectWorkOrder(e.target.value)}
-              disabled={!quotation?.erp_draft_id || workOrders.filter((wo) => wo.customer_order_no?.trim() === quotation.erp_draft_id?.trim()).length === 0}
-            >
-              <option value="">
-                {quotation?.erp_draft_id ? "请选择与当前 ERP 订单正式关联的工单" : "请先创建 ERP 销售订单草稿"}
-              </option>
-              {workOrders
-                .filter((wo) => wo.customer_order_no?.trim() === quotation?.erp_draft_id?.trim())
-                .map((wo) => (
-                <option key={wo.work_order_id} value={wo.work_order_id}>
-                  {wo.work_order_no} · {wo.product_name} ({wo.status})
-                </option>
-              ))}
-            </select>
-            {noLinkedOrder && (
-              <p className="field-hint">ERP 订单 {quotation?.erp_draft_id} 当前没有正式关联的 OpenMES 工单。系统不会用其他订单的工单代替。</p>
-            )}
-            <button
-              className="button ghost"
-              onClick={onRefreshWorkOrders}
-            >
-              ↻ 刷新工单列表（在 OpenMES 建立关联后点击）
-            </button>
+      {/* 信息架构（2026-10-02 用户反馈）：无关联工单时"下达工单"是主操作，置顶为主 CTA，
+          不再排在下拉框/提示/刷新之后；有可跟单工单时才显示下拉与加载按钮。 */}
+      {step === 7 && noLinkedOrder ? (
+        <div className="dispatch-block primary-cta">
+          <div className="dispatch-lead">
+            <strong>ERP 订单 {quotation?.erp_draft_id} 还没有可跟单的 MES 工单</strong>
+            <span>系统不会用其他订单的工单代替。下一步是在审批门禁内向 OpenMES 下达本订单的工单：真实创建 + customer_order_no 自动关联 + 回读验证。</span>
           </div>
-        </div>
-      )}
-      {/* 工单下达（阶段十通用链路补强）：任意新订单不再依赖人工在 OpenMES 手工建单 */}
-      {step === 7 && noLinkedOrder && (
-        <div className="dispatch-block">
           {!dispatchFlow && (
-            <>
-              <small>没有关联工单？可以在审批门禁内向 OpenMES 下达工单（真实创建 + customer_order_no 自动关联 + 回读验证）</small>
+            <div className="dispatch-cta-row">
               <button className="button primary" onClick={onOpenDispatch} disabled={loading}>
                 下达工单到 OpenMES（需人工审批）→
               </button>
-            </>
+              <button className="button ghost" onClick={onRefreshWorkOrders}>↻ 刷新工单列表</button>
+            </div>
           )}
           {dispatchFlow?.stage === "confirm" && (
             <div className="dispatch-confirm">
@@ -156,22 +129,55 @@ export function WorkOrderSelectPanel({
             ) : (
               <div className="dispatch-result error">
                 工单下达失败：{dispatchFlow.result.error}
+                <div className="proposal-confirm-row">
+                  <button className="button ghost" onClick={onDismissDispatch} disabled={loading}>
+                    重置后重新下达
+                  </button>
+                </div>
               </div>
             )
           )}
         </div>
-      )}
-      {step === 7 && (
-        <div className="form-actions">
-          <button
-            className="button primary"
-            onClick={onLoadTracking}
-            disabled={loading || !workOrderId || !quotation?.erp_draft_id}
-          >
-            {loading ? "加载中..." : "加载跟单与质量数据 →"}
-          </button>
-        </div>
-      )}
+      ) : step === 7 ? (
+        <>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>工单号 (来自 OpenMES)</label>
+              <select
+                value={workOrderId}
+                onChange={(e) => onSelectWorkOrder(e.target.value)}
+                disabled={!quotation?.erp_draft_id || workOrders.filter((wo) => wo.customer_order_no?.trim() === quotation.erp_draft_id?.trim()).length === 0}
+              >
+                <option value="">
+                  {quotation?.erp_draft_id ? "请选择与当前 ERP 订单正式关联的工单" : "请先创建 ERP 销售订单草稿"}
+                </option>
+                {workOrders
+                  .filter((wo) => wo.customer_order_no?.trim() === quotation?.erp_draft_id?.trim())
+                  .map((wo) => (
+                  <option key={wo.work_order_id} value={wo.work_order_id}>
+                    {wo.work_order_no} · {wo.product_name} ({wo.status})
+                  </option>
+                ))}
+              </select>
+              <button
+                className="button ghost"
+                onClick={onRefreshWorkOrders}
+              >
+                ↻ 刷新工单列表（在 OpenMES 建立关联后点击）
+              </button>
+            </div>
+          </div>
+          <div className="form-actions">
+            <button
+              className="button primary"
+              onClick={onLoadTracking}
+              disabled={loading || !workOrderId || !quotation?.erp_draft_id}
+            >
+              {loading ? "加载中..." : "加载跟单与质量数据 →"}
+            </button>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }

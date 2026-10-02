@@ -134,6 +134,7 @@ export type WorkOrder = {
   status: string;
   line_name: string;
   authority: string;
+  due_date?: string;
 };
 
 export type NetRequirementItem = {

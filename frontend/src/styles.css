@@ -747,6 +747,16 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 
 .kpi-card.clickable { cursor: pointer; }
+/* KPI 卡第三行补充说明：单行省略，不撑高卡片（完整说明放 title 悬停） */
+.kpi-card small {
+  grid-column: 2;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--faint);
+}
 .kpi-card.clickable:hover {
   border-color: #8dc9bf;
   box-shadow: var(--shadow-md);
@@ -1544,6 +1554,17 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   flex-direction: column;
   gap: 8px;
 }
+/* 无关联工单时的主 CTA 卡（2026-10-02 信息架构调整：下达置顶，不再是通栏底条） */
+.dispatch-block.primary-cta {
+  border: 1px solid rgba(10, 125, 116, 0.35);
+  background: linear-gradient(135deg, #f2faf8, #e9f5f1);
+  border-radius: var(--r-md);
+  padding: 16px 18px;
+}
+.dispatch-lead { display: flex; flex-direction: column; gap: 4px; }
+.dispatch-lead strong { color: var(--ink); font-size: 14px; }
+.dispatch-lead span { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.dispatch-cta-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .dispatch-block > small { color: var(--muted); }
 .dispatch-confirm code, .dispatch-executing {
   display: block;
@@ -2392,6 +2413,48 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 
 /* ===== 智能协同问答（阶段五：协调智能体） ===== */
 .assistant-panel { margin-top: 8px; }
+/* 问答面板保持挂载：切到其他模块时隐藏而非卸载，返回后聊天记录仍在 */
+.hidden-module-pane { display: none; }
+/* 会话消息列表（2026-10-02：连续聊天，历史轮次沉入列表；输入框固定在列表上方，
+   消息区内部滚动，新内容自动滚动到最新一条） */
+.assistant-messages {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 60vh; min-height: 160px; overflow-y: auto; padding: 4px 2px; margin-top: 10px;
+}
+.assistant-msg {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  background: var(--surface); font-size: 13px; line-height: 1.55;
+}
+.assistant-msg.user { border-color: rgba(10, 125, 116, 0.3); background: var(--teal-light); }
+.assistant-msg-role { font-size: 11px; font-weight: 700; color: var(--muted); }
+.assistant-msg.user .assistant-msg-role { color: var(--teal-dark); }
+.assistant-msg-body { color: var(--ink-2); word-break: break-word; }
+.assistant-msg-body.md-body p { margin: 0 0 6px; }
+/* 回答分层折叠：调用链/质量明细/数据缺失默认收起（结论与关键事实保持首屏） */
+.assistant-fold {
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 6px 10px; background: var(--surface);
+}
+.assistant-fold > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
+}
+.assistant-fold[open] > summary { margin-bottom: 8px; }
+/* 历史会话切换器（2026-10-02：保留期内的旧对话可切回查看） */
+.assistant-sessions {
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 6px 10px; margin-top: 8px; background: var(--surface);
+}
+.assistant-sessions > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none; }
+.assistant-sessions[open] > summary { margin-bottom: 8px; }
+.assistant-sessions-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.assistant-session-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  background: var(--surface); cursor: pointer; text-align: left; font-size: 12px;
+}
+.assistant-session-row:hover:not(:disabled) { border-color: var(--teal); }
+.assistant-session-row.current { border-color: var(--teal); color: var(--muted); cursor: default; }
+.assistant-session-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.assistant-session-row time { color: var(--faint); font-size: 11px; white-space: nowrap; }
 .assistant-input-row { display: flex; gap: 10px; align-items: flex-end; }
 .assistant-input-row textarea {
   flex: 1; resize: vertical; min-height: 48px;
@@ -2756,6 +2819,17 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 }
 .module-hint-card strong { color: var(--ink); }
 .module-hint-card span { color: var(--muted); font-size: 13px; flex: 1; min-width: 200px; }
+.module-hint-card .hint-actions { display: flex; gap: 8px; }
+.module-actions { display: flex; justify-content: flex-end; margin: 8px 0 4px; }
+/* 全厂跟单（2026-10-02）：跨订单选择任意未完工工单 */
+.global-track-panel { margin-bottom: 12px; }
+.global-track-row { display: flex; gap: 10px; align-items: center; }
+.global-track-row select {
+  flex: 1; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  font-size: 13px; font-family: inherit; color: var(--ink-2); background: var(--surface);
+  min-width: 0;
+}
+.global-track-row .button { white-space: nowrap; }
 .subview-tabs { margin-bottom: 4px; }
 
 /* 业务总览 */

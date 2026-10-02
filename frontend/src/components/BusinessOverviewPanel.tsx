@@ -97,6 +97,10 @@ export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCo
 
       {error && <div className="error-banner"><span>总览加载失败</span> {error}<button onClick={() => setError("")}>×</button></div>}
 
+      <p className="field-hint">
+        待审批数为全部业务记录的全局口径（含历史演示记录），不是当前单个订单的数量；逐条处理请进「审批与审计」。
+      </p>
+
       <section className="panel">
         <div className="panel-heading">
           <div>

@@ -266,6 +266,27 @@ async def require_real_identity(
         ) from exc
 
 
+async def require_real_human_identity(
+    authorization: str | None = Header(default=None),
+):
+    """审批/写入门禁：必须是浏览器登录的审批账号（OpenMES）会话。
+
+    与 require_real_identity 的区别：无 Authorization 头时**不回落**到
+    ERPNext 服务端集成账号——集成账号是程序的数据连接身份，不能替人审批
+    （2026-10-02 用户实测发现未登录也能走完报价审批与 ERP 草稿，根源即此）。
+    只读查询仍无需登录。
+    """
+    if not authorization or not authorization.strip():
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "approver_login_required",
+                "message": "审批/写入需要审批账号登录：请到「系统连接」用 OpenMES 账号登录后再操作（未登录时本操作不会以服务端集成账号名义执行）",
+            },
+        )
+    return await require_real_identity(authorization=authorization)
+
+
 def _actor_for_request(provided: str | None, identity, capability: str) -> str:
     """Validate an optional legacy actor field and enforce the business role."""
     from app.services.identity import ensure_role
@@ -869,7 +890,7 @@ async def real_order_request_quality_issue_resolution(
     issue_id: str,
     body: RealOrderQualityIssueResolutionRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """建立质量问题处理审批记录，不写入 OpenMES。"""
     from app.services.real_order import request_quality_issue_resolution
@@ -890,7 +911,7 @@ async def real_order_approve_quality_issue_resolution(
     approval_id: str,
     body: RealOrderQualityIssueApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """批准质量问题处理请求；此步骤也不写入 OpenMES。"""
     from app.services.real_order import approve_quality_issue_resolution
@@ -958,7 +979,7 @@ class RealOrderWorkOrderDispatchWriteRequest(BaseModel):
 async def real_order_request_work_order_dispatch(
     body: RealOrderWorkOrderDispatchRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """① 建立"工单下达"审批：只登记将执行内容，不写 OpenMES。"""
     from app.services.real_order import request_work_order_dispatch
@@ -975,7 +996,7 @@ async def real_order_approve_work_order_dispatch(
     approval_id: str,
     body: RealOrderWorkOrderDispatchApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """② 人工批准工单下达审批。"""
     from app.services.real_order import approve_work_order_dispatch
@@ -991,7 +1012,7 @@ async def real_order_approve_work_order_dispatch(
 async def real_order_dispatch_work_order(
     body: RealOrderWorkOrderDispatchWriteRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """③ 审批通过后创建 OpenMES 工单并回读验证（customer_order_no 幂等）。"""
     from app.services.real_order import dispatch_work_order_to_openmes
@@ -1033,7 +1054,7 @@ class RealOrderProductionReportWriteRequest(BaseModel):
 async def real_order_request_production_report(
     body: RealOrderProductionReportRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """① 建立"真实报工"审批：预检（快照步骤/数量上限）+ 登记将执行内容，不写 OpenMES。"""
     from app.services.real_order import request_production_report
@@ -1059,7 +1080,7 @@ async def real_order_approve_production_report(
     approval_id: str,
     body: RealOrderProductionReportApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """② 人工批准真实报工审批。"""
     from app.services.real_order import approve_production_report
@@ -1075,7 +1096,7 @@ async def real_order_approve_production_report(
 async def real_order_execute_production_report(
     body: RealOrderProductionReportWriteRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """③ 审批通过后走 OpenMES 官方报工链路（建批次→开工→完工）并回读验证（lot_number 幂等）。"""
     from app.services.real_order import execute_production_report
@@ -1124,7 +1145,7 @@ async def real_order_list_issue_types() -> list[dict]:
 async def real_order_request_issue_registration(
     body: RealOrderIssueRegistrationRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """① 建立"质量问题登记"审批：预检（工单/类型真实存在）+ 登记内容，不写 OpenMES。"""
     from app.services.real_order import request_issue_registration
@@ -1147,7 +1168,7 @@ async def real_order_approve_issue_registration(
     approval_id: str,
     body: RealOrderIssueRegistrationApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """② 人工批准质量问题登记审批。"""
     from app.services.real_order import approve_issue_registration
@@ -1163,7 +1184,7 @@ async def real_order_approve_issue_registration(
 async def real_order_execute_issue_registration(
     body: RealOrderIssueRegistrationWriteRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """③ 审批通过后创建 OpenMES 质量问题并回读验证（work_order_id+title 幂等）。"""
     from app.services.real_order import execute_issue_registration
@@ -1182,7 +1203,7 @@ async def real_order_resolve_quality_issue(
     issue_id: str,
     body: RealOrderQualityIssueResolveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """使用已持久化且已批准的审批记录写入 OpenMES，并回读验证。"""
     from app.services.real_order import resolve_quality_issue
@@ -1207,7 +1228,7 @@ async def real_order_request_quality_issue_disposition(
     issue_id: str,
     body: RealOrderQualityDispositionRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """校验并登记 NCR 处置审批，不直接写 OpenMES。"""
     from app.services.real_order import request_quality_issue_disposition
@@ -1233,7 +1254,7 @@ async def real_order_approve_quality_issue_disposition(
     approval_id: str,
     body: RealOrderQualityIssueApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     from app.services.real_order import approve_quality_issue_disposition
     approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_approval")
@@ -1249,7 +1270,7 @@ async def real_order_set_quality_issue_disposition(
     issue_id: str,
     body: RealOrderQualityDispositionWriteRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     from app.services.real_order import set_quality_issue_disposition
     approved_by = _actor_for_request(body.approved_by, identity, "quality_disposition_write")
@@ -1273,7 +1294,7 @@ async def real_order_request_quality_issue_close(
     issue_id: str,
     body: RealOrderQualityCloseRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     from app.services.real_order import request_quality_issue_close
     requested_by = _actor_for_request(body.requested_by, identity, "quality_resolution_request")
@@ -1289,7 +1310,7 @@ async def real_order_approve_quality_issue_close(
     approval_id: str,
     body: RealOrderQualityIssueApproveRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     from app.services.real_order import approve_quality_issue_close
     approved_by = _actor_for_request(body.approved_by, identity, "quality_resolution_approval")
@@ -1305,7 +1326,7 @@ async def real_order_close_quality_issue(
     issue_id: str,
     body: RealOrderQualityCloseWriteRequest,
     _write_access: bool = Depends(require_real_write_access),
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     from app.services.real_order import close_quality_issue_with_approval
     approved_by = _actor_for_request(body.approved_by, identity, "quality_close_write")
@@ -1422,7 +1443,7 @@ async def real_order_get_procurement_plan(plan_id: str) -> dict:
 async def real_order_approve_procurement_plan(
     plan_id: str,
     body: RealOrderProcurementApproveRequest,
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """审批采购方案（选择供应商方案 + 批准/驳回）。"""
     from app.services.real_order import approve_procurement_plan
@@ -1443,7 +1464,7 @@ async def real_order_approve_procurement_plan(
 @app.post("/api/real-orders/erp/draft/po-from-plan", tags=["real-orders"])
 async def real_order_create_po_from_plan(
     body: RealOrderPoDraftFromPlanRequest,
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """根据已审批采购方案创建 ERP 采购订单草稿（创建+回读确认）。"""
     from app.services.real_order import create_erp_purchase_order_from_plan
@@ -1569,7 +1590,7 @@ async def real_order_get_quotation(quotation_id: str) -> dict:
 async def real_order_approve_quotation(
     quotation_id: str,
     body: RealOrderQuotationApproveRequest,
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """审批报价（通过/驳回）。审批通过后可用于创建 ERP 草稿。"""
     from app.services.real_order import approve_quotation
@@ -1596,7 +1617,7 @@ async def real_order_list_approvals() -> list[dict]:
 @app.post("/api/real-orders/erp/draft/from-quotation", tags=["real-orders"])
 async def real_order_create_so_from_quotation(
     body: RealOrderErpDraftFromQuotationRequest,
-    identity=Depends(require_real_identity),
+    identity=Depends(require_real_human_identity),
 ) -> dict:
     """根据已审批报价创建 ERP 销售订单草稿（创建+回读确认）。"""
     from app.services.real_order import create_erp_sales_order_from_quotation
@@ -1789,6 +1810,70 @@ async def real_order_assistant_ask_stream(body: dict):
     )
 
 
+@app.get("/api/real-orders/assistant/sessions", tags=["real-orders"])
+async def real_order_assistant_sessions(limit: int = 20) -> dict:
+    """协同问答历史会话列表（只读；前端"历史会话"切换器用）。
+
+    按最近活跃倒序返回会话锚点（session_id/title/时间）。只含会话元数据，
+    不含消息正文、令牌或业务上下文细节；消息按需经 sessions/{id}/messages 获取。
+    """
+    from sqlalchemy import select
+
+    from app.persistence.database import SessionLocal
+    from app.persistence.models import AssistantSessionRow
+
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(AssistantSessionRow)
+            .order_by(AssistantSessionRow.last_active_at.desc())
+            .limit(max(1, min(limit, 50)))
+        ).scalars().all()
+    return {
+        "sessions": [
+            {
+                "session_id": row.session_id,
+                "title": row.title,
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "last_active_at": row.last_active_at.isoformat() if row.last_active_at else "",
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/real-orders/assistant/sessions/{session_id}/messages", tags=["real-orders"])
+async def real_order_assistant_session_messages(session_id: str) -> dict:
+    """协同问答会话历史消息（只读；前端刷新后恢复聊天记录用）。
+
+    只返回 role/content/created_at 原文——不含会话令牌、凭据或完整工具参数；
+    消息按 ASSISTANT_RETENTION_DAYS 过期清理，过期后自然返回空列表。
+    """
+    from sqlalchemy import select
+
+    from app.persistence.database import SessionLocal
+    from app.persistence.models import AssistantMessageRow
+
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(AssistantMessageRow)
+            .where(AssistantMessageRow.session_id == session_id.strip())
+            .order_by(AssistantMessageRow.id.asc())
+            .limit(200)
+        ).scalars().all()
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "id": row.id,
+                "role": row.role,
+                "content": row.content,
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+            }
+            for row in rows
+        ],
+    }
+
+
 @app.get("/api/real-orders/collaboration/events", tags=["real-orders"])
 async def collaboration_events_list(limit: int = 20, status: str | None = None) -> dict:
     """跨智能体协同事件列表（P1；只读）。"""
@@ -1811,7 +1896,7 @@ async def collaboration_event_detail(event_id: str) -> dict:
 @app.post("/api/real-orders/collaboration/events/{event_id}/retry", tags=["real-orders"])
 async def collaboration_event_retry(
     event_id: str,
-    identity: dict = Depends(require_real_identity),
+    identity: dict = Depends(require_real_human_identity),
 ) -> dict:
     """人工重试失败的事件协同（重试上限内）。"""
     from app.services.collaboration import retry_event
@@ -1826,7 +1911,7 @@ async def collaboration_event_retry(
 async def collaboration_event_takeover(
     event_id: str,
     body: dict | None = None,
-    identity: dict = Depends(require_real_identity),
+    identity: dict = Depends(require_real_human_identity),
 ) -> dict:
     """人工接管：停止自动协同，记录操作者与备注（处置仍走 NCR 审批门禁）。"""
     from app.services.collaboration import takeover_event

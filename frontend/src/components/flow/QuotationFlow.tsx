@@ -151,9 +151,15 @@ export function QuotationReviewPanel({
               ? `${quotation.delivery_estimate.estimated_days} 天`
               : "数据缺失"}
           </strong>
-          {quotation.delivery_estimate?.basis === "missing" && (
+          {quotation.delivery_estimate?.basis === "missing" ? (
             <small>需补录 ERP 交期数据</small>
-          )}
+          ) : quotation.delivery_estimate?.basis === "mes_work_order_schedule" ? (
+            <small title={quotation.delivery_estimate?.note}>
+              MES 排程倒计时 · {quotation.delivery_estimate.source}
+            </small>
+          ) : quotation.delivery_estimate?.basis === "stock_available" ? (
+            <small>成品库存可直发</small>
+          ) : null}
         </div>
         <div className="kpi-card">
           <span

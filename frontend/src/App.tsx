@@ -272,7 +272,7 @@ function App() {
             {connectionText}
           </div>
           <p className="sidebar-approver">
-            当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b>
+            当前审批人：<b>{realIdentity ? `${realIdentity.actor_id}（OpenMES）` : "未登录"}</b>
             <br />
             {isRealModule(page)
               ? <>真实 ERP/MES 数据<br />Agent 辅助 · 草稿写入需审批</>
@@ -290,7 +290,7 @@ function App() {
               <i />
               {connectionText}
             </div>
-            <span className="topbar-approver">当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b></span>
+            <span className="topbar-approver">当前审批人：<b>{realIdentity ? `${realIdentity.actor_id}（OpenMES）` : "未登录"}</b></span>
             {mockDemoEnabled && projects.length > 0 && !isRealModule(page) && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.project_id} value={item.project_id}>{item.project_id} · {item.scenario === "normal_order" ? "正常订单" : item.scenario === "material_shortage" ? "缺料协作" : item.scenario === "quality_hold" ? "质量冻结" : "订单加急"}</option>)}
             </select>}
