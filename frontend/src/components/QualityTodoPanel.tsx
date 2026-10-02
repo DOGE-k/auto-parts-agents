@@ -35,7 +35,7 @@ export default function QualityTodoPanel({
       </div>
       {!hasOpenmesSession && (
         <p className="quality-todo-hint">
-          登录后查看质量待办——请展开上方"会话设置"，用 OpenMES 账号建立短期会话（仅当前浏览器会话生效）。
+          登录后查看质量待办——请到左侧「系统连接」用 OpenMES 账号建立短期会话（仅当前浏览器会话生效）。
         </p>
       )}
       {hasOpenmesSession && qualityTodoError && (

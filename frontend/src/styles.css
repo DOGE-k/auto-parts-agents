@@ -2713,3 +2713,90 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   background: #eef2ff;
   color: #4338ca;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   信息架构改版（2026-10-02 §3.56）：左侧导航分组 / 业务总览 / 系统连接
+   ═══════════════════════════════════════════════════════════════════ */
+.nav-group { display: grid; gap: 3px; margin-top: 10px; }
+.nav-group-caption {
+  font-size: 11px; letter-spacing: 0.12em; color: #5f7a76;
+  padding: 2px 12px 4px; text-transform: uppercase;
+}
+.nav-group-caption.mock { color: #a8833a; }
+.sidebar-approver { color: #7d9490; font-size: 12px; line-height: 1.6; }
+.sidebar-approver b { color: #cfe5e0; font-weight: 600; }
+.topbar-approver { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.topbar-approver b { color: var(--ink); font-weight: 600; }
+
+/* 页头紧凑审批身份 */
+.real-identity-compact { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.identity-roles { display: inline-block; }
+.identity-roles summary { cursor: pointer; color: var(--teal); font-size: 12px; }
+.identity-roles p { margin: 6px 0 0; font-size: 12px; color: var(--muted); max-width: 560px; line-height: 1.6; }
+
+/* 会话过期提醒（跳转系统连接） */
+.session-expiry-warning { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 问答常用问题芯片 + 回答跳转 */
+.assistant-chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip-caption { font-size: 12px; color: var(--muted); }
+.assistant-chip {
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
+}
+.assistant-chip:hover { border-color: var(--teal); color: var(--teal); background: var(--teal-light); }
+.assistant-chip:disabled { opacity: 0.5; cursor: default; }
+.assistant-jump-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+/* 模块接续提示卡（销售/采购/生产模块间的引导） */
+.module-hint-card {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px dashed var(--line); border-radius: 12px;
+  background: var(--surface-2); padding: 14px 18px; margin: 12px 0;
+}
+.module-hint-card strong { color: var(--ink); }
+.module-hint-card span { color: var(--muted); font-size: 13px; flex: 1; min-width: 200px; }
+.subview-tabs { margin-bottom: 4px; }
+
+/* 业务总览 */
+.overview-panel { display: grid; gap: 14px; }
+.overview-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.overview-columns { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 1080px) { .overview-columns { grid-template-columns: 1fr; } }
+.attention-list { display: grid; gap: 8px; }
+.attention-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 14px; background: var(--surface);
+}
+.attention-row code { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.attention-meta { color: var(--muted); font-size: 13px; flex: 1; min-width: 160px; }
+.run-list { display: grid; gap: 6px; }
+.run-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line-soft); padding: 8px 4px; font-size: 13px;
+}
+.run-row:last-child { border-bottom: none; }
+.run-row code { font-family: var(--mono); font-size: 12px; color: var(--muted); flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-ask-row { display: flex; gap: 8px; }
+.overview-ask-row input { flex: 1; }
+
+/* 系统连接 */
+.connection-panel { display: grid; gap: 14px; max-width: 860px; }
+.connection-rows { display: grid; gap: 10px; }
+.connection-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 16px; background: var(--surface);
+  font-size: 13px; color: var(--muted);
+}
+.connection-row > span:nth-of-type(2) { flex: 1; min-width: 220px; }
+.connection-row b { font-weight: 600; }
+.connection-account { display: grid; gap: 8px; }
+.connection-account-row {
+  display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-soft);
+  padding: 8px 2px; font-size: 13px; color: var(--muted);
+}
+.connection-account-row b { color: var(--ink); }
+.advanced-settings { font-size: 13px; color: var(--muted); }
+.advanced-settings summary { cursor: pointer; color: var(--teal); margin-bottom: 8px; }
+.advanced-settings label { display: grid; gap: 4px; margin: 10px 0; }
+.panel-heading-actions { display: flex; align-items: center; gap: 8px; }

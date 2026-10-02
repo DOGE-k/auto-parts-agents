@@ -6,9 +6,10 @@
 2. [当前状态与整改计划](current_status_and_fix_plan.md)：真实代码、接口、测试、运行记录和遗留问题的证据账本；最新追加的小节优先。
 3. [§3.52 去处置联动与工程收口执行记录](handoff_2026-10-01_event_disposal_and_stabilization.md)：事件导航、SQLite 回退、缺口回归和当前复核边界。
 4. [能力目录运行时构建交接](handoff_2026-10-02_dynamic_capability_catalog.md)：专项任务的设计依据与验收标准（已于 §3.55 实施）。
-5. [真实报工与质量问题登记交接](handoff_2026-09-30_report_and_issue.md)：两项写入能力的接口契约和实现背景。
-6. [演示剧本](demo_script.md)：当前真实业务演示步骤、记录编号和已知限制。
-7. [项目根目录 README](../README.md)：部署、配置、启动和排障。
+5. [真实业务前端信息架构改版](handoff_2026-10-02_frontend_information_architecture.md)：左侧导航、业务模块和会话设置的改版范围。
+6. [真实报工与质量问题登记交接](handoff_2026-09-30_report_and_issue.md)：两项写入能力的接口契约和实现背景。
+7. [演示剧本](demo_script.md)：当前真实业务演示步骤、记录编号和已知限制。
+8. [项目根目录 README](../README.md)：部署、配置、启动和排障。
 
 ## 文档职责
 
@@ -18,6 +19,7 @@
 | `current_status_and_fix_plan.md` | 阶段证据和历史状态 | 追加记录，不覆盖旧证据 |
 | `handoff_2026-10-01_event_disposal_and_stabilization.md` | §3.52 执行记录 | 已完成任务、验收结果和剩余边界 |
 | `handoff_2026-10-02_dynamic_capability_catalog.md` | P0-5 专项交接 | 能力目录动态化的设计依据、边界和验收（§3.55 已实施）|
+| `handoff_2026-10-02_frontend_information_architecture.md` | 前端改版专项交接 | 左侧导航、业务模块、会话设置和比赛版验收标准 |
 | `handoff_2026-09-30_report_and_issue.md` | 报工和质量登记交接 | 已完成部分用于核对，未完成部分按真实验证复查 |
 | `demo_script.md` | 页面演示和验收复现 | 路径来自已验证真实系统；编号和数量属历史记录，运行前必须重新核对 |
 | `next_development_plan.md` | 早期阶段计划 | 保留历史，未勾选任务不自动视为当前待办 |

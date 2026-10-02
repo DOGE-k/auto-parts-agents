@@ -1,8 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { api, agentNames, Approval, Case, Event, eventNames, ProductionCompletion, Project, writeHeaders } from "./api";
-import RealBusinessPage from "./RealBusinessPage";
+import { api, agentNames, Approval, Case, Event, eventNames, Project, writeHeaders } from "./api";
+import RealBusinessPage, { type RealModuleKey } from "./RealBusinessPage";
+import type { RealIdentity } from "./api";
 
-type PageKey = "real-business" | "scenarios" | "dashboard" | "agents" | "plans" | "approvals" | "audit" | "mes-completions";
+type PageKey =
+  | RealModuleKey
+  | "scenarios" | "dashboard" | "agents" | "plans" | "approvals" | "mock-audit";
 type Snapshot = Record<string, any>;
 type RuntimeSurface = {
   mock_demo_enabled: boolean;
@@ -11,36 +14,68 @@ type RuntimeSurface = {
   mock_api_prefixes: string[];
 };
 
-const navigation: { key: PageKey; label: string; icon: string; mock?: boolean }[] = [
-  { key: "real-business", label: "真实业务", icon: "◆" },
-  { key: "scenarios", label: "场景与回放", icon: "◫", mock: true },
-  { key: "dashboard", label: "协同驾驶舱", icon: "▦", mock: true },
-  { key: "agents", label: "Agent 工作台", icon: "◉", mock: true },
-  { key: "plans", label: "方案对比", icon: "⇄", mock: true },
-  { key: "approvals", label: "人工审批箱", icon: "✓", mock: true },
-  { key: "audit", label: "审计与追溯", icon: "⌁", mock: true },
-  { key: "mes-completions", label: "MES 完工数据", icon: "▤" },
+const REAL_MODULES: RealModuleKey[] = [
+  "assistant", "overview", "sales", "procurement", "production", "quality", "audit", "connection",
+];
+const isRealModule = (page: PageKey): page is RealModuleKey => (REAL_MODULES as string[]).includes(page);
+
+// 真实业务导航按工厂业务模块分组（信息架构改版 §4.1；默认入口为 AI 协同问答）
+const realNavGroups: { caption: string; items: { key: RealModuleKey; label: string; icon: string }[] }[] = [
+  { caption: "工作台", items: [{ key: "overview", label: "业务总览", icon: "▦" }] },
+  {
+    caption: "业务协同",
+    items: [
+      { key: "assistant", label: "AI 协同问答", icon: "◆" },
+      { key: "sales", label: "销售与订单", icon: "◈" },
+      { key: "procurement", label: "采购与缺料", icon: "⇄" },
+      { key: "production", label: "生产跟单", icon: "▤" },
+      { key: "quality", label: "质量中心", icon: "⚠" },
+    ],
+  },
+  {
+    caption: "记录与管理",
+    items: [
+      { key: "audit", label: "审批与审计", icon: "⌁" },
+      { key: "connection", label: "系统连接", icon: "⚙" },
+    ],
+  },
 ];
 
+// Mock 演示导航（合成数据；真实模式下整组隐藏，不与真实业务混在一组）
+const mockNavItems: { key: PageKey; label: string; icon: string }[] = [
+  { key: "scenarios", label: "场景与回放", icon: "◫" },
+  { key: "dashboard", label: "协同驾驶舱", icon: "▦" },
+  { key: "agents", label: "Agent 工作台", icon: "◉" },
+  { key: "plans", label: "方案对比", icon: "⇄" },
+  { key: "approvals", label: "人工审批箱", icon: "✓" },
+  { key: "mock-audit", label: "审计与追溯", icon: "⌁" },
+];
+
+const pageLabels = Object.fromEntries([
+  ...realNavGroups.flatMap((g) => g.items.map((i) => [i.key, i.label])),
+  ...mockNavItems.map((i) => [i.key, i.label]),
+] as [PageKey, string][]) as Record<PageKey, string>;
+
 function App() {
-  const [page, setPage] = useState<PageKey>("real-business");
+  // 默认主入口：AI 协同问答（信息架构改版 §八.1）
+  const [page, setPage] = useState<PageKey>("assistant");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
-  const [completions, setCompletions] = useState<ProductionCompletion[]>([]);
-  const [completionMeta, setCompletionMeta] = useState<Record<string, any> | null>(null);
-  const [completionsLoading, setCompletionsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [runtimeSurface, setRuntimeSurface] = useState<RuntimeSurface | null>(null);
+  // 当前审批人（由 RealBusinessPage 解析后上报，供顶栏与侧栏展示）
+  const [realIdentity, setRealIdentity] = useState<RealIdentity | null>(null);
+  // 业务总览"去提问"带来的一条待发送问题（填入问答输入框后即消费）
+  const [pendingQuestion, setPendingQuestion] = useState("");
   // Real mode is the safe initial state while the runtime surface is loading;
   // do not briefly expose Mock navigation during that request.
   const mockDemoEnabled = runtimeSurface?.mock_demo_enabled ?? false;
-  const visibleNavigation = mockDemoEnabled ? navigation : navigation.filter((item) => !item.mock);
 
   const refreshProjects = useCallback(async () => {
     const data = await api<Project[]>("/projects");
@@ -73,22 +108,6 @@ function App() {
     }
   }, [projectId, refreshProject, refreshProjects, runtimeSurface]);
 
-  const refreshCompletions = useCallback(async () => {
-    setCompletionsLoading(true);
-    try {
-      const result = await api<{ data: ProductionCompletion[]; meta?: Record<string, any> }>(
-        "/integrations/openmes/production-completions",
-      );
-      setCompletions(result.data ?? []);
-      setCompletionMeta(result.meta ?? null);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "加载 OpenMES 完工数据失败");
-    } finally {
-      setCompletionsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     void Promise.all([api<RuntimeSurface>("/runtime/surface"), api("/health")])
       .then(([surface]) => {
@@ -101,9 +120,10 @@ function App() {
       .catch((e) => setError(e instanceof Error ? e.message : "连接本地服务失败"));
   }, [refreshProjects]);
 
+  // 真实模式下不暴露 Mock 页面；误入时回到默认主入口（AI 协同问答）
   useEffect(() => {
-    if (runtimeSurface && !runtimeSurface.mock_demo_enabled && page !== "real-business" && page !== "mes-completions") {
-      setPage("real-business");
+    if (runtimeSurface && !runtimeSurface.mock_demo_enabled && !isRealModule(page)) {
+      setPage("assistant");
     }
   }, [page, runtimeSurface]);
 
@@ -121,10 +141,6 @@ function App() {
     }
     void refreshProject(projectId).catch((e) => setError(e instanceof Error ? e.message : "加载项目失败"));
   }, [projectId, refreshProject, runtimeSurface]);
-
-  useEffect(() => {
-    if (page === "mes-completions") void refreshCompletions();
-  }, [page, refreshCompletions]);
 
   useEffect(() => {
     if (!runtimeSurface?.mock_demo_enabled || !projectId) return;
@@ -213,23 +229,40 @@ function App() {
         </div>
         <div className="sidebar-caption">工作空间</div>
         <nav className="nav-list">
-          {visibleNavigation.map((item) => (
-            <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
-              <span className="nav-icon">{item.icon}</span>{item.label}
-              {item.mock && <span className="nav-mock-badge">Mock</span>}
-              {item.key === "approvals" && currentApprovals.length > 0 && <span className="nav-count">{currentApprovals.length}</span>}
-            </button>
+          {realNavGroups.map((group) => (
+            <div className="nav-group" key={group.caption}>
+              <div className="nav-group-caption">{group.caption}</div>
+              {group.items.map((item) => (
+                <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
+                  <span className="nav-icon">{item.icon}</span>{item.label}
+                </button>
+              ))}
+            </div>
           ))}
+          {mockDemoEnabled && (
+            <div className="nav-group">
+              <div className="nav-group-caption mock">Mock 演示（合成数据）</div>
+              {mockNavItems.map((item) => (
+                <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
+                  <span className="nav-icon">{item.icon}</span>{item.label}
+                  <span className="nav-mock-badge">Mock</span>
+                  {item.key === "approvals" && currentApprovals.length > 0 && <span className="nav-count">{currentApprovals.length}</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </nav>
         <div className="sidebar-bottom">
-          <div className={`mode-indicator ${page === "real-business" ? "real-mode" : ""}`}>
+          <div className={`mode-indicator ${isRealModule(page) ? "real-mode" : ""}`}>
             <i />
-            {page === "real-business" ? "ERPNext + OpenMES 真实连接" : "Mock + OpenMES 只读"}
+            {isRealModule(page) ? "ERPNext + OpenMES 已连接" : "Mock + OpenMES 只读"}
           </div>
-          <p>
-            {page === "real-business"
+          <p className="sidebar-approver">
+            当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b>
+            <br />
+            {isRealModule(page)
               ? <>真实 ERP/MES 数据<br />Agent 辅助 · 草稿写入需审批</>
-              : <>场景回放仍是合成数据<br />MES 完工页读取真实 OpenMES</>}
+              : <>场景回放仍是合成数据<br />生产跟单含真实 MES 完工数据</>}
           </p>
           <div className="version-tag">Runtime · 0.1.0</div>
         </div>
@@ -237,13 +270,14 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumbs"><span>汽车零部件</span><b>/</b><strong>{navigation.find((item) => item.key === page)?.label}</strong></div>
+          <div className="breadcrumbs"><span>汽车零部件</span><b>/</b><strong>{pageLabels[page] ?? page}</strong></div>
           <div className="topbar-actions">
-            <div className={`connection ${page === "real-business" ? "real-mode" : ""}`}>
+            <div className={`connection ${isRealModule(page) ? "real-mode" : ""}`}>
               <i />
-              {page === "real-business" ? "ERPNext + OpenMES 真实数据" : "Mock + OpenMES 只读"}
+              {isRealModule(page) ? "ERPNext + OpenMES · 已连接" : "Mock + OpenMES 只读"}
             </div>
-            {mockDemoEnabled && projects.length > 0 && page !== "real-business" && page !== "mes-completions" && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+            <span className="topbar-approver">当前审批人：<b>{realIdentity ? realIdentity.display_name : "未登录"}</b></span>
+            {mockDemoEnabled && projects.length > 0 && !isRealModule(page) && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.project_id} value={item.project_id}>{item.project_id} · {item.scenario === "normal_order" ? "正常订单" : item.scenario === "material_shortage" ? "缺料协作" : item.scenario === "quality_hold" ? "质量冻结" : "订单加急"}</option>)}
             </select>}
             <button className="icon-button" title="刷新" onClick={() => void refreshAll()}>↻</button>
@@ -251,18 +285,29 @@ function App() {
         </header>
 
         {error && <div className="error-banner"><span>连接或操作失败</span> {error}<button onClick={() => setError("")}>×</button></div>}
-        {page === "real-business" && <RealBusinessPage />}
+        {isRealModule(page) && (
+          <RealBusinessPage
+            activeModule={page}
+            onNavigate={setPage}
+            onIdentityChange={setRealIdentity}
+            pendingQuestion={pendingQuestion}
+            onPendingQuestionConsumed={() => setPendingQuestion("")}
+            onAskQuestion={(question) => {
+              setPendingQuestion(question);
+              setPage("assistant");
+            }}
+          />
+        )}
         {page === "scenarios" && <ScenarioPage projects={projects} busy={busy} onRun={runScenario} onSelect={(id) => { setProjectId(id); setPage("dashboard"); }} onReset={resetProject} />}
         {page === "dashboard" && <DashboardPage snapshot={snapshot} events={events} onGoApprovals={() => setPage("approvals")} />}
         {page === "agents" && <AgentsPage snapshot={snapshot} events={events} />}
         {page === "plans" && <PlansPage snapshot={snapshot} />}
         {page === "approvals" && <ApprovalsPage approvals={currentApprovals} snapshot={snapshot} busy={busy} onDecide={decide} />}
-        {page === "audit" && <AuditPage events={events} audit={audit} snapshot={snapshot} />}
-        {page === "mes-completions" && <MesCompletionsPage rows={completions} meta={completionMeta} loading={completionsLoading} onRefresh={() => void refreshCompletions()} />}
+        {page === "mock-audit" && <AuditPage events={events} audit={audit} snapshot={snapshot} />}
       </main>
       {toast && <div className="toast">✓ &nbsp;{toast}</div>}
       {busy && <div className="busy-indicator"><span />处理中</div>}
-      {!selectedProject && page !== "scenarios" && page !== "mes-completions" && page !== "real-business" && <div className="empty-overlay"><div className="empty-card"><span className="empty-symbol">◫</span><h2>先启动一个演示场景</h2><p>选择正常订单或缺料协作，生成带完整审计时间线的合成项目。</p><button className="button primary" onClick={() => setPage("scenarios")}>选择场景</button></div></div>}
+      {!selectedProject && !isRealModule(page) && page !== "scenarios" && <div className="empty-overlay"><div className="empty-card"><span className="empty-symbol">◫</span><h2>先启动一个演示场景</h2><p>选择正常订单或缺料协作，生成带完整审计时间线的合成项目。</p><button className="button primary" onClick={() => setPage("scenarios")}>选择场景</button></div></div>}
     </div>
   );
 }
@@ -398,21 +443,6 @@ function AuditPage({ events, audit, snapshot }: { events: Event[]; audit: any[];
     <PageHeading mode="mock" eyebrow="审计与追溯（Mock 演示）" title="完整的事件因果链" subtitle="按 correlation_id 查看业务事实，再按 trace_id 关联协作、工具、审批和回放。" action={<div className="trace-chip">trace_id <code>{traceId ?? "—"}</code></div>} />
     <div className="audit-stats"><Kpi label="业务事件" value={events.length} icon="⌁" tone="blue" /><Kpi label="审计记录" value={audit.length} icon="▤" tone="purple" /><Kpi label="审批快照" value={snapshot?.pending_approvals?.length ?? 0} icon="✓" tone="amber" /></div>
     <div className="audit-grid"><section className="panel"><div className="panel-heading"><div><h2>事件与证据</h2><p>事实只追加，不覆盖</p></div></div><EventTimeline events={events} expanded /></section><section className="panel"><div className="panel-heading"><div><h2>运行审计</h2><p>工具输入输出使用 SHA-256 摘要</p></div></div>{audit.length === 0 ? <div className="empty-state compact">暂无审计动作</div> : <div className="audit-list">{audit.map((item) => <div className="audit-row" key={item.audit_id}><div className="audit-check">✓</div><div><strong>{item.action}</strong><small>{item.actor} · {new Date(item.created_at).toLocaleString("zh-CN")}</small><code>in {item.input_hash?.slice(0, 18)}…</code><code>out {item.output_hash?.slice(0, 18)}…</code></div><Badge value={item.result} /></div>)}</div>}</section></div>
-  </div>;
-}
-
-function MesCompletionsPage({ rows, meta, loading, onRefresh }: { rows: ProductionCompletion[]; meta: Record<string, any> | null; loading: boolean; onRefresh: () => void }) {
-  return <div className="page-content">
-    <PageHeading
-      eyebrow="真实 OpenMES 只读数据"
-      title="生产完工记录"
-      subtitle="通过 scoped ERP API Key 读取；本页不写入 OpenMES，也不把完工记录混入 Mock 场景。"
-      action={<button className="button ghost" disabled={loading} onClick={onRefresh}>{loading ? "读取中…" : "刷新数据"}</button>}
-    />
-    <section className="panel table-panel">
-      <div className="panel-heading"><div><h2>OpenMES production completions</h2><p>{meta?.count != null ? `返回 ${meta.count} 条` : `当前 ${rows.length} 条`}</p></div><span className="badge green">只读连接</span></div>
-      {rows.length === 0 ? <div className="empty-state large"><span>▤</span><h3>OpenMES 暂无完工记录</h3><p>认证和读取接口已经成功；当前系统还没有已完工的生产批次。</p></div> : <div className="table-wrap"><table><thead><tr><th>工单</th><th>产品</th><th>完工数量</th><th>完工时间</th><th>状态</th><th>原始数据</th></tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id ?? row.work_order_id ?? row.order_no ?? index)}><td><strong>{row.order_no ?? row.work_order_no ?? row.id ?? "—"}</strong><small>{row.line?.name ?? row.line_name ?? ""}</small></td><td>{row.product_name ?? row.product_type?.name ?? row.product_code ?? "—"}</td><td>{row.produced_quantity ?? row.quantity ?? row.completed_quantity ?? "—"}</td><td>{row.completed_at ?? row.completed_at_at ?? row.finished_at ?? row.updated_at ?? "—"}</td><td><span className="badge green">{row.status ?? "completed"}</span></td><td><details><summary>查看 JSON</summary><pre>{JSON.stringify(row, null, 2)}</pre></details></td></tr>)}</tbody></table></div>}
-    </section>
   </div>;
 }
 

@@ -3,6 +3,9 @@ import QualityTodoPanel from "./components/QualityTodoPanel";
 import CollaborationEventsPanel from "./components/CollaborationEventsPanel";
 import AgentRunsPanel from "./components/AgentRunsPanel";
 import AssistantPanel from "./components/AssistantPanel";
+import BusinessOverviewPanel from "./components/BusinessOverviewPanel";
+import ConnectionSettingsPanel from "./components/ConnectionSettingsPanel";
+import MesCompletionsPanel from "./components/MesCompletionsPanel";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useNcrWorkflows } from "./hooks/useNcrWorkflows";
 import {
@@ -53,18 +56,41 @@ import type {
   WorkOrder,
 } from "./types/realBusiness";
 
-// ========== 页面页签（阶段十信息架构优化：单页纵向堆叠改为页签分区） ==========
-type RealTabKey = "assistant" | "flow" | "quality" | "runs";
-const TAB_ITEMS: { key: RealTabKey; label: string }[] = [
-  { key: "assistant", label: "协同问答" },
-  { key: "flow", label: "订单流程" },
-  { key: "quality", label: "质量中心" },
-  { key: "runs", label: "运行记录" },
-];
+// ========== 真实业务一级模块（信息架构改版 §四/§七：左侧导航按工厂业务模块分组，
+// 本组件承载全部真实业务模块的视图，由 App 的一级导航控制当前模块） ==========
+export type RealModuleKey =
+  | "assistant"     // AI 协同问答（默认主入口）
+  | "overview"      // 业务总览
+  | "sales"         // 销售与订单（流程步骤 1-3）
+  | "procurement"   // 采购与缺料（流程步骤 4-6）
+  | "production"    // 生产跟单（流程步骤 7-8 + MES 完工数据）
+  | "quality"       // 质量中心（质量待办 + 协同事件）
+  | "audit"         // 审批与审计（Agent 运行记录）
+  | "connection";   // 系统连接（数据连接 + 审批账号 + 高级联调）
+
+// 各模块页头文案（信息架构改版 §4.2/§4.3：顶部保留业务语境，审批身份压缩为一行摘要）
+const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subtitle: string }> = {
+  assistant: { eyebrow: "AI 协同", title: "AI 协同问答", subtitle: "用一句话提问，协调者自动调度报价/采购/跟单/质量四个智能体查询真实 ERP/MES；写操作停在人工审批。" },
+  overview: { eyebrow: "工作台", title: "业务总览", subtitle: "待审批、质量待办、风险事件与最近业务链；处理动作进入对应业务模块。" },
+  sales: { eyebrow: "业务协同", title: "销售与订单", subtitle: "报价分析 → 报价审批 → ERP 销售订单草稿；后续采购与生产在对应模块继续。" },
+  procurement: { eyebrow: "业务协同", title: "采购与缺料", subtitle: "采购分析 → 供应商方案审批 → PO 草稿；缺料事件会自动协同相关方。" },
+  production: { eyebrow: "业务协同", title: "生产跟单", subtitle: "工单下达/选择 → 跟单进度 + 质量记录 + 发运门禁；MES 完工数据为只读视图。" },
+  quality: { eyebrow: "业务协同", title: "质量中心", subtitle: "跨工单质量待办与协同事件；处置走 NCR 审批门禁，接管≠已处置。" },
+  audit: { eyebrow: "记录与管理", title: "审批与审计", subtitle: "每次智能体调用的输入、结果与耗时全程留痕，可追溯。" },
+  connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与审批账号会话；调试令牌收在高级联调设置里。" },
+};
 
 // ========== 页面组件 ==========
-export default function RealBusinessPage() {
-  const [activeTab, setActiveTab] = useState<RealTabKey>("assistant");
+type Props = {
+  activeModule: RealModuleKey;
+  onNavigate: (module: RealModuleKey) => void;
+  onIdentityChange?: (identity: RealIdentity | null) => void;
+  pendingQuestion?: string;
+  onPendingQuestionConsumed?: () => void;
+  onAskQuestion?: (question: string) => void;
+};
+
+export default function RealBusinessPage({ activeModule, onNavigate, onIdentityChange, pendingQuestion, onPendingQuestionConsumed, onAskQuestion }: Props) {
   const [step, setStep] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -86,11 +112,12 @@ export default function RealBusinessPage() {
   const [identity, setIdentity] = useState<RealIdentity | null>(null);
   const [sessionToken, setSessionToken] = useState(() => getRealSessionToken());
   const [writeToken, setWriteToken] = useState(() => getRealWriteToken());
-  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
+  // 生产跟单模块的二级视图（信息架构改版：MES 完工数据并入生产跟单）
+  const [productionView, setProductionView] = useState<"tracking" | "completions">("tracking");
   // 阶段九：跨工单质量待办（仅 OpenMES 登录会话可见）
   const [qualityTodo, setQualityTodo] = useState<QualityTodoItem[] | null>(null);
   const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
@@ -500,6 +527,7 @@ export default function RealBusinessPage() {
       setShipGate(ship);
       setWorkOrderId(String(item.work_order_id));
       setStep(8);
+      setProductionView("tracking");
       setTodoFocusIssueId(String(item.issue_id));
       void restoreNcrWorkflowStates(qual);
       notify(`已打开工单 ${item.work_order_no || item.work_order_id} 的 NCR 处置面板`);
@@ -515,8 +543,8 @@ export default function RealBusinessPage() {
     const payload = event.payload ?? {};
     if (event.event_type === "quality_issue_raised") {
       // 复用质量待办的处置跳转：加载工单三面板并聚焦该问题的 NCR 卡片
-      // （质量待办入口在外层先切页签再调 goToQualityDispose，此处保持一致）
-      setActiveTab("flow");
+      // （质量待办入口在外层先切到生产跟单模块再调 goToQualityDispose，此处保持一致）
+      onNavigate("production");
       // goToQualityDispose 只消费工单/问题编号与标题；其余字段按类型契约补空
       await goToQualityDispose({
         issue_id: String(payload.issue_id ?? ""),
@@ -557,7 +585,7 @@ export default function RealBusinessPage() {
         } else {
           setStep(4);
         }
-        setActiveTab("flow");
+        onNavigate("procurement");
         notify(`已打开方案 ${planId} 的采购审批视图（基于事件 ${event.event_id}）`);
       } catch (e) {
         setError(e instanceof Error ? e.message : "打开采购方案视图失败");
@@ -603,7 +631,8 @@ export default function RealBusinessPage() {
         setShipGate(ship);
         setWorkOrderId(workOrderId);
         setStep(8);
-        setActiveTab("flow");
+        setProductionView("tracking");
+        onNavigate("production");
         void restoreNcrWorkflowStates(qual);
         notify(`已打开工单 ${workOrderNo || workOrderId} 的跟单视图（生产延期事件）`);
       } catch (e) {
@@ -614,9 +643,9 @@ export default function RealBusinessPage() {
       return;
     }
     setError(`事件 ${event.event_id} 类型未知（${event.event_type}），无法跳转`);
-  }, [goToQualityDispose, notify]);
+  }, [goToQualityDispose, notify, onNavigate]);
 
-  // 跳转后滚动并高亮目标 NCR 卡片（依赖 activeTab：去处置先切回订单流程页签，渲染后再滚动）
+  // 跳转后滚动并高亮目标 NCR 卡片（依赖 activeModule：去处置先切到生产跟单模块，渲染后再滚动）
   useEffect(() => {
     if (!todoFocusIssueId) return;
     const el = document.getElementById(`ncr-issue-${todoFocusIssueId}`);
@@ -625,10 +654,51 @@ export default function RealBusinessPage() {
       const timer = window.setTimeout(() => setTodoFocusIssueId(""), 5000);
       return () => window.clearTimeout(timer);
     }
-  }, [todoFocusIssueId, quality, step, activeTab]);
+  }, [todoFocusIssueId, quality, step, activeModule]);
 
 
 
+
+  // OpenMES 登录/令牌处理（信息架构改版后由「系统连接」模块的 ConnectionSettingsPanel 调用）
+  const handleOpenmesLogin = () => {
+    setLoginBusy(true);
+    setLoginError("");
+    loginRealSession(loginUsername.trim(), loginPassword)
+      .then((result) => {
+        setRealSessionToken(result.access_token);
+        setSessionToken(result.access_token);
+        setLoginPassword("");
+        if (result.identity) setIdentity(result.identity);
+        else void getRealIdentity().then(setIdentity).catch(() => undefined);
+        notify(
+          result.force_password_change
+            ? "登录成功，但上游要求先修改密码，该会话仅能改密"
+            : `已登录为 ${result.identity?.display_name ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
+        );
+      })
+      .catch((e) => setLoginError(e instanceof Error ? e.message : "OpenMES 登录失败"))
+      .finally(() => setLoginBusy(false));
+  };
+
+  const handleSaveTokens = () => {
+    setRealSessionToken(sessionToken);
+    setRealWriteToken(writeToken);
+    void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+    notify("会话设置已保存到当前浏览器会话");
+  };
+
+  const handleClearTokens = () => {
+    setSessionToken("");
+    setWriteToken("");
+    setRealSessionToken("");
+    setRealWriteToken("");
+    void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+  };
+
+  // 身份上报给 App：顶栏/侧栏显示当前审批人（信息架构改版 §4.2）
+  useEffect(() => {
+    onIdentityChange?.(identity);
+  }, [identity, onIdentityChange]);
 
   const resetFlow = () => {
     setStep(1);
@@ -645,155 +715,34 @@ export default function RealBusinessPage() {
     <div className="page-content">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">真实系统业务链</div>
-          <h1>真实 ERP + MES 订单全流程</h1>
-          <p>
-            数据全部来自 ERPNext 与 OpenMES 真实系统，所有操作保留来源系统与原始记录编号。
-          </p>
-          <div className="data-source-info">
-            <span className="source-tag erp">ERPNext</span>
-            <span className="ds-label">客户/物料/BOM/价格/库存 · 只读 + 草稿写入</span>
-            <span className="source-tag mes">OpenMES</span>
-            <span className="ds-label">工单/进度/质量 · 只读</span>
-          </div>
-          <div className="data-source-info">
+          <div className="eyebrow">真实系统业务链 · {MODULE_META[activeModule].eyebrow}</div>
+          <h1>{MODULE_META[activeModule].title}</h1>
+          <p>{MODULE_META[activeModule].subtitle}</p>
+          <div className="real-identity-compact">
             <span className="source-tag erp">审批身份</span>
-            <span className="ds-label">
-              {identity
-                ? `${identity.display_name}（${identity.actor_id}，${identity.authority}，角色：${identity.roles.join("、") || "未返回"}）`
-                : "正在从 ERPNext/OpenMES 解析当前登录用户…"}
-            </span>
+            {identity ? (
+              <>
+                <span className="ds-label">{identity.display_name}（{identity.authority}）</span>
+                <details className="identity-roles">
+                  <summary>身份详情</summary>
+                  <p>{identity.actor_id} · 角色：{identity.roles.join("、") || "未返回"}</p>
+                </details>
+              </>
+            ) : (
+              <span className="ds-label">正在解析当前登录用户…</span>
+            )}
           </div>
           {hasOpenmesSession && sessionExpiringSoon && (
             <div className="session-expiry-warning">
-              OpenMES 会话即将过期（15 分钟 TTL）——请在"会话设置"中重新登录，以继续审批与处置操作。
+              OpenMES 会话即将过期（15 分钟 TTL）——请到「系统连接」重新登录，以继续审批与处置操作。
+              <button className="button ghost" onClick={() => onNavigate("connection")}>去系统连接</button>
             </div>
           )}
-          <div className="real-session-toolbar">
-            <button className="button ghost session-toggle" onClick={() => setSessionSettingsOpen((open) => !open)}>
-              {sessionSettingsOpen ? "收起会话设置 ▲" : "会话设置 ▼"}
-            </button>
-            {sessionSettingsOpen && (
-              <div className="real-session-panel">
-                <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。</p>
-                <div className="real-session-login">
-                  <strong>OpenMES 账号登录（推荐）</strong>
-                  <div className="real-session-login-row">
-                    <input
-                      value={loginUsername}
-                      onChange={(e) => setLoginUsername(e.target.value)}
-                      placeholder="OpenMES 用户名"
-                      autoComplete="username"
-                    />
-                    <input
-                      type="password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="OpenMES 密码"
-                      autoComplete="current-password"
-                    />
-                    <button
-                      className="button primary"
-                      disabled={loginBusy || !loginUsername.trim() || !loginPassword}
-                      onClick={() => {
-                        setLoginBusy(true);
-                        setLoginError("");
-                        loginRealSession(loginUsername.trim(), loginPassword)
-                          .then((result) => {
-                            setRealSessionToken(result.access_token);
-                            setSessionToken(result.access_token);
-                            setLoginPassword("");
-                            if (result.identity) setIdentity(result.identity);
-                            else void getRealIdentity().then(setIdentity).catch(() => undefined);
-                            notify(
-                              result.force_password_change
-                                ? "登录成功，但上游要求先修改密码，该会话仅能改密"
-                                : `已登录为 ${result.identity?.display_name ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
-                            );
-                          })
-                          .catch((e) => setLoginError(e instanceof Error ? e.message : "OpenMES 登录失败"))
-                          .finally(() => setLoginBusy(false));
-                      }}
-                    >
-                      {loginBusy ? "登录中…" : "登录"}
-                    </button>
-                  </div>
-                  <p className="real-session-hint">
-                    登录走真实 OpenMES 认证接口，返回默认 15 分钟 TTL 的短时会话；登出只清除本浏览器会话，不吊销上游令牌。
-                  </p>
-                  {loginError && <p className="real-session-error">登录失败：{loginError}（请确认 OpenMES 的用户名和密码，默认账号是安装 OpenMES 时设置的 admin）</p>}
-                </div>
-                <label>
-                  Bearer 会话（可选）
-                  <input
-                    type="password"
-                    value={sessionToken}
-                    onChange={(e) => setSessionToken(e.target.value)}
-                    placeholder="粘贴短期企业会话令牌"
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  本地写入令牌（可选）
-                  <input
-                    type="password"
-                    value={writeToken}
-                    onChange={(e) => setWriteToken(e.target.value)}
-                    placeholder="服务端 REAL_WRITE_API_TOKEN"
-                    autoComplete="off"
-                  />
-                </label>
-                <div className="real-session-actions">
-                  <button
-                    className="button primary"
-                    onClick={() => {
-                      setRealSessionToken(sessionToken);
-                      setRealWriteToken(writeToken);
-                      void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
-                      notify("会话设置已保存到当前浏览器会话");
-                    }}
-                  >
-                    保存并重新解析身份
-                  </button>
-                  <button
-                    className="button ghost"
-                    onClick={() => {
-                      setSessionToken("");
-                      setWriteToken("");
-                      setRealSessionToken("");
-                      setRealWriteToken("");
-                      void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
-                    }}
-                  >
-                    清除会话
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
         <div className="heading-badges">
           <span className="badge green">真实数据连接</span>
           <span className="badge blue-badge">Agent 辅助</span>
         </div>
-      </div>
-
-      {/* 页签导航（阶段十信息架构优化：问答/流程/质量/记录分区，待办数徽标提醒） */}
-      <div className="real-tabs" role="tablist">
-        {TAB_ITEMS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={activeTab === t.key}
-            className={`real-tab ${activeTab === t.key ? "active" : ""}`}
-            onClick={() => setActiveTab(t.key)}
-          >
-            {t.label}
-            {t.key === "quality" && hasOpenmesSession && (qualityTodo?.length ?? 0) > 0 && (
-              <span className="real-tab-count">{qualityTodo?.length}</span>
-            )}
-          </button>
-        ))}
       </div>
 
       {/* 全局错误横幅：任何页签的操作失败都在此显示 */}
@@ -804,8 +753,8 @@ export default function RealBusinessPage() {
         </div>
       )}
 
-      {/* 智能协同问答（阶段五-八：协调智能体 + 方案批准执行闭环；10.5 抽出组件） */}
-      {activeTab === "assistant" && (
+      {/* AI 协同问答（默认主入口；信息架构改版 §4.3） */}
+      {activeModule === "assistant" && (
         <ErrorBoundary name="智能协同问答">
           <AssistantPanel
             identity={identity}
@@ -813,167 +762,268 @@ export default function RealBusinessPage() {
             currentWorkOrderId={workOrderId}
             notify={notify}
             onError={setError}
+            onNavigate={onNavigate}
+            initialQuestion={pendingQuestion}
+            onQuestionConsumed={onPendingQuestionConsumed}
           />
         </ErrorBoundary>
       )}
 
-      {/* 阶段九：质量待办（跨工单 MRB 待办视角，仅登录会话可见；10.5 抽出组件） */}
-      {activeTab === "quality" && (
+      {/* 业务总览（信息架构改版 §4.4：第二入口，只给概览与"需要处理"） */}
+      {activeModule === "overview" && (
+        <ErrorBoundary name="业务总览">
+          <BusinessOverviewPanel
+            hasOpenmesSession={hasOpenmesSession}
+            qualityTodoCount={qualityTodo?.length ?? null}
+            onNavigateAssistant={(question) => onAskQuestion?.(question)}
+            onNavigate={onNavigate}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* 质量中心：跨工单质量待办 + 协同事件（复用原组件与处置链路） */}
+      {activeModule === "quality" && (
         <ErrorBoundary name="质量中心">
-        <QualityTodoPanel
-          hasOpenmesSession={hasOpenmesSession}
-          qualityTodo={qualityTodo}
-          qualityTodoLoading={qualityTodoLoading}
-          qualityTodoError={qualityTodoError}
-          busy={loading}
-          onRefresh={() => void loadQualityTodo()}
-          onGoDispose={(item) => {
-            setActiveTab("flow");
-            void goToQualityDispose(item);
-          }}
-        />
-        <CollaborationEventsPanel notify={notify} onError={setError} onGoTarget={(event) => void goToEventTarget(event)} />
+          <QualityTodoPanel
+            hasOpenmesSession={hasOpenmesSession}
+            qualityTodo={qualityTodo}
+            qualityTodoLoading={qualityTodoLoading}
+            qualityTodoError={qualityTodoError}
+            busy={loading}
+            onRefresh={() => void loadQualityTodo()}
+            onGoDispose={(item) => {
+              onNavigate("production");
+              void goToQualityDispose(item);
+            }}
+          />
+          <CollaborationEventsPanel notify={notify} onError={setError} onGoTarget={(event) => void goToEventTarget(event)} />
         </ErrorBoundary>
       )}
 
-      {/* 步骤指示器（订单流程页签） */}
-      {activeTab === "flow" && (
+      {/* 订单全流程按业务模块分段（信息架构改版 §七.4：订单流程变为详情/执行视图，
+          销售与订单=步骤1-3、采购与缺料=步骤4-6、生产跟单=步骤7-8；步骤状态机共享） */}
+      {(activeModule === "sales" || activeModule === "procurement" || activeModule === "production") && (
         <>
-      <div className="stepper">
-        {[
-          { n: 1, label: "报价分析" },
-          { n: 2, label: "报价审批" },
-          { n: 3, label: "ERP 草稿" },
-          { n: 4, label: "采购分析" },
-          { n: 5, label: "方案审批" },
-          { n: 6, label: "PO 草稿" },
-          { n: 7, label: "跟单质量" },
-          { n: 8, label: "发运门禁" },
-        ].map((s) => (
-          <div
-            key={s.n}
-            className={`step-item ${step >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
-          >
-            <div className="step-number">{s.n}</div>
-            <span>{s.label}</span>
+          <div className="stepper">
+            {[
+              { n: 1, label: "报价分析" },
+              { n: 2, label: "报价审批" },
+              { n: 3, label: "ERP 草稿" },
+              { n: 4, label: "采购分析" },
+              { n: 5, label: "方案审批" },
+              { n: 6, label: "PO 草稿" },
+              { n: 7, label: "跟单质量" },
+              { n: 8, label: "发运门禁" },
+            ].map((s) => (
+              <div
+                key={s.n}
+                className={`step-item ${step >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
+              >
+                <div className="step-number">{s.n}</div>
+                <span>{s.label}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Step 1: 报价输入 */}
-      {step === 1 && (
-        <QuotationInputStep
-          customers={customers}
-          items={items}
-          selectedCustomer={selectedCustomer}
-          onSelectCustomer={setSelectedCustomer}
-          selectedItem={selectedItem}
-          onSelectItem={setSelectedItem}
-          quantity={quantity}
-          onQuantityChange={setQuantity}
-          deliveryDate={deliveryDate}
-          onDeliveryDateChange={setDeliveryDate}
-          loading={loading}
-          onGenerate={() => void generateQuotation()}
-        />
-      )}
-      {/* Step 2: 报价详情 + 审批 */}
-      {step >= 2 && quotation && (
-        <QuotationReviewPanel
-          step={step}
-          quotation={quotation}
-          loading={loading}
-          onApprove={(approved) => void approveQuotation(approved)}
-        />
-      )}
-      {/* Step 3: ERP 草稿 */}
-      {step >= 3 && quotation && (
-        <ErpDraftPanel
-          step={step}
-          quotation={quotation}
-          loading={loading}
-          onCreateDraft={() => void createErpDraft()}
-        />
-      )}
-      {/* Step 4: 采购分析 */}
-      {step >= 4 && quotation && (
-        <ProcurementAnalyzePanel
-          step={step}
-          quotation={quotation}
-          plan={plan}
-          loading={loading}
-          selectedOptionId={selectedOptionId}
-          onSelectOption={setSelectedOptionId}
-          onAnalyze={() => void analyzeProcurement()}
-        />
-      )}
-      {/* Step 5: 方案审批 */}
-      {step === 5 && plan && plan.net_requirement.has_shortage && (
-        <PlanApprovalPanel
-          plan={plan}
-          loading={loading}
-          hasSelectedOption={Boolean(selectedOptionId)}
-          onApprove={(approved) => void approveProcurement(approved)}
-        />
-      )}
-      {/* Step 6: PO 草稿 */}
-      {step >= 6 && plan && plan.net_requirement.has_shortage && (
-        <PoDraftPanel
-          step={step}
-          plan={plan}
-          loading={loading}
-          onCreatePo={() => void createPoDraft()}
-        />
-      )}
-      {/* Step 7: 选择工单 + 加载跟单 */}
-      {step >= 7 && (
-        <WorkOrderSelectPanel
-          step={step}
-          quotation={quotation}
-          workOrders={workOrders}
-          workOrderId={workOrderId}
-          onSelectWorkOrder={setWorkOrderId}
-          loading={loading}
-          onRefreshWorkOrders={() => void refreshWorkOrders()}
-          onLoadTracking={() => void loadTracking()}
-          dispatchFlow={dispatchFlow}
-          onOpenDispatch={() => setDispatchFlow({ stage: "confirm" })}
-          onConfirmDispatch={() => void runWorkOrderDispatch()}
-          onDismissDispatch={() => setDispatchFlow(null)}
-        />
-      )}
-      {/* Step 8: 跟单 + 质量 + 发运门禁（面板级降级：NCR 卡片渲染异常不影响流程其余部分） */}
-      {step >= 8 && tracking && quality && shipGate && (
-        <ErrorBoundary name="跟单质量与发运门禁">
-        <TrackingQualityGatePanels
-          tracking={tracking}
-          quality={quality}
-          shipGate={shipGate}
-          loading={loading}
-          workOrderId={workOrderId}
-          identity={identity}
-          ncrWorkflows={ncrWorkflows}
-          todoFocusIssueId={todoFocusIssueId}
-          onNcrFormChange={updateNcrForm}
-          onRequestNcrDisposition={(issue) => void requestNcrDisposition(issue)}
-          onApproveNcrDisposition={(id) => void approveNcrDisposition(id)}
-          onWriteNcrDisposition={(id) => void writeNcrDisposition(id)}
-          onCheckNcrClosure={(id) => void checkNcrClosure(id)}
-          onRequestNcrClose={(id) => void requestNcrClose(id)}
-          onApproveNcrClose={(id) => void approveNcrClose(id)}
-          onWriteNcrClose={(id) => void writeNcrClose(id)}
-          onReload={() => void loadTracking()}
-          onReset={resetFlow}
-        />
-        </ErrorBoundary>
-      )}
+          {/* 销售与订单：步骤 1-3 */}
+          {activeModule === "sales" && (
+            <>
+              {step === 1 && (
+                <QuotationInputStep
+                  customers={customers}
+                  items={items}
+                  selectedCustomer={selectedCustomer}
+                  onSelectCustomer={setSelectedCustomer}
+                  selectedItem={selectedItem}
+                  onSelectItem={setSelectedItem}
+                  quantity={quantity}
+                  onQuantityChange={setQuantity}
+                  deliveryDate={deliveryDate}
+                  onDeliveryDateChange={setDeliveryDate}
+                  loading={loading}
+                  onGenerate={() => void generateQuotation()}
+                />
+              )}
+              {step >= 2 && quotation && (
+                <QuotationReviewPanel
+                  step={step}
+                  quotation={quotation}
+                  loading={loading}
+                  onApprove={(approved) => void approveQuotation(approved)}
+                />
+              )}
+              {step >= 3 && quotation && (
+                <ErpDraftPanel
+                  step={step}
+                  quotation={quotation}
+                  loading={loading}
+                  onCreateDraft={() => void createErpDraft()}
+                />
+              )}
+              {step >= 4 && (
+                <div className="module-hint-card">
+                  <strong>报价与订单草稿已完成</strong>
+                  <span>采购分析、供应商方案审批和 PO 草稿在「采购与缺料」模块继续。</span>
+                  <button className="button primary" onClick={() => onNavigate("procurement")}>去采购与缺料 →</button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 采购与缺料：步骤 4-6 */}
+          {activeModule === "procurement" && (
+            <>
+              {step < 4 && (
+                <div className="module-hint-card">
+                  <strong>还没有可分析的净需求</strong>
+                  <span>先在「销售与订单」完成报价分析并创建 ERP 订单草稿，这里才能做采购分析。</span>
+                  <button className="button primary" onClick={() => onNavigate("sales")}>去销售与订单 →</button>
+                </div>
+              )}
+              {step >= 4 && quotation && (
+                <ProcurementAnalyzePanel
+                  step={step}
+                  quotation={quotation}
+                  plan={plan}
+                  loading={loading}
+                  selectedOptionId={selectedOptionId}
+                  onSelectOption={setSelectedOptionId}
+                  onAnalyze={() => void analyzeProcurement()}
+                />
+              )}
+              {step === 5 && plan && plan.net_requirement.has_shortage && (
+                <PlanApprovalPanel
+                  plan={plan}
+                  loading={loading}
+                  hasSelectedOption={Boolean(selectedOptionId)}
+                  onApprove={(approved) => void approveProcurement(approved)}
+                />
+              )}
+              {step >= 6 && plan && plan.net_requirement.has_shortage && (
+                <PoDraftPanel
+                  step={step}
+                  plan={plan}
+                  loading={loading}
+                  onCreatePo={() => void createPoDraft()}
+                />
+              )}
+              {step >= 7 && (
+                <div className="module-hint-card">
+                  <strong>采购链路已完成</strong>
+                  <span>工单下达、生产跟单与发运门禁在「生产跟单」模块继续。</span>
+                  <button className="button primary" onClick={() => onNavigate("production")}>去生产跟单 →</button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 生产跟单：步骤 7-8 + MES 完工数据（原独立导航项并入为二级视图） */}
+          {activeModule === "production" && (
+            <>
+              <div className="real-tabs subview-tabs" role="tablist">
+                <button
+                  role="tab"
+                  aria-selected={productionView === "tracking"}
+                  className={`real-tab ${productionView === "tracking" ? "active" : ""}`}
+                  onClick={() => setProductionView("tracking")}
+                >
+                  跟单视图
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={productionView === "completions"}
+                  className={`real-tab ${productionView === "completions" ? "active" : ""}`}
+                  onClick={() => setProductionView("completions")}
+                >
+                  MES 完工数据
+                </button>
+              </div>
+              {productionView === "completions" ? (
+                <MesCompletionsPanel />
+              ) : (
+                <>
+                  {step < 7 && (
+                    <div className="module-hint-card">
+                      <strong>还没有选定的工单</strong>
+                      <span>完成报价与采购方案后可下达新工单；协同事件跳转也会直接打开对应工单的跟单视图。</span>
+                      <button className="button ghost" onClick={() => onNavigate("sales")}>回销售与订单</button>
+                    </div>
+                  )}
+                  {step >= 7 && (
+                    <WorkOrderSelectPanel
+                      step={step}
+                      quotation={quotation}
+                      workOrders={workOrders}
+                      workOrderId={workOrderId}
+                      onSelectWorkOrder={setWorkOrderId}
+                      loading={loading}
+                      onRefreshWorkOrders={() => void refreshWorkOrders()}
+                      onLoadTracking={() => void loadTracking()}
+                      dispatchFlow={dispatchFlow}
+                      onOpenDispatch={() => setDispatchFlow({ stage: "confirm" })}
+                      onConfirmDispatch={() => void runWorkOrderDispatch()}
+                      onDismissDispatch={() => setDispatchFlow(null)}
+                    />
+                  )}
+                  {step >= 8 && tracking && quality && shipGate && (
+                    <ErrorBoundary name="跟单质量与发运门禁">
+                      <TrackingQualityGatePanels
+                        tracking={tracking}
+                        quality={quality}
+                        shipGate={shipGate}
+                        loading={loading}
+                        workOrderId={workOrderId}
+                        identity={identity}
+                        ncrWorkflows={ncrWorkflows}
+                        todoFocusIssueId={todoFocusIssueId}
+                        onNcrFormChange={updateNcrForm}
+                        onRequestNcrDisposition={(issue) => void requestNcrDisposition(issue)}
+                        onApproveNcrDisposition={(id) => void approveNcrDisposition(id)}
+                        onWriteNcrDisposition={(id) => void writeNcrDisposition(id)}
+                        onCheckNcrClosure={(id) => void checkNcrClosure(id)}
+                        onRequestNcrClose={(id) => void requestNcrClose(id)}
+                        onApproveNcrClose={(id) => void approveNcrClose(id)}
+                        onWriteNcrClose={(id) => void writeNcrClose(id)}
+                        onReload={() => void loadTracking()}
+                        onReset={resetFlow}
+                      />
+                    </ErrorBoundary>
+                  )}
+                </>
+              )}
+            </>
+          )}
         </>
       )}
 
-      {/* Agent 运行记录（阶段三：持久化可查；10.5 抽出组件） */}
-      {activeTab === "runs" && (
-        <ErrorBoundary name="Agent 运行记录">
+      {/* 审批与审计（信息架构改版 §七.5：原"运行记录"并入） */}
+      {activeModule === "audit" && (
+        <ErrorBoundary name="审批与审计">
           <AgentRunsPanel />
+        </ErrorBoundary>
+      )}
+
+      {/* 系统连接（信息架构改版 §六：数据连接 + 审批账号 + 高级联调设置） */}
+      {activeModule === "connection" && (
+        <ErrorBoundary name="系统连接">
+          <ConnectionSettingsPanel
+            identity={identity}
+            hasOpenmesSession={hasOpenmesSession}
+            sessionExpiringSoon={sessionExpiringSoon}
+            sessionToken={sessionToken}
+            writeToken={writeToken}
+            loginUsername={loginUsername}
+            loginPassword={loginPassword}
+            loginBusy={loginBusy}
+            loginError={loginError}
+            onLoginUsernameChange={setLoginUsername}
+            onLoginPasswordChange={setLoginPassword}
+            onLogin={handleOpenmesLogin}
+            onSessionTokenChange={setSessionToken}
+            onWriteTokenChange={setWriteToken}
+            onSaveTokens={handleSaveTokens}
+            onClearTokens={handleClearTokens}
+          />
         </ErrorBoundary>
       )}
 

@@ -1,5 +1,5 @@
 // 智能协同问答面板（阶段五-八：协调智能体动态调用四个真实智能体 + 方案批准执行闭环；阶段十 10.5 从 RealBusinessPage 抽出；P0 会话上下文：多轮沿用+回显+追问+下游重确认标记）
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
 import {
   agentRunTypeNames,
@@ -25,7 +25,20 @@ type Props = {
   currentWorkOrderId: string;
   notify: (message: string) => void;
   onError: (message: string) => void;
+  /** 信息架构改版 §4.3：回答中的业务对象跳转到对应模块（只读导航，不执行审批） */
+  onNavigate?: (module: "sales" | "procurement" | "production" | "quality") => void;
+  /** 业务总览"去提问"带过来的问题：填入输入框待用户确认发送 */
+  initialQuestion?: string;
+  onQuestionConsumed?: () => void;
 };
+
+// 常用问题芯片（填入输入框，不自动发送；没有订单号时协调者会主动追问）
+const COMMON_QUESTIONS = [
+  "订单什么时候能做完？",
+  "这单为什么还不能发运？",
+  "这单缺料怎么办？给我几套方案",
+  "这个质量异常会影响交期吗？",
+];
 
 export default function AssistantPanel({
   identity,
@@ -33,6 +46,9 @@ export default function AssistantPanel({
   currentWorkOrderId,
   notify,
   onError,
+  onNavigate,
+  initialQuestion,
+  onQuestionConsumed,
 }: Props) {
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState<AssistantAnswer | null>(null);
@@ -139,6 +155,23 @@ export default function AssistantPanel({
     notify("已开始新会话（业务任务上下文将重新积累）");
   }, [notify]);
 
+  // 业务总览"去提问"预填：填入输入框待用户确认，不自动发送
+  useEffect(() => {
+    if (!initialQuestion) return;
+    setAssistantQuestion(initialQuestion);
+    onQuestionConsumed?.();
+  }, [initialQuestion, onQuestionConsumed]);
+
+  // 回答涉及的业务对象 → 对应模块跳转按钮（信息架构改版 §4.3：回答中的操作入口调起业务详情）
+  const ctx = (assistantAnswer?.context ?? {}) as Record<string, unknown>;
+  const jumpButtons: { label: string; module: "sales" | "procurement" | "production" | "quality" }[] = [];
+  if (assistantAnswer && onNavigate) {
+    if (ctx.quotation_id || ctx.报价号) jumpButtons.push({ label: "打开销售与订单", module: "sales" });
+    if (ctx.plan_id || ctx.方案号) jumpButtons.push({ label: "去采购与缺料", module: "procurement" });
+    if (ctx.work_order_id || ctx.工单id) jumpButtons.push({ label: "查看生产跟单", module: "production" });
+    if (ctx.issue_id || ctx.质量问题id) jumpButtons.push({ label: "去质量中心", module: "quality" });
+  }
+
   return (
     <section className="panel assistant-panel">
       <div className="panel-heading">
@@ -171,6 +204,15 @@ export default function AssistantPanel({
         <button className="button ghost" onClick={startNewSession} disabled={assistantLoading} title="清空当前会话上下文，重新开始一个业务任务">
           新会话
         </button>
+      </div>
+      {/* 常用问题芯片（信息架构改版 §4.3；填入输入框，不自动发送） */}
+      <div className="assistant-chip-row">
+        <span className="chip-caption">常用问题：</span>
+        {COMMON_QUESTIONS.map((q) => (
+          <button key={q} className="assistant-chip" disabled={assistantLoading} onClick={() => setAssistantQuestion(q)}>
+            {q}
+          </button>
+        ))}
       </div>
       {sessionId && (
         <p className="field-hint">当前会话 {sessionId} · 上一轮的客户/物料/订单/工单/数量/交期会自动沿用，回答中会回显；说"新会话"或点击上方按钮可重新开始。</p>
@@ -240,6 +282,16 @@ export default function AssistantPanel({
             className="assistant-answer md-body"
             dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(assistantAnswer.answer) }}
           />
+          {jumpButtons.length > 0 && (
+            <div className="assistant-jump-row">
+              <span>在业务模块中继续处理：</span>
+              {jumpButtons.map((b) => (
+                <button key={b.module} className="button ghost" onClick={() => onNavigate?.(b.module)}>
+                  {b.label} →
+                </button>
+              ))}
+            </div>
+          )}
           {assistantAnswer.proposal_options && (
             <div className="proposal-block">
               <small>可执行方案（真实工具结果汇集；最终由人工确认，执行请走 8 步审批流程）</small>

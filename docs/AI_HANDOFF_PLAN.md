@@ -10,9 +10,10 @@
 1. `docs/current_status_and_fix_plan.md`：当前代码、接口和真实验证记录的唯一证据账本；最新追加的小节优先于早期小节。
 2. `docs/handoff_2026-10-01_event_disposal_and_stabilization.md`：§3.52 去处置联动、SQLite 回退和收口验收记录。
 3. `docs/handoff_2026-10-02_dynamic_capability_catalog.md`：下一阶段能力目录运行时构建专项交接。
-4. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
-5. `docs/demo_script.md`：当前演示路径和已验证记录编号。
-6. `README.md`：环境、部署、启动、故障排查。
+4. `docs/handoff_2026-10-02_frontend_information_architecture.md`：真实业务前端信息架构改版专项交接（已于 2026-10-02 下午按 §3.56 实施，§八验收 14 条逐条通过）。
+5. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
+6. `docs/demo_script.md`：当前演示路径和已验证记录编号。
+7. `README.md`：环境、部署、启动、故障排查。
 
 `docs/next_development_plan.md` 保留为阶段历史资料。本文件中的后续路线优先于其中未勾选的旧任务；如果两份文件冲突，以当前代码和最新真实验证为准。
 
