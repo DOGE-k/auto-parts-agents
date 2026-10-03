@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     在一台新的 Windows 电脑上准备本项目的真实 ERPNext + OpenMES 环境。
 
