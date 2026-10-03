@@ -1,0 +1,146 @@
+{
+  "aic": "TBD-TRACKING-AGENT-001",
+  "active": true,
+  "lastModifiedTime": "2026-10-02T17:00:37.278615+00:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件跟单智能体",
+  "description": "负责订单交期跟踪、生产进度监控、风险识别和ETA计算。只提供风险预警和进度分析，不做生产调度和质量放行决策。",
+  "version": "1.0.0",
+  "provider": {
+    "countryCode": "CN",
+    "organization": "AutoParts Intelligence",
+    "department": "AI Agent Team",
+    "url": "https://autoparts-agent.example.com",
+    "name": "Dev Team",
+    "email": "dev@autoparts-agent.example.com"
+  },
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS",
+      "description": "双向TLS认证，智能体间高安全级别通信"
+    },
+    "apiKey": {
+      "type": "apiKey",
+      "description": "API Key 认证，用于本地开发和测试",
+      "name": "X-API-Key",
+      "in": "header"
+    }
+  },
+  "endPoints": [
+    {
+      "url": "http://localhost:9000/aip/tracking/rpc",
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "apiKey": []
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "text/plain",
+    "application/json",
+    "text/markdown"
+  ],
+  "skills": [
+    {
+      "id": "tracking.find_real_by_no",
+      "name": "真实find_real_by_no",
+      "description": "按用户提供的 MES 工单编号（如 WO-2026-001）精确查询数字 work_order_id。用户给出 WO- 开头的工单编号时，必须先调用本工具完成编号到数字 ID 的转换，再把返回的 work_order_id 传给进度、质量或发运门禁工具；不得猜测数字 ID。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "tracking"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.lookup_order_link",
+      "name": "真实lookup_order_link",
+      "description": "根据 ERP 销售订单号（如 SAL-ORD-2026-00023）查询正式关联的 MES 工单。返回 LINKED（含 work_order_id）或 NOT_LINKED。回答任何关于某个订单的生产进度、交期、质量、发运问题前，必须先调用本工具找到工单，除非已知 work_order_id。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "tracking"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.track_real",
+      "name": "真实track_real",
+      "description": "查询 MES 工单的真实生产进度：状态、完成率、完工数量、计划数量、交期、风险预警。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "tracking"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.check_real_ship_gate",
+      "name": "真实check_real_ship_gate",
+      "description": "发运门禁综合判断：报价审批状态 + 质量门禁 + 生产完成率（≥90%）是否全部满足，返回 can_ship 与阻塞原因。问“能不能发运/为什么不能发运”时使用。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "tracking"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.assess_delivery_impact",
+      "name": "真实assess_delivery_impact",
+      "description": "交期影响评估：物料到货时间（由采购方案 lead_time_days 推算 YYYY-MM-DD）与工单交期的差值，判断该方案下订单是否延期。问“换供应商还来不来得及/会不会延期”时使用。工单已完工时返回 not_needed。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "tracking"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ]
+}

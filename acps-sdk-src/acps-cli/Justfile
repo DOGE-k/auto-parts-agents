@@ -1,0 +1,40 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+project_name := "acps-cli"
+project_kind := "tool"
+project_python_version := "3.14"
+project_just_hook_lib := "scripts/just/project-hooks.sh"
+
+dev_infra_script := "../acps-infra/dev-infra/dev-infra.sh"
+dev_runtime_profile := "none"
+dev_runtime_actions := ""
+dev_checks := "python-toolchain just-tool uv-sync dotenv acps-cli-upstream-services"
+dev_bootstrap_checks := "acps-cli-public-docker-config infra-postgres infra-redis infra-rabbitmq dotenv uv-sync hooks"
+
+test_checks := "python-toolchain just-tool uv-sync acps-cli-managed-test-runtimes"
+test_bootstrap_checks := "acps-cli-public-docker-config infra-postgres infra-redis infra-rabbitmq dotenv uv-sync hooks acps-cli-managed-test-runtimes"
+test_all_steps := "unit integration e2e coverage"
+test_e2e_profiles := "local"
+test_profile := "project"
+
+qa_profile := "python-cli"
+
+package_scope_enabled := "1"
+package_script_path := "../acps-infra/dev-infra/just/package-wheel-runtime.sh"
+package_python_version := "3.14"
+package_required_paths := "pyproject.toml README.md .env.example acps_cli"
+package_sibling_repos := "acps-sdk"
+package_output_dir := "dist"
+package_release_name_prefix := "acps-cli-wheel"
+package_wheel_distribution := "acps_cli"
+package_build_mode := "hatchling-build-env"
+package_requires_build_env := "1"
+package_copy_sibling_wheels_to_wheelhouse := "0"
+
+import "../acps-infra/dev-infra/just/project.just"
+import "../acps-infra/dev-infra/just/infra.just"
+import "../acps-infra/dev-infra/just/package.just"
+import "../acps-infra/dev-infra/just/dev.just"
+import "../acps-infra/dev-infra/just/prep.just"
+import "../acps-infra/dev-infra/just/qa.just"
+import "../acps-infra/dev-infra/just/test.just"

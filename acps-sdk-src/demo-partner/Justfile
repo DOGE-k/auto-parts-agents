@@ -1,0 +1,40 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+project_name := "demo-partner"
+project_kind := "service"
+project_python_version := "3.14"
+project_just_hook_lib := "scripts/just/project-hooks.sh"
+
+dev_infra_script := "../acps-infra/dev-infra/dev-infra.sh"
+dev_runtime_profile := "project"
+dev_runtime_actions := "start stop status logs restart"
+dev_checks := "python-toolchain just-tool uv-sync infra-tooling infra-rabbitmq demo-partner-dev-ready"
+dev_bootstrap_checks := "infra-rabbitmq dotenv uv-sync hooks demo-partner-certs"
+
+test_checks := "python-toolchain just-tool uv-sync demo-partner-test-ready"
+test_bootstrap_checks := "infra-rabbitmq dotenv uv-sync hooks demo-partner-certs"
+test_all_steps := "unit integration e2e coverage"
+test_e2e_profiles := "local"
+test_profile := "project"
+
+qa_profile := "python-service"
+
+package_scope_enabled := "1"
+package_script_path := "../acps-infra/dev-infra/just/package-wheel-runtime.sh"
+package_python_version := "3.14"
+package_required_paths := "pyproject.toml README.md .env.example partners"
+package_sibling_repos := "acps-sdk acps-cli"
+package_output_dir := "dist"
+package_release_name_prefix := "demo-partner-wheel"
+package_wheel_distribution := "demo_partner"
+package_build_mode := "hatchling-build-env"
+package_requires_build_env := "1"
+package_copy_sibling_wheels_to_wheelhouse := "0"
+
+import "../acps-infra/dev-infra/just/project.just"
+import "../acps-infra/dev-infra/just/infra.just"
+import "../acps-infra/dev-infra/just/package.just"
+import "../acps-infra/dev-infra/just/dev.just"
+import "../acps-infra/dev-infra/just/prep.just"
+import "../acps-infra/dev-infra/just/qa.just"
+import "../acps-infra/dev-infra/just/test.just"

@@ -1,0 +1,93 @@
+{
+  "fixture_id": "expedite-demo-v1",
+  "data_source": "synthetic_demo_only",
+  "scenario": "expedite",
+  "notice": "加急场景：客户要求提前交付，所有数据均为演示用合成数据。",
+  "project": {
+    "customer_id": "DEMO-CUSTOMER-002",
+    "product_id": "DEMO-BRACKET-001",
+    "product_name": "演示支架组件",
+    "order_quantity": 200,
+    "currency": "CNY",
+    "required_delivery_date": "2026-10-18"
+  },
+  "quotation": {
+    "bom": [
+      {"material_id": "DEMO-AL-102", "qty_per_product": "2", "unit_price": "12.50"},
+      {"material_id": "DEMO-BOLT-008", "qty_per_product": "4", "unit_price": "2.00"}
+    ],
+    "cost_components": {
+      "processing": "18.00",
+      "outsourcing": "0.00",
+      "inspection": "2.00",
+      "packaging": "1.00",
+      "logistics": "3.00"
+    },
+    "risk_buffer_rate": "0.08",
+    "target_gross_margin": "0.25",
+    "minimum_gross_margin": "0.18",
+    "expedite_premium": "0.09"
+  },
+  "delivery": {
+    "material_available_date": "2026-10-05",
+    "capacity_completion_date": "2026-10-12",
+    "quality_wait_days": 1,
+    "buffer_days": 2,
+    "original_eta_date": "2026-10-25",
+    "requested_delivery_date": "2026-10-18",
+    "mock_mes_quality_released": false,
+    "mock_document_evidence_complete": false,
+    "expedite_options": [
+      {
+        "option_id": "EXP-OPT-001",
+        "name": "全工序加急",
+        "description": "所有工序优先级提升，加班生产",
+        "additional_cost": 1200,
+        "risk_level": "low",
+        "new_eta_date": "2026-10-15",
+        "meets_requested_date": true
+      },
+      {
+        "option_id": "EXP-OPT-002",
+        "name": "关键工序加急",
+        "description": "仅机加工和热处理加急，其余正常",
+        "additional_cost": 600,
+        "risk_level": "medium",
+        "new_eta_date": "2026-10-19",
+        "meets_requested_date": false
+      },
+      {
+        "option_id": "EXP-OPT-003",
+        "name": "部分外包",
+        "description": "50% 数量外包给协作工厂",
+        "additional_cost": 1800,
+        "risk_level": "medium",
+        "new_eta_date": "2026-10-14",
+        "meets_requested_date": true
+      }
+    ]
+  },
+  "procurement": {
+    "expedite_material": true,
+    "material_id": "DEMO-AL-102",
+    "required_quantity": 400,
+    "expedite_supplier_options": [
+      {
+        "supplier_id": "SUP-ALUMINUM-001",
+        "supplier_name": "演示铝业集团",
+        "expedite_available": true,
+        "expedite_additional_cost": 800,
+        "expedite_delivery_date": "2026-10-05"
+      }
+    ]
+  },
+  "tracking": {
+    "original_risk": "low",
+    "expedite_risk": "medium",
+    "risk_factors": [
+      "加急可能影响质量稳定性",
+      "供应商加急交期存在不确定性",
+      "加班可能导致人员疲劳"
+    ]
+  }
+}

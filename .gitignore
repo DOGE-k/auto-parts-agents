@@ -15,3 +15,15 @@ frontend/vite.config.d.ts
 *.pem
 *.key
 eab.json
+# 本地部署的第三方服务源码（各自独立 git 仓库，单独克隆获取）
+services/
+!backend/app/services/
+!backend/app/services/**
+backend/app/services/**/__pycache__/
+# 编辑器分享产物
+.trae-html-share-packages/
+# 临时运行文件
+backend/pid.txt
+backend/qid.txt
+backend/uvicorn-9000*.log
+frontend/vite-dev.log

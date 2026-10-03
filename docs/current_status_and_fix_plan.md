@@ -1,0 +1,2166 @@
+# 四智能体项目当前状态与整改计划
+
+首版更新时间：2026-09-28（阶段 1 只读关联完成）
+
+> **最新追加：2026-10-02。** 当前状态以文档末尾最新小节为准；截至 §3.52 后的复核结果见“八、2026-10-02 文档整理复核”。
+
+项目路径：`E:\competition\汽车零部件工厂智能体开发`
+
+## 0. 这份文档的用途
+
+这是当前项目唯一的开发对照文档。
+
+后续每完成一个阶段，必须更新本文件中的：
+
+- 实际完成情况
+- 实际验证结果
+- 未解决问题
+- 下一阶段任务
+- 验收证据
+
+没有实际运行结果的内容，只能写成“计划”或“待验证”，不能写成“已完成”。
+
+> 本文后续追加的阶段记录优先于早期快照；早期章节保留历史验收上下文。
+
+## 1. 用户的最终要求
+
+用户所说的“demo”是本地可运行版本，但业务数据必须来自本地已经部署的 ERP 和 MES。
+
+目标是连接真实 ERP/MES，跑通四个独立 Agent 的业务流程：
+
+1. 报价 Agent
+2. 采购 Agent
+3. 跟单 Agent
+4. 质量文档 Agent
+
+固定 fixture、MockERP、MockMES、`DEMO_*` 和 `synthetic_demo_only` 只能用于开发测试，不得作为真实业务主流程或验收依据。
+
+## 2. 当前代码和运行状态
+
+### 2.1 已确认完成
+
+- ERPNext 客户读取可用
+- ERPNext 物料读取可用
+- ERPNext BOM 读取可用
+- ERPNext 价格读取可用
+- ERPNext 库存读取可用
+- ERPNext 登录检查可用
+- OpenMES 质量问题读取可用
+- OpenMES 健康检查可用，返回 200
+- OpenMES 工单列表可用，实际返回 4 条记录（其中 `DEMO_WO_001` 是明确标注的演示记录）
+- OpenMES 工单详情和整体进度接口已可调用
+- OpenMES 生产完工接口可访问，当前返回 0 条
+- 本地 AIP RPC 端点已注册四个 Agent
+- 真实业务页面已加入前端并设为默认页面
+- 报价分析、报价审批、ERP 销售订单草稿接口已经存在
+- 采购分析、采购审批、ERP 采购订单草稿接口已经存在
+- 跟单、质量资料汇总、发运门禁接口已经存在
+
+### 2.2 当前仍未完成
+
+- ~~真实 ERP 订单与 MES 工单的关联~~ 已完成（字段确认+写入+LINKED 验证，见 3.4）
+- ~~报价 Agent 占位计算~~ 已删除并接入真实数据（见 3.5.1/3.5.3）；数量折扣表去留待用户确认
+- ~~采购供应商价格和交期模拟~~ 已删除并接入真实数据（见 3.5.1）；供应商业务数据补录待用户决策
+- 采购 Agent 前端页面尚未接入真实业务页面（P1-3）
+- 质量文档还没有真实文档归档和真实放行写回闭环（P1-4）
+- OpenMES 质量放行/SOP/Control Plan 等文档接口不存在，需明确记录"当前系统不支持"
+- 报价、采购方案、审批记录使用内存字典，重启后丢失（P2-1，本轮验证已实际触发一次）
+- 跟单 Agent 的 ETA 仍是交期占位（进度为 0 时无速率可用；待积累真实进度数据后实现）
+- 旧的场景页面和后台仍然保留 Mock 主流程，需要明确隔离为测试入口
+
+## 3. 已验证的实际结果
+
+### 3.1 ERPNext
+
+已实际读取：
+
+- 客户：上汽集团
+- 物料：`BD-2401`
+- BOM：`BOM-BD-2401-001`
+- BOM 子项：4 个
+- 库存：`CI-RAW`、`M10-BOLT` 等
+
+返回数据带有：
+
+```text
+authority=ERPNext
+```
+
+### 3.2 OpenMES
+
+已实际读取：
+
+- 健康检查：200，`health=ok`
+- 工单列表：4 条 OpenMES 记录，其中 3 条业务样例工单、1 条 `DEMO_WO_001` 演示工单
+- 工单示例：`WO-2026-001`、`WO-2026-002`、`WO-2026-003`、`DEMO_WO_001`
+- 质量问题：2 条
+- 生产完工：接口可访问，当前 0 条
+
+当前已确认的工单接口结果：
+
+```text
+/api/integrations/openmes/check              200
+/api/integrations/openmes/work-orders        200，4 条
+/api/mes/work-orders                         200，4 条
+```
+
+工单返回数据带有 `authority=OpenMES` 和 `data_source=openmes_api`。
+
+### 3.3 测试
+
+当前测试（含关联查询与写入路径共 20 个）：
+
+```text
+20 passed
+```
+
+前端构建（2026-09-28 复验，EPERM 未再复现）：
+
+```text
+npm run build 成功（29 modules transformed, built in 475ms）
+```
+
+### 3.4 阶段 1：真实 ERP 订单 ↔ MES 工单关联（只读）——已完成关联字段确认与只读验证
+
+### 3.5 阶段 2/3 前置：报价与采购 Agent 真实化（2026-09-28）
+
+#### 3.5.1 已删除的占位逻辑（逐项）
+
+| 原占位 | 位置 | 替换为 |
+|--------|------|--------|
+| BOM 子项固定成本 `qty*10` | analyze_quotation | 真实 Buying Item Price（含记录编号），缺价 → `missing_data` 明确列出 |
+| 固定加成 `×1.3` | analyze_quotation | 删除。无 Selling 价时按真实 BOM 成本报价（`pricing_basis=erp_bom_cost_no_markup`，未加成，建议人工确认加成率） |
+| 无价格时固定估算 | analyze_quotation | `status=DATA_MISSING`，拒绝出价；SO 草稿创建同步拒绝 |
+| 固定交付期 `7`/`15+2×n` 天 | analyze_quotation | 结构化 `delivery_estimate`：库存足够→真实库存；不足→真实 MES 工单 due_date 推算；无数据→`basis=missing` 明确报缺失 |
+| 数量折扣表（伪装系统计算） | llm_quotation.py | **已删除**（用户决策）：报价一律按 ERP 真实价格原价；`quantity_discount_source=disabled_pending_business_rule`；折扣规则确认后恢复 |
+| 采购价 `×0.7` 系数、固定 `50` 元 | compute_net_requirement | 只用真实 Buying 价格记录；缺失时 `price_status=missing`、金额留空，`missing_data` 列出 |
+| 供应商固定加价系数 `1.0+idx*0.05` | analyze_procurement | 删除。ERP 无供应商特定价格（Item Price.supplier 全空），所有方案共享真实标准价并如实说明 |
+| 供应商固定交期 `7+idx*3` 天 | analyze_procurement | 删除。`lead_time_days=None, lead_time_source=missing`（ERP 无 Item Supplier 记录、Item.lead_time_days=0） |
+| 推荐理由"综合最优"（编造） | analyze_procurement | 确定性规则 `lowest_total_cost_v1`（总价最低者推荐），理由基于真实数字与规则版本 |
+| PO 草稿固定公司 `AutoParts Manufacturing` | 两个 draft 函数 | 真实 Company 记录读取（`company_source=erp_company_record`） |
+| PO/SO 草稿固定仓库 `Stores - APM` | 两个 draft 函数 | 真实 Warehouse 记录选择（type 字段优先，名称约定次之；`warehouse_source=erp_warehouse_record`） |
+| PO schedule_date 基于模拟交期 | create_erp_purchase_order_from_plan | 有真实交期→today+N；缺失→today 并明确提示"需人工确认后调整" |
+| 缺价物料静默入 PO | create_erp_purchase_order_from_plan | 拒绝创建，报出缺价物料清单 |
+
+#### 3.5.2 ERP 真实数据现状（2026-09-28 实测，关联字段调查）
+
+- Item Price：9 条（5 Selling + 4 Buying），`supplier` 字段全空 → 无供应商特定价格
+- Item Supplier（物料-供应商关系）：**0 条记录**
+- Item.min_order_qty=0、lead_time_days=0、purchase_uom=None、default_warehouse=None（全部未配置）
+- BOM 成本字段全 0（total_cost/rate），BOM 币种 INR 异常（测试数据问题，不影响报价——报价用 Item Price 的 CNY）
+- Warehouse：5 条真实记录（Stores - APM 等）；Company：AutoParts Manufacturing（唯一）
+- Supplier：3 家真实存在，无默认价格表/付款条件
+
+#### 3.5.3 真实流程验证记录（APP_ADAPTER_MODE=real）
+
+| 流程 | 结果 |
+|------|------|
+| 报价分析 BD-2401×500 | 200：真实 Selling 价 85（erp_selling_price）；交付估算=真实 MES 工单 WO-2026-001 排程 17 天；折扣标注 manual_config_v1 |
+| 报价分析 BD-2401×2000 | 200：同上，交付估算仍来自 MES 排程 |
+| 采购分析 ×500 | 200：真实结论 NO_SHORTAGE（库存足够，正确） |
+| 采购分析 ×2000 | 200：真实缺料 3 项（CI-RAW 1200、M10-BOLT 3000、BRG-6204 2500）；3 个供应商方案单价全部来自真实 Buying 价格记录（mrsgdil3h1/mrsk75j80c/mrspjlrfcs，12.5/0.8/8.2）；交期全部如实 missing；`data_limitations` 4 项明示 |
+| 采购审批（选 OPT-2 宁波紧固件） | 200：APR 编号返回，selected_option_id=OPT-2 |
+| PO 草稿 | 200：PUR-ORD-2026-00003，回读 verified=True（供应商宁波紧固件，3 行 1200/3000/2500，单价 12.5/0.8/8.2，仓库 Stores - APM 来自真实记录）；schedule_date=今日 + 交期缺失人工确认提示；docstatus=0 |
+| SO 草稿 | 200：SAL-ORD-2026-00007，回读 verified=True（rate 80.75=85×0.95 折扣），仓库/公司来自真实记录，docstatus=0 |
+
+测试：27 passed（新增 7 个真实化逻辑测试：真实 BOM 成本无加成、缺价 DATA_MISSING、MES 排程估算、无数据报缺失、缺价不伪造、真实价格方案、缺价拒绝 PO）。
+前端：`npm run build` 通过（报价卡片改为 delivery_estimate 结构，缺失时显示"数据缺失"）。
+
+#### 3.5.4 本阶段实际跑通 vs 仍不可用
+
+**已实际跑通（真实数据）**：报价分析（真实原价、无折扣）、交付估算（MES 排程路径）、净需求与缺料计算（含 MOQ 约束）、供应商差异化方案（真实 Item Supplier 关系过滤 + 供应商特定价格 + 物料级交期）、采购审批、SO/PO 草稿创建+回读（schedule_date 来自真实交期）、跟单/质量/门禁读取、ERP↔MES 关联查询与写入。
+
+**仍不可用/受限制**：
+1. 报价 DATA_MISSING 路径：当前真实数据中所有成品都有 Selling 价，该路径仅由单元测试覆盖（逻辑正确，真实触发需一个无价物料）
+2. 交期为物料级而非供应商级：ERPNext 版本限制（Item Supplier 子表无 lead_time_days 字段），如实标注
+3. 数量折扣：已按用户决策删除，待用户提供规则或 ERP 配置价格表后恢复
+4. 内存状态重启丢失（P2-1）：本次验证中实际触发——服务重启后 plan 丢失需重跑
+5. 供应商推荐规则 lowest_total_cost_v2 是确定性代码规则（全覆盖优先+总价最低），业务上是否适用待用户后续确认
+
+#### 3.5.5 用户决策记录（2026-09-28）与执行结果
+
+**决策 1：数量折扣表 —— 删除（已执行）**
+
+- 用户明确："先删除未经确认的数量折扣，不要把测试用的 9 折等数字用于正式报价……如果没有可用价格，就显示'缺少价格数据，无法自动报价'，不要自行编造原价。以后我提供折扣规则或 ERP 中有对应数据时，再加入折扣功能。"
+- 已执行：报价一律使用 ERP 真实价格原价，`quantity_discount_factor=1.0`、`quantity_discount_source=disabled_pending_business_rule`；无价格时 `DATA_MISSING` 并拒绝出价与草稿
+- 实测：BD-2401×500 报价单价 = 85.0（原价，此前为 76.50=85×0.9）
+- 旧 Mock 场景流程（tools/registry.py、main.py 旧报价端点）的折扣逻辑保留未动（该流程属 P2 隔离范围，不用于真实业务）
+
+**决策 2：供应商业务数据补录 —— 批准（已执行并回读验证）**
+
+`backend/seed_supplier_data.py` 写入真实 ERP（幂等，重复运行跳过已存在记录）：
+
+| 物料 | lead_time_days | min_order_qty | 供应商关系 | 供应商特定价格（记录编号） |
+|------|---------------|---------------|-----------|--------------------------|
+| CI-RAW | 12 | 100 | 上海铸锻厂、江苏轴承 | 12.5(d5v1dj85c6)、13.4(d62nbu3539) |
+| M10-BOLT | 7 | 500 | 宁波紧固件、上海铸锻厂 | 0.8(d630laii6j)、0.86(d63ua5r17b) |
+| SEAL-RING | 10 | 100 | 宁波紧固件、上海铸锻厂 | 3.5(d64cslut3v)、3.68(d64b0am952) |
+| BRG-6204 | 15 | 50 | 江苏轴承、上海铸锻厂 | 8.2(d65qrd6fks)、8.6(d66qj4kvr0) |
+
+回读验证一致。已知版本限制：本 ERPNext 的 Item Supplier 子表无 lead_time_days 字段（实测 417），交期存储为物料级 Item.lead_time_days。
+
+#### 3.5.6 采购 Agent 差异化方案真实验证（数据补录后）
+
+#### 3.6 第 1/2 项：持久化与采购前端（2026-09-28）
+
+**3.6.1 数据库持久化（用户优先级 1）**
+
+- 新增 3 张表：`real_quotations` / `real_approvals` / `real_procurement_plans`（Alembic 迁移 `d11a1a04ea20_real_business_state`，已 upgrade head）
+- `backend/app/services/real_order.py`：三个内存字典全部替换为数据库读写（save/get/list），审批校验器读数据库
+- **重启验证（实测）**：
+  1. 创建报价 QUO-73E16DC603AC + 审批 APPR-C3072D79B26F + 方案 PROC-FB9A1D5C5119
+  2. 停止 uvicorn 进程，重新启动
+  3. 三条记录全部可查（状态/审批人/金额完整）
+  4. 用重启前的审批编号创建 ERP 草稿成功：SAL-ORD-2026-00008，回读 verified=True（审批门禁跨重启有效）
+- 测试：28 passed
+
+**3.6.2 采购前端（用户优先级 2）**
+
+- `frontend/src/RealBusinessPage.tsx`：流程扩展为 8 步（新增 4 采购分析 / 5 方案审批 / 6 PO 草稿），新增类型、状态与回调；采购分析按钮要求先创建 SO 草稿
+- 采购分析面板展示：缺料清单（毛需求/库存/净需求/采购数量+MOQ 上调标注/交期/供应商）、供应商方案卡片（总价/交期/覆盖度/推荐徽标/每行价格依据+价格记录号/推荐理由）、数据来源与限制（如实标注）、证据列表
+- `frontend/src/styles.css`：新增 proc-table / supplier-option-card / data-limitations 等样式
+- **浏览器实测**（dev server 5173 + 后端 9000，全流程点击）：
+  - 报价 2000 件 → 单价 CNY 85（原价）、交期 17 天（真实 MES 排程）✓
+  - SO 草稿 SAL-ORD-2026-00009 回读确认 ✓
+  - 采购分析：缺料 3 项表格 + 3 个方案卡片（上海铸锻厂 3/3 推荐 39080、宁波 1/3、江苏 2/3），每行价格记录号（d5v1dj85c6 等）与交期（15/7/15 天）✓
+  - 批准 OPT-1 → PO 草稿 PUR-ORD-2026-00005：供应商/交期 2026-10-13（真实 lead_time 15 天）/回读 ✓ 已确认 ✓
+  - 截图证据：`gui-test-screenshots/t2_procurement_panel.png`、`t2_quotation_stepper.png`
+- 测试中发现并修复：批准后未推进到第 6 步（缺 `setStep(6)`）；修复后重测通过
+- 环境修复：dev server 曾连接 9001 端口的过期旧后端（显示旧折扣价格），已终止旧进程并新增 `frontend/.env.local` 固定 API 地址为 9000
+
+BD-2401×2000（缺料 3 项：CI-RAW 1200、M10-BOLT 3000、BRG-6204 2500；SEAL-RING 库存恰好够→不缺，真实判断）：
+
+- 方案按 Item Supplier 真实关系过滤：无关供应商不生成方案；上海铸锻厂覆盖 3/3（唯一全覆盖）、宁波紧固件 1/3（M10-BOLT@0.8 特定价）、江苏轴承 2/3（CI-RAW@13.4、BRG-6204@8.2）
+- 每行价格携带真实 Item Price 记录编号，price_basis=supplier_specific_price
+- 交期来自 Item.lead_time_days（max(12,7,15)=15 天，真实数据）
+- 推荐规则 lowest_total_cost_v2：优先覆盖全部缺料 → 推荐上海铸锻厂（39080 CNY，唯一全覆盖）
+- 审批 → PO 草稿 PUR-ORD-2026-00004：schedule_date=2026-10-13（今日+真实交期 15 天），回读 verified=True，docstatus=0，行项价格 12.5/0.86/8.6 与供应商特定价一致
+
+MOQ 约束已接入：净需求 < MOQ 时按 MOQ 上调（`qty_basis=min_order_qty`），由单元测试覆盖（净需求 100 → 订购 500）。
+
+#### 3.4.1 关联字段确认结论（基于源码与真实数据，非推断）
+
+正式关联字段：`OpenMES work_orders.customer_order_no`（nullable, string, max 100）。
+
+源码证据：
+
+- `services/OpenMes/backend/routes/api.php`：`POST /api/v1/erp/work-orders/import`（X-Api-Key + scope `erp:orders:import`），官方 ERP→MES 工单导入通道
+- `services/OpenMes/backend/app/Http/Requests/Api/V1/Erp/ImportWorkOrdersRequest.php`：payload 显式包含 `orders.*.customer_order_no`
+- `services/OpenMes/backend/app/Http/Requests/Api/V1/StoreWorkOrderRequest.php` 与 `UpdateWorkOrderRequest.php`：均接受 `customer_order_no`
+- `services/OpenMes/backend/app/Services/CsvImport/WorkOrderImportService.php`：`update_or_create` 策略可回填已有工单的该字段
+- `services/OpenMes/backend/app/Http/Controllers/Api/V1/Erp/ProductionExportController.php`：完工导出原样返回 `customer_order_no`
+
+产品主数据级标识（仅信息性，不构成订单关联）：OpenMES `product_type.external_system="erpnext"` + `external_code`（BD-2401/SK-3401/TS-4501 有值，DEMO_BRACKET_001 为 null）。
+
+真实数据现状（2026-09-28 读取）：
+
+- OpenMES 4 个工单的 `customer_order_no` 全部为 null（种子创建时未填）
+- ERPNext 5 张销售订单全部是 BD-2401：00001(500件,交期2026-10-15)、00002(100,09-28)、00003(500,10-15)、00004(100,09-28)、00005(100,09-28)
+- ERPNext Work Order doctype 存在但 0 条记录（未使用）
+- 歧义已实证：WO-2026-001（BD-2401×500，due 2026-10-15）同时匹配 00001 和 00003 两张订单，因此产品编码+数量+交期不能作为正式关联依据
+
+#### 3.4.2 修改文件
+
+| 文件 | 修改 |
+|------|------|
+| `backend/app/adapters/erp/base.py` | 协议新增 `list_sales_orders` / `get_sales_order` |
+| `backend/app/adapters/erp/erpnext_adapter.py` | 实现两方法；404 才返回 found=False，连接错误直接抛出 |
+| `backend/app/adapters/erp/mock.py` | Mock 实现同方法（authority=MockERP, synthetic_demo_only） |
+| `backend/app/adapters/mes/base.py` | 协议新增 `get_work_orders_strict` |
+| `backend/app/adapters/mes/openmes_adapter.py` | `_map_work_order` 新增 `customer_order_no`/`product_external_code`/`product_external_system`；新增 `get_work_orders_strict`（连接失败抛异常而非返回空列表） |
+| `backend/app/adapters/mes/mock.py` | 同上 Mock 版 |
+| `backend/app/services/order_linkage.py` | 新增：关联查询服务（只按 customer_order_no 精确匹配） |
+| `backend/app/main.py` | 新增 2 个只读 GET 路由（见 3.4.3） |
+| `backend/tests/test_order_linkage.py` | 新增 8 个测试（已关联/未关联/产品编码不等于关联/ERP 不存在/ERP 断连/MES 断连/数量不一致仅作证据/Mock 契约） |
+| `backend/investigate_linkage.py` | 新增：只读调查脚本（拉取两边原始记录比对字段） |
+
+#### 3.4.3 新增接口与真实验证结果（APP_ADAPTER_MODE=real，端口 9000）
+
+- `GET /api/real-orders/erp/sales-orders`：列出真实销售订单供选择
+- `GET /api/real-orders/erp/sales-orders/{order_id}/mes-link`：订单↔工单关联查询（只读，含证据）
+
+关联接口行为约定：
+
+1. 正式关联仅按 `customer_order_no == ERP 销售订单号` 精确匹配
+2. 未匹配时返回 `status=NOT_LINKED`、`message="未建立关联"`、`not_substituted=true`，并附 `candidates_for_manual_review`（产品编码一致工单，显式标注 `not_an_association=true`）
+3. ERP/MES 连接失败返回 502 明确报错（不用空结果冒充"未建立关联"，不回退 Mock）
+4. ERP 订单不存在返回 404 且不查询 MES
+
+实测记录（全部只读，未写入任何真实系统）：
+
+| 接口 | 状态码 | authority | 结果 |
+|------|--------|-----------|------|
+| `GET /api/erp/customers/上汽集团` | 200 | ERPNext | found |
+| `GET /api/erp/items/BD-2401` | 200 | ERPNext | found |
+| `GET /api/erp/items/BD-2401/bom` | 200 | ERPNext | BOM-BD-2401-001 |
+| `GET /api/erp/inventory?item_codes=BD-2401,CI-RAW` | 200 | ERPNext | 1 条（当前真实库存状态） |
+| `GET /api/real-orders/erp/sales-orders` | 200 | ERPNext | 5 张订单，data_source=erpnext_api |
+| `GET /api/integrations/openmes/work-orders` | 200 | OpenMES | 4 条 |
+| `GET /api/integrations/openmes/work-orders/2` | 200 | OpenMES | WO-2026-001, customer_order_no=None |
+| `GET /api/mes/work-orders` | 200 | OpenMES | 4 条（已含 customer_order_no 字段） |
+| `GET /api/mes/work-orders/2/progress` | 200 | OpenMES | 整体进度 |
+| `GET /api/mes/quality-records` | 200 | OpenMES | 2 条 |
+| `GET /api/real-orders/erp/sales-orders/SAL-ORD-2026-00001/mes-link` | 200 | erp=ERPNext, mes=OpenMES | `NOT_LINKED`："未建立关联"，如实说明 4 个工单 0 个填写 customer_order_no；候选 WO-2026-001 标注 product_code_only + not_an_association |
+| `GET /api/real-orders/erp/sales-orders/SAL-ORD-2026-00003/mes-link` | 200 | 同上 | 同上 |
+| `GET /api/real-orders/erp/sales-orders/SAL-ORD-2026-99999/mes-link` | 404 | ERPNext | "ERP 中不存在销售订单 …，未查询 MES" |
+
+#### 3.4.4 阶段 1 结论
+
+- 关联字段：已确认（`customer_order_no`），只读关联能力已实现并验证
+- 关联值：**已建立**——WO-2026-001 → SAL-ORD-2026-00001（用户批准，经官方导入接口回填，回读验证一致），关联接口返回 LINKED
+- `DEMO_WO_001` 及演示记录未参与任何关联逻辑
+- 后续跟单/质量/门禁/报价/采购流程已基于该关联完成真实验证（见 3.4.6）
+- 关联值回填需要人工决策（00001 还是 00003 与 WO-2026-001 对应只有业务方知道）并写入真实 MES，等待用户审批后进行
+
+#### 3.4.5 关联写入与 LINKED 验证（2026-09-28，已获用户批准）
+
+用户决策更新：测试数据无需人工判断订单归属，明确指令
+"统一将 WO-2026-001 → SAL-ORD-2026-00001，按照项目已有的 MES 写入方式完成关联，
+然后执行只读验证，确认 NOT_LINKED 变为 LINKED，并继续测试后续流程"。
+
+**使用的 MES 写入方式（项目已有，未编造接口）**：
+
+- `POST /api/v1/erp/work-orders/import`（X-Api-Key + scope `erp:orders:import`，strategy=`update_or_create`）
+- 源码依据：`services/OpenMes/backend/routes/api.php`、`ImportWorkOrdersRequest.php`、`WorkOrderImportService.php::updateExisting()/optionalErpFields()`
+
+**执行记录**（脚本 `backend/link_work_order.py`，审批依据已写入返回结果）：
+
+- API Key `agent-erp-v2` 已含 `erp:orders:import` scope，未变更凭据
+- 导入 payload：order_no=WO-2026-001, line_code=DEMO_LINE_01, product_type_code=BD-2401, planned_qty=500.0, priority=5, due_date=2026-10-15, customer_order_no=SAL-ORD-2026-00001（当前值原样回传，防止覆盖）
+- OpenMES 返回：HTTP 200，`updated=1, errors=[]`
+- **回读验证**：customer_order_no=SAL-ORD-2026-00001，数量 500.00、交期 2026-10-15、状态 ACCEPTED 均未被改动
+- authority：erp=ERPNext，mes=OpenMES
+
+**是否写入真实系统**：是（真实 MES 一条工单的 customer_order_no 字段）。回读一致。
+**只读验证结果**：
+
+- `backend/verify_order_link.py WO-2026-001` → `[已关联] WO-2026-001 → SAL-ORD-2026-00001，数量一致 | 交期一致`
+- `GET /api/real-orders/erp/sales-orders/SAL-ORD-2026-00001/mes-link` → HTTP 200，`status=LINKED`，证据链完整（双端记录号、匹配字段值、数量/交期一致性核验、来源系统）
+
+**新增写入能力代码**：
+
+- `backend/app/adapters/mes/openmes.py`：`import_erp_work_orders`（客户端）
+- `backend/app/adapters/mes/openmes_adapter.py`：适配器透传 + `_map_work_order` 增加 `line_code/product_type_code/description`
+- `backend/app/adapters/mes/base.py`：协议新增 `import_erp_work_orders`
+- `backend/app/adapters/mes/mock.py`：Mock 导入实现
+- `backend/app/services/order_linkage.py`：`link_work_order_to_erp_order`（强制审批参数、DEMO 隔离、当前值回传、回读验证）
+- `backend/link_work_order.py`：一次性执行脚本（含 scope 检查）
+- `backend/tests/test_order_linkage.py`：新增 5 个写入路径测试
+
+#### 3.4.6 后续流程真实验证（2026-09-28，APP_ADAPTER_MODE=real）
+
+| 流程 | 接口 | 状态码 | 结果 |
+|------|------|--------|------|
+| 跟单 Agent | `GET /api/real-orders/mes/track/2` | 200 | OpenMES：WO-2026-001 完成率 0%、ETA=交期、风险=进度偏低+2 个未关闭质量问题 |
+| 质量文档 Agent | `GET /api/real-orders/quality/package/2` | 200 | 门禁未通过（如实）：2 个未关闭问题，SOP/Control Plan 缺失（OpenMES 无此类文档） |
+| 发运门禁 | `GET /api/real-orders/ship-gate/2` | 200 | can_ship=False，三重阻断（未审批/质量门禁未通过/进度 0%<90%） |
+| 报价分析 | `POST /api/real-orders/quotation/analyze`（上汽集团/BD-2401/500） | 200 | 真实证据：价格记录 mrrhhgs4s8 单价 85、BOM 4 子项、4 条库存；单价 76.50（数量折扣 0.9）、总价 38250 |
+| 报价审批 | `POST /api/real-orders/quotations/QUO-845E0B1F9BBD/approve` | 200 | APPR-95A69598A15D |
+| ERP 销售订单草稿 | `POST /api/real-orders/erp/draft/from-quotation` | 200 | **写入真实 ERP（草稿）**：SAL-ORD-2026-00006，docstatus=0 未提交，回读 verified=True（客户上汽集团，total 38250） |
+| 采购分析（500 件） | `POST /api/real-orders/procurement/analyze` | 200 | 真实结论 NO_SHORTAGE（库存充足，无需采购）——真实数据的正确结果 |
+| 采购分析（2000 件） | 同上 | 200 | 真实缺料 3 项：CI-RAW 1200、M10-BOLT 3000、BRG-6204 2500；3 个供应商方案（价格/交期仍为模拟占位，见 P1-2） |
+| 采购审批 | `POST /api/real-orders/procurement/plans/PROC-77E17739B31A/approve` | 200 | APR-D3FCF8634E6A，选中 OPT-1 上海铸锻厂 |
+| ERP 采购订单草稿 | `POST /api/real-orders/erp/draft/po-from-plan` | 200 | **写入真实 ERP（草稿）**：PUR-ORD-2026-00002，docstatus=0，回读 verified=True（供应商上海铸锻厂，3 行缺料 1200/3000/2500，单价来自真实 Buying 价格表 12.5/0.8/8.2） |
+
+写入系统汇总（本次会话）：真实 MES 1 次（customer_order_no 回填，已回读）；真实 ERP 2 次（销售订单草稿、采购订单草稿，均为 docstatus=0 未提交并回读确认，未提交为正式单据）。
+
+### 3.7 第 3/4/5 项：质量接口检查、报价残留清理与全流程验收（2026-09-28）
+
+**3.7.1 质量 Agent OpenMES 接口检查（用户优先级 3）**
+
+源码路由 + 真实调用实测结论：
+
+| 能力 | OpenMES 接口 | 真实数据 | 处理 |
+|------|-------------|---------|------|
+| 质量问题 / NCR 读取 | `GET /api/v1/erp/quality/issues` | 2 条 | ✓ 已接入（原有） |
+| 检验记录 | `GET /api/v1/inspections` | 接口 200，0 条 | ✓ 新接入（inspections 空 → 门禁如实显示） |
+| 工程文档（SOP/Control Plan 载体） | `GET /api/v1/work-orders/{id}/engineering-documents` | 接口 200，0 条 | ✓ 新接入（0 条 → SOP/Control Plan 如实判缺失） |
+| 质量放行状态 | **未发现订单级放行 API** | — | 仍标注 `NOT_SUPPORTED`（工程文档 release 与检验 disposition 不能直接代表订单级放行） |
+| NCR 处置写回 | OpenMES API 路由存在（resolve/close/disposition），本项目尚未接入 | — | 暂不调用；需先完成权限、请求字段和审批门禁验证 |
+
+- `openmes.py` 新增 `list_work_order_engineering_documents` / `list_inspections`；适配器新增 `get_work_order_documents` / `get_inspections`（连接失败抛异常）
+- `quality_package` 重写：真实文档/检验数据 + `unsupported_capabilities` 显式列表 + 门禁理由注明"工程文档功能存在但当前无文档记录"
+- 前端质量面板新增"当前系统不支持（如实标注，不伪造）"区块
+- 实测：`GET /api/real-orders/quality/package/2` → 200，gate=False，open_issues=2，docs=0，inspections=0，unsupported=[质量放行状态, NCR 处置写回]
+
+**3.7.2 报价残留清理（用户优先级 4）**
+
+- 删除 `POST /api/real-orders/erp/draft/sales-order` 端点（使用固定测试数据 BD-2401/500/85.0/Stores - APM 创建草稿，前端未使用）
+- SO 草稿交期保护：报价无 delivery_date 时显式拒绝创建（此前默认"今天"冒充交期）
+- 审计确认 real_order.py 真实业务链中无残留固定价格/折扣/默认值；`llm_quotation.py` 的折扣函数仅剩 Mock 场景流程引用（P2 隔离范围）
+- 测试 28 passed；前端 build 通过
+
+**3.7.3 完整业务流程验收（用户优先级 5）**
+
+APP_ADAPTER_MODE=real，一次性脚本（acceptance_result.json）：
+
+| # | 环节 | 接口 | 状态码 | 结果 |
+|---|------|------|--------|------|
+| 1 | ERP↔MES 关联 | `GET /api/real-orders/erp/sales-orders/SAL-ORD-2026-00001/mes-link` | 200 | LINKED → WO-2026-001 |
+| 2 | 跟单 | `GET /api/real-orders/mes/track/2` | 200 | 完成率 0%，2 个质量风险 |
+| 3 | 报价 | `POST /api/real-orders/quotation/analyze`（2000 件） | 200 | erp_selling_price 85 元原价，交付=真实 MES 排程 17 天 |
+| 4 | 报价审批 | `POST .../quotations/{id}/approve` | 200 | APPR-BEC4EA858A93（已持久化） |
+| 5 | SO 草稿 | `POST /api/real-orders/erp/draft/from-quotation` | 200 | SAL-ORD-2026-00011，回读 True |
+| 6 | 采购链 | analyze → approve → po-from-plan | 200 | 缺料 3 项 → OPT-1 → PUR-ORD-2026-00006，交期 2026-10-13（真实 lead_time），回读 True |
+| 7 | 质量 | `GET /api/real-orders/quality/package/2` | 200 | 门禁未通过（2 个真实未关闭问题 + SOP/ControlPlan 无文档），2 项不支持标注 |
+| 8 | 发运门禁 | `GET /api/real-orders/ship-gate/2?quotation_approved=true` | 200 | can_ship=False，正确阻断（质量门禁未通过 + 进度 0%<90%） |
+
+**验收结论**：报价→审批→SO 草稿→采购→审批→PO 草稿全链路真实跑通（全部持久化）；质量与发运门禁基于真实数据正确阻断交付——这是当前真实数据下的正确业务结果（生产未完成、存在未关闭质量问题），不是功能缺失。
+
+### 3.8 第 5 批任务：运行记录持久化 / Mock 区分 / 质量通过场景（2026-09-28，历史记录；最终结果见 3.11）
+
+用户指令 5 项：① Agent 运行记录持久化 ② Mock 与真实入口区分 ③ 质量门禁阻断验证 ④ 质量通过场景（接口核实→补录→重跑）⑤ 双场景验收。
+**详细交接指南见 `docs/handoff_2026-09-28.md`**（后续开发以该文档为操作手册）。
+
+#### 3.8.1 ① Agent 运行记录持久化（完成）
+
+- 新表 `real_agent_runs`（Alembic 迁移 `1a1aade41dfd`，已 upgrade head），记录输入/完整结果（含证据链）/错误/起止时间
+- 装饰器 `@_agent_run(agent_type, operation)` 套在 10 个真实 Agent 函数上（报价/跟单/质量/门禁/采购/审批×2/ERP 写入×2/关联查询）
+- 新接口：`GET /api/real-orders/agent-runs`（摘要列表，可按 agent_type 过滤）、`GET /api/real-orders/agent-runs/{run_id}`（完整记录）
+- **重启验证通过**：报价 → 停服重启 → 5 条报价运行记录可查；最新记录 RUN-A7A3F87FAAA3 的 result.evidence 完整列出所用 ERP 记录编号（价格 mrrhhgs4s8、BOM-BD-2401-001、4 条库存）——决策依据可追溯已实证
+- 实施中修复：装饰器首次插入漏 `@` 前缀导致记录为空，已修复并重验
+
+#### 3.8.2 ② Mock 与真实入口区分（完成）
+
+- 导航栏 6 个 Mock 页面加黄色 `Mock` 徽标；每个 Mock 页面标题区加橙色横幅"Mock 演示数据——来自固定种子合成场景（synthetic_demo_only），不是真实 ERP/MES 业务结果，真实流程请使用「真实业务」页面"
+- `frontend/src/App.tsx`（navigation.mock 标记 + PageHeading mode 属性）、`styles.css`（.nav-mock-badge/.mode-banner）
+- 前端 build 通过；浏览器截图确认徽标与横幅可见
+
+#### 3.8.3 ③ 质量门禁阻断（API 级完成；页面级两个前端问题已修复，待复验）
+
+- API 已验证：`GET /api/real-orders/ship-gate/2?quotation_approved=true` → can_ship=False，blocking_reasons=['质量门禁未通过','生产进度不足 (0.0% < 90%)']，原因清晰
+- 前端走查中发现并修复两个问题：
+  1. 报价表单缺"客户要求交期"必填输入（后端交期保护会拒绝无交期草稿，但表单无输入项）→ 已新增日期输入 + 校验
+  2. 采购 NO_SHORTAGE（库存充足）时流程卡死：`analyzeProcurement` 无条件 setStep(5)，而步骤 5/6 面板要求 has_shortage → 无按钮推进。已修复：NO_SHORTAGE 时 setStep(7) 直接进入跟单质量
+- 前端 build 通过；**页面级复验待做**（100 件走 NO_SHORTAGE 路径 + 2000 件走缺料路径各一遍并截图）
+
+#### 3.8.4 ④ 质量通过场景 / ⑤ 双场景验收（当时未开始，已由 3.11 完成）
+
+需先核实 OpenMES 写接口（问题关闭/工程文档上传/produced_qty 更新），再补录明确标记的测试数据重跑；操作指南在 handoff 文档 §7.1/§7.2。缺接口则记录为当前不可用。
+
+#### 3.8.5 本批验证快照
+
+- 测试 28 passed；compileall 通过；前端 build 通过
+- 后端 9000（real 模式）与前端 5173 运行中；agent-runs 接口可用
+
+## 4. 当前问题清单
+
+### P0：必须先解决
+
+#### P0-1 真实 ERP 订单与真实 MES 工单建立关联（已完成）
+
+- 关联字段确认：`customer_order_no`（见 3.4.1）
+- 只读关联接口：已上线并验证（见 3.4.3）
+- 关联值写入：WO-2026-001 → SAL-ORD-2026-00001 经官方导入接口回填，回读验证一致（见 3.4.5）
+- 关联查询返回 LINKED，证据链完整；找不到关联时明确返回”未建立关联”，不拿其他工单代替
+- 产品编码/数量/交期推断已被实证排除作为匹配依据（仅作一致性核验与人工确认候选）
+
+#### P0-2 禁止真实模式悄悄回退 Mock
+
+真实业务模式下，ERP/MES 连接失败必须明确报错；不能让真实页面继续显示 Mock 数据。
+
+需要检查：
+
+- `backend/app/adapters/factory.py`
+- `backend/app/main.py`
+- 前端真实业务页面
+
+验收：
+
+- `APP_ADAPTER_MODE=real` 时连接失败直接阻断业务
+- 页面显示连接错误和来源状态
+- 不出现 `MockERP`、`MockMES` 或 `synthetic_demo_only`
+
+### P1：真实业务链必须完成
+
+#### P1-1 报价 Agent 去除占位计算（已完成，见 3.5.1/3.5.3）
+
+固定成本/固定加成/固定生产周期/固定公司仓库均已删除并接入真实数据；
+数量折扣表保留但显式标注为人工配置参数（去留待用户确认）。
+
+#### P1-2 采购 Agent 接入真实采购数据（已完成代码层，数据层待用户决策，见 3.5.1/3.5.3）
+
+模拟价格系数、固定交期、固定占位金额均已删除；单价来自真实 Buying 价格记录
+（含编号），方案/审批/PO 草稿/回读全链验证通过。ERP 缺少的供应商业务数据
+（Item Supplier 关系、供应商特定价格、交期、MOQ）已如实标注 data_limitations，
+是否补录测试数据待用户决策。
+
+#### P1-3 接入采购前端
+
+真实业务页面需要补齐：
+
+1. 物料需求清单
+2. 缺料数量
+3. 供应商方案
+4. 方案选择
+5. 人工审批
+6. ERP 采购订单草稿
+7. 草稿回读结果
+
+#### P1-4 质量文档 Agent 形成真实闭环
+
+需要确认 OpenMES 是否存在真实的：
+
+- SOP
+- Control Plan
+- 检验记录
+- NCR 处置
+- 质量放行
+
+当前只能读取质量问题和生成本地汇总，不能宣称已经完成质量文档业务闭环。
+
+### P2：系统可持续使用
+
+#### P2-1 业务数据持久化（核心三项已完成，见 3.6）
+
+报价记录、审批记录、采购方案已迁移到 SQLite（real_quotations / real_approvals /
+real_procurement_plans 三张表，Alembic 迁移 d11a1a04ea20），重启后数据可查、
+审批门禁跨重启有效（实测创建 SAL-ORD-2026-00008）。剩余：ERP 草稿回读结果已嵌在
+报价/方案的 data_json 中随之持久化；订单-MES 关联查询为实时只读无需持久化；
+Agent 运行记录待后续。
+
+#### P2-2 修复前端构建
+
+2026-09-28 复验：`npm run build` 已通过（EPERM 未再复现，此前可能是文件锁临时占用）。
+保留本条目持续观察若干次构建；若复发，排查 `tsconfig*.tsbuildinfo` 与 `vite.config.js` 的写入占用。
+
+#### P2-3 清理和保护凭据
+
+检查未跟踪脚本，尤其是：
+
+- `backend/check_openmes.py`
+- `backend/check_erpnext.py`
+- `backend/get_openmes_token.py`
+- `backend/create_erp_api_key*.py`
+- `backend/seed_*.py`
+
+不得在脚本中硬编码 Token、API Key、Secret 或密码。已经暴露的凭据应轮换。
+
+## 5. 真实业务目标流程
+
+第一条必须跑通的垂直链：
+
+```text
+真实 ERP 客户/物料
+    ↓
+报价 Agent 读取真实价格、BOM、库存
+    ↓
+人工报价审批
+    ↓
+ERP 销售订单草稿
+    ↓
+ERP 物料需求
+    ↓
+真实 MES 工单关联
+    ↓
+跟单 Agent 读取进度和交期
+    ↓
+质量文档 Agent 读取真实质量资料
+    ↓
+人工质量审批
+    ↓
+真实质量门禁
+    ↓
+发运判断
+```
+
+这条链没有完整跑通之前，不能扩展更多演示场景，也不能宣称四 Agent 已完成。
+
+## 6. 开发顺序
+
+### 阶段 1：真实 ERP 订单到 MES 工单关联（✅ 已完成 2026-09-28）
+
+- ✅ 确认真实关联字段（customer_order_no，见 3.4.1）
+- ✅ 新增关联查询（只读接口 + 证据链，见 3.4.3）
+- ✅ 处理找不到关联的情况（明确"未建立关联"+人工确认候选，见 3.4.3）
+- ✅ 只读验收 + 关联值回填与回读（LINKED 验证，见 3.4.5）
+
+### 阶段 2：报价 Agent 真实化
+
+- 删除固定成本和固定交期占位
+- 使用真实价格和库存
+- 生成报价证据链
+- 审批后创建草稿并回读
+
+### 阶段 3：采购 Agent 真实化
+
+- 确认供应商价格和交期字段
+- 删除模拟价格和固定交期
+- 完成采购前端
+- 审批后创建采购草稿并回读
+
+### 阶段 4：跟单和质量闭环
+
+- 真实工单进度
+- 真实质量记录
+- 真实质量文档
+- 真实质量放行状态
+- 发运门禁
+
+### 阶段 5：持久化、构建和安全
+
+- 迁移内存状态到数据库
+- 修复前端构建
+- 清理硬编码凭据
+- 完成端到端验证
+
+## 7. 每阶段必须记录的验收证据
+
+每次改动后更新本文件，记录：
+
+1. 修改文件
+2. 使用的真实 ERP/MES 记录编号
+3. 实际调用的接口
+4. 返回状态码
+5. 返回 authority
+6. 是否写入真实系统
+7. 写入后的回读结果
+8. 测试命令和结果
+9. 仍然存在的问题
+10. 下一步任务
+
+## 3.9 本轮继续开发：质量问题工单范围修正（2026-09-28）
+
+- 发现：OpenMES `GET /api/v1/erp/quality/issues` 返回的是 `work_order_no`，适配器原先只读取 `work_order_id`，且未按当前工单过滤；这会把其他工单的质量问题计入当前工单门禁。
+- 修改：`backend/app/adapters/mes/openmes_adapter.py` 先读取当前工单 `order_no`，再只保留同号质量问题；同时合并工单详情中的嵌套问题并去重。缺少工单号或质量接口异常时失败关闭，不把异常当成空质量结果。
+- 测试：新增 `backend/tests/test_openmes_quality_scope.py`，覆盖跨工单过滤、嵌套问题去重、缺少工单号和接口异常；与订单关联测试合计 `16 passed`。
+- 编译：`compileall` 受现有 `backend/app/adapters/mes/__pycache__` 文件权限锁影响，未完成写入；需清理/解锁缓存后重跑。
+- 当前真实验证：WO-2026-001 的质量包仍返回 2 条未关闭问题、SOP/Control Plan 各缺 1 项，质量门禁应保持未通过；本轮未修改 OpenMES 测试数据。
+- 重启验证：使用独立 9001 临时实例加载新代码后，WO-2026-001 返回 1 条同工单质量问题（带 `work_order_no=WO-2026-001`），其他工单问题已被过滤；质量门禁仍为 False。原 9000 进程因权限无法停止，未强行处理。
+- 质量写回进展（历史记录）：已接入 OpenMES `POST /api/v1/issues/{id}/resolve` 与 `/close` 的客户端适配；后续已补充服务端令牌、两步审批和回读验证，详见 3.9。
+- 测试数据库隔离：直接使用 E 盘运行数据库执行全量测试时受到运行进程/权限锁，出现 SQLite 只读错误；复制数据库到临时可写位置后全量测试 `32 passed`，临时文件已删除。该问题不属于业务逻辑失败，但后续应为测试配置固定独立数据库。
+- 写入安全门禁：新增 `REAL_WRITE_API_TOKEN` 服务端令牌校验；令牌未配置时质量写回相关接口返回 503，令牌错误返回 403。质量写回仍需经过本地审批记录校验。新增安全测试后，隔离数据库全量测试 `35 passed`。
+- 质量写回实测：使用临时令牌和隔离本地审批库，`issue_id=1`（WO-2026-001）通过“申请→批准→resolve→回读”写入 OpenMES；回读 `status=RESOLVED`、`read_back_verified=true`。这是明确标记的 TEST 操作，未修改 ERP、生产数量或工程文档。
+- 写回后的真实门禁：`open_issues=0`，`missing_documents=[SOP, Control Plan]`，`quality_gate=false`；发运仍为 `can_ship=false`，阻断原因为质量文档缺失和生产进度 `0% < 90%`。
+
+### 3.10 本轮继续开发：工程文档类型核验与质量门禁复验（2026-09-28）
+
+- 发现：当前运行的 OpenMES 工单冻结快照和 `/api/v1/work-orders/{id}/engineering-documents` 返回文档 ID、文件名、版本和生命周期，但旧运行版本没有返回 `document_type`；因此仅看摘要会把真实 SOP/Control Plan 误判为缺失。
+- 修复：`backend/app/adapters/mes/openmes.py` 新增 `GET /api/v1/engineering-documents/{id}` 客户端方法；`openmes_adapter.py` 对缺少类型的冻结文档按 ID 读取详情，使用 OpenMES 返回的真实 `document_type`，不从文件名猜类型。新增契约测试后 `tests/test_real_integrations.py` 为 `10 passed`。
+- 真实测试数据：OpenMES 文档 `id=1`（`TEST_SOP_WO2026-001.html`，SOP，released）和 `id=2`（`TEST_ControlPlan_WO2026-001.html`，Control Plan，released）；测试工单 `id=6 / TEST_WO_QUALITY_002` 的工单冻结快照已包含两份文档引用。
+- 质量门禁复验：`quality_package(6)` 返回 `open_issues=0`、`documents=2`、`missing_documents=[]`、`quality_gate_passed=true`。`ship_gate_check(6, quotation_approved=true)` 仍正确返回 `can_ship=false`，唯一阻断为生产完成率 `0% < 90%`。
+- 当前限制（截至 3.10）：OpenMES 正在运行的服务仍是旧构建，尚未加载 `WorkOrderService.php` 的 `document_type` 快照字段补丁；项目适配器已通过详情接口兼容该版本。生产完工路径已在 3.11 通过官方批次/工序完成接口验证。
+
+### 3.11 本轮继续开发：OpenMES 官方生产完工路径与发运门禁通过（2026-09-28）
+
+- 工艺模板：通过 `POST /api/v1/product-types/2/process-templates` 创建 `TEST_BD2401_QUALITY_FLOW`（template id=2），再通过 `POST /api/v1/process-templates/2/steps` 创建 `TEST_Final_Assembly`（step id=2）。
+- 测试工单：通过官方 `POST /api/v1/work-orders` 创建 `TEST_WO_QUALITY_003`（work_order id=7，计划 500 件），随后 `POST /api/v1/work-orders/7/accept` 接受。
+- 测试批次与完工：创建 `TEST_LOT_QUALITY_003`（batch id=2），调用 `POST /api/v1/batch-steps/1/start`，再调用 `POST /api/v1/batch-steps/1/complete`，请求 `produced_qty=500`、实际工时 30 分钟；回读工单状态 `DONE`、`produced_qty=500.00`、完成率 100%。
+- 四 Agent 门禁复验（隔离本地数据库，仅读取真实 OpenMES）：`quality_gate_passed=true`、未关闭质量问题 0、缺失文档 0；报价审批参数为 true 时，`ship_gate_check(7)` 返回 `can_ship=true`、`production_ready=true`、`blocking_reasons=[]`。
+- 本轮结论：报价→采购→跟单→质量文档→质量门禁→发运判断的主链已经有一条真实 ERP/MES 测试数据路径跑通；仍需补页面级验收、检验记录/NCR 完整处置和真实身份权限治理，不能把该 `TEST_` 场景当作生产数据。
+
+### 3.12 本轮继续开发：页面禁止跨订单选择 MES 工单（2026-09-28）
+
+- 发现：页面原先在进入跟单步骤时默认选择工单列表第一条，用户也可以手动选择任意工单。因此即使 ERP 新建的销售订单草稿是 `SAL-ORD-2026-000020`，页面仍可能加载 `TEST_WO_QUALITY_003`（其 `customer_order_no` 仍是其他订单号），造成“门禁通过但不是同一业务订单”的假通过。
+- 修复：`frontend/src/RealBusinessPage.tsx` 增加 `customer_order_no` 字段；创建 ERP 销售订单草稿后刷新 MES 工单，并只保留 `customer_order_no == erp_draft_id` 的精确匹配项。没有匹配项时禁用工单选择和加载按钮，明确提示先在 OpenMES 建立正式关联；加载前再次校验，不能通过前端状态绕过。
+- 验证：`frontend` TypeScript 检查通过（`npx tsc --noEmit --incremental false`）。由于当前运行中的前端进程占用构建缓存，未强制结束该进程；完整构建使用临时输出目录继续验证。
+- 影响：现有 `TEST_WO_QUALITY_003` 只能在其 `customer_order_no` 与当前 ERP 草稿号一致时用于通过场景。系统不再用其他工单替代未建立关联的订单，测试数据需要先通过 OpenMES 官方关联接口回填并回读。
+
+### 3.13 本轮继续开发：测试隔离、失败验证、Agent 运行面板与页面级双场景验收（2026-09-29）
+
+**测试与安全（next_development_plan 阶段四）**
+
+- 新增 `backend/tests/conftest.py`：pytest 全套使用临时目录独立 SQLite（导入 app 前设置 `DATABASE_URL`，`Base.metadata.create_all` 建表，测试结束删除）。验证：全量测试期间 `backend/data/demo.db` mtime 无变化，运行库不被测试触碰。此前"复制业务库跑测试"的做法不再需要。
+- 失败验证矩阵补齐：`tests/test_real_integrations.py` 新增 `JsonHttpFailureMappingTests` 4 例——超时（`httpx.ConnectTimeout`→`IntegrationError code=timeout, retryable=true`）、网络中断（`ConnectError`→`network_error`）、远端 500（`remote_http_error`，retryable）、远端 404（不重试、保留 detail）。连接失败（ERP/MES 传播）、权限（写门禁 403/503、IntegrationPermissionDenied）、空数据（DATA_MISSING）此前已有测试覆盖。
+- 凭据扫描结论：未跟踪脚本（get_openmes_token/seed_*/investigate_* 等）均从 `.env` 读取凭据，无硬编码兜底值；`.gitignore` 覆盖 `.env`/`.env.*`。无需轮换（未发现新暴露）。
+- `compileall` 此前的 `__pycache__` 权限锁已随旧进程退出自行解除，本轮通过（无代码改动）。
+- 全量测试：**42 passed**（38→42）；`compileall` 通过；`npm run build` 通过。
+
+**阶段三：Agent 运行记录页面查询（新功能）**
+
+- `frontend/src/api.ts`：新增 `AgentRunSummary`/`AgentRunDetail`/`AgentRunEvidenceItem` 类型与 `agentRunTypeNames` 映射（8 类：报价/采购/跟单/质量文档/发运门禁/人工审批/ERP 草稿写入/ERP↔MES 关联）。
+- `frontend/src/RealBusinessPage.tsx`：页面底部新增"Agent 运行记录"面板——展开/收起、按 Agent 类型过滤、刷新；行点击展开详情：输入参数、**证据链（source/record_type/record_id/summary 逐条显示真实 ERP 记录编号）**、错误信息、数据限制、起止时间。
+- 页面实测：展开 `RUN-99BCF77551D4`（报价 analyze），证据链完整显示客户"上汽集团"、物料 BD-2401、价格记录 mrrhhgs4s8、BOM-BD-2401-001、4 条库存记录；2026-09-28 的运行记录跨重启可查。截图 `gui-test-screenshots/2026-09-29_agent_runs_panel_evidence.png`。
+
+**页面级 8 步走查发现并修复 3 个前端问题**（`RealBusinessPage.tsx`）：
+
+1. **缺料路径步骤 6 卡死**（与 §6.1 NO_SHORTAGE 卡步同类，此前 §6.2 走查未完成所以漏网）：`createPoDraft` 成功后不推进步骤且无任何进入步骤 7 的入口。修复：PO 草稿创建成功后刷新工单列表并 `setStep(7)`。
+2. **步骤 7 无法刷新工单列表**：页面提示"先在 OpenMES 建立正式关联"，但建立关联后工单列表无从刷新（顶部 ↻ 只刷新 Mock 场景数据）。修复：步骤 7 增加"↻ 刷新工单列表"按钮。
+3. **步骤 8 无法重新加载门禁**：MES 生产进度更新后只能重新开始整个流程。修复：步骤 8 增加"↻ 重新加载跟单与门禁"按钮（复用 `loadTracking`）。
+- 三个修复均经浏览器实测复验；`npm run build` 通过。
+
+**页面级双场景最终验收（真实记录，全部 TEST_ 标记数据）**
+
+本批真实写入记录（写入均为官方 API，全部回读确认）：
+
+| 记录 | 编号 | 说明 |
+|------|------|------|
+| ERP SO 草稿 | SAL-ORD-2026-00021 | 100 件路径（QUO-B406CF260BBF，85 元原价，docstatus=0） |
+| ERP SO 草稿 | SAL-ORD-2026-00022 | 2000 件第一次走查（QUO-2A531CB13585；流程止步于旧步骤 6 卡死 bug，已由 00023 重走复验） |
+| ERP SO 草稿 | SAL-ORD-2026-00023 | 2000 件完整路径（QUO-8D8CEE7515DD，docstatus=0） |
+| ERP PO 草稿 | PUR-ORD-2026-00007 / 00008 | 分别对应 00022/00023 的上海铸锻厂方案（CNY 39,080，交期 2026-10-14=真实 lead_time 15 天，docstatus=0） |
+| MES 工单 | id=8 `TEST_WO_PAGE_00022` | `POST /api/v1/work-orders` 创建（201）+ accept，`customer_order_no=SAL-ORD-2026-00022`，0% |
+| MES 工单 | id=9 `TEST_WO_PAGE_00023` | 同上（201/200），`customer_order_no=SAL-ORD-2026-00023`；冻结快照继承已发布工程文档 id=1(SOP)/2(Control Plan) |
+| MES 批次 | id=3 `TEST_LOT_PAGE_9` | `POST /work-orders/9/batches`（201）→ `POST /batch-steps/2/start`（200）→ `/complete` produced_qty=1800（200）→ 回读 `produced_qty=1800.00`（90%） |
+
+- **场景 A（应阻断）**：100 件 NO_SHORTAGE 路径跳步复验通过（不再卡步骤 5/6，直接到步骤 7，截图 `2026-09-29_no_shortage_step7.png`）；2000 件路径在工单 0% 时发运门禁页面显示"禁止发运"——报价审批 ✓/质量门禁 ✓/生产进度 ✗ (0%<90%)，阻塞原因"生产进度不足"。截图 `2026-09-29_scenarioA_ship_gate_blocked.png`。
+- **场景 B（应通过）**：同一工单按官方批次工序接口补产 1800/2000（90%）后，页面重新加载门禁：三项全 ✓，"可以发运"。截图 `2026-09-29_scenarioB_ship_gate_passed.png`。
+- API 交叉验证：`GET /api/real-orders/ship-gate/9?quotation_approved=true` → `can_ship=true, completion_rate=90.0, blocking_reasons=[]`，与页面一致。
+- 走查辅助脚本：`backend/walkthrough_page_scenarios.py`（create/produce 两模式，凭据从 .env 读取，输出不含凭据）。
+
+**遗留问题（更新）**
+
+- ~~Agent 运行记录页面查询~~ 已完成（本轮）
+- ~~页面级双场景验收截图~~ 已完成（本轮）
+- ~~NO_SHORTAGE 卡步~~ 已复验收口（本轮）
+- ETA 仍取交期占位（produced_qty 已可积累，速率 ETA 待真实排产数据）
+- 质量写回的身份来源仍是服务端令牌（REAL_WRITE_API_TOKEN）+本地审批记录，未接真实用户/角色体系；close/disposition 与纠正措施校验未接入（页面 unsupported_capabilities 如实标注）
+- MES 质量数据补录（检验记录 0 条）仍待用户决策
+- 旧 Mock 场景隔离（Mock 页面已有横幅，后端场景注册表与真实链共用进程）
+
+### 3.14 本轮继续开发：阶段五动态协同——协调智能体（2026-09-29）
+
+**背景**：用户提供团队讨论稿《汽车零部件四智能体功能与流程_团队讨论稿_动态协作版》，明确要求 Agent 调用拓扑与业务生命周期分开（不写死调用顺序），交互形态为"输入自然语言问题（如订单什么时候能做完）→ 智能体自行调用四个智能体查真实数据 → 汇总回答"。计划先落 docs/next_development_plan.md 阶段五（用户要求先写文档再开工）。
+
+**已完成**：
+
+1. **四个 AIP 智能体接入真实技能**（`app/aip/agents/*_aip.py`，8 个只读技能，原 Mock 演示技能保留并注释区分）：
+   - quotation: `quotation.analyze_real`（real_order.analyze_quotation）、`quotation.get_real`（get_quotation）
+   - procurement: `procurement.analyze_real`（analyze_procurement）、`procurement.get_real_plan`（get_procurement_plan）
+   - tracking: `tracking.track_real`（track_order）、`tracking.lookup_order_link`（order_linkage.get_order_mes_link）、`tracking.check_real_ship_gate`（ship_gate_check）
+   - quality-document: `quality.get_real_package`（quality_package）
+2. **协调智能体** `app/services/coordinator.py`：DeepSeek 工具调用循环（≤8 轮）；能力目录 `REAL_SKILL_TOOLS`（8 技能含用途描述+参数 schema+aip_agent 路由键，即"能力发现"依据）；每个工具调用走真实 AIP RPC（acps_sdk start→poll→complete → `POST /aip/{agent}/rpc`）；调用链留痕（caller→callee→技能→参数→结果摘要→状态→耗时）；协调运行持久化 real_agent_runs（agent_type=coordinator）。system prompt 明确：禁编造数字、数据缺失如实说、只读不承诺写入。
+3. **API** `POST /api/real-orders/assistant/ask`：DeepSeek 未配置返回 503 `llm_not_configured`（不伪造回答）；question 必填 422。
+4. **前端**：真实业务页顶部"智能协同问答"面板（textarea + 提问 → 回答 + 调用链可视化：序号/子智能体/技能/参数/状态/耗时 + coordination_run_id）；agent-runs 面板与映射支持 coordinator 类型；`api.ts` 修复结构化错误 detail.message 提取（原先显示 [object Object]）。
+5. **测试** `tests/test_coordinator.py` 10 例：假 LLM 工具循环→链与持久化、工具失败回喂、轮次上限、未知技能不致命、能力目录↔AIP 注册一致性、tool specs 格式、无 DEEPSEEK key 明确报错、真实技能接线验证（patch real_order 函数验证调用与参数）。全量 **52 passed**，compileall 通过，前端 build 通过。
+
+**真实验证（AIP 通道，无 LLM 部分）**：重启后端（9000）后用 AipAgentClient 直连验证——
+- `tracking.lookup_order_link(SAL-ORD-2026-00023)` → LINKED，`association.links[0].mes_record.record_id=9`（ERPNext+OpenMES 双 authority）
+- `tracking.track_real(9)` → TEST_WO_PAGE_00023 完成率 90.0%（authority OpenMES）
+- `quality.get_real_package(9)` → 质量门禁 True、未关闭问题 0（authority OpenMES）
+- 即协调者的调用通道（AIP RPC → 真实技能 → 真实 ERP/MES）已全链打通；缺的只有 LLM 决策层。
+
+**阻塞项**：`.env` 中 `DEEPSEEK_API_KEY` 为**空值**（键存在无值），`LLM_MODEL=deepseek-flash`、`DEEPSEEK_BASE_URL` 已配置。因此"LLM 驱动完整问答"的真实验收暂未执行——页面与 API 均如实返回 503 明确提示"尚未配置 DEEPSEEK_API_KEY。不使用固定话术伪造回答"（截图 `gui-test-screenshots/2026-09-29_assistant_panel_llm_not_configured.png`）。**待用户提供 API Key 后即可跑阶段五任务 6 的两问动态性验收**。
+
+**修改文件**：backend/app/services/coordinator.py（新增）、backend/app/aip/agents/{quotation,procurement,tracking,quality_document}_aip.py（真实技能）、backend/app/main.py（ask 端点）、backend/tests/test_coordinator.py（新增）、backend/tests/conftest.py（上轮）、frontend/src/api.ts、frontend/src/RealBusinessPage.tsx、frontend/src/styles.css、docs/next_development_plan.md（阶段五计划）。
+
+**阻塞解除与真实验收（2026-09-29，用户提供 DEEPSEEK_API_KEY 后）**：
+
+- 修复：DeepSeek 工具名约束 `^[a-zA-Z0-9_-]+$` 不允许技能 ID 中的点——协调者增加技能 ID↔LLM 工具名双向映射（`.`→`__`，`_LLM_NAME_TO_SKILL`）；`http.py` 错误提取兼容 OpenAI 风格错误体 `{"error":{"message":...}}`（此前只显示"远端服务拒绝请求"）。测试同步更新，52 passed。
+- **问 1**"SAL-ORD-2026-00023 这个订单什么时候能做完？现在进展如何？"（HTTP 200，4.5s，RUN-COORD-77C8CCC320D7）：
+  - 调用链（2 步，LLM 自主决定）：`lookup_order_link(SAL-ORD-2026-00023)` 243ms → `track_real(9)` 461ms；
+  - 回答：完成率 90%（1800/2000）、交期 2026-10-31、关联字段精确一致，依据含 ERP 订单记录、MES 工单 id=9、产线、ETA；**主动发现真实数据不一致**（工单状态 PENDING vs 完成率 90%、工序 TEST_Final_Assembly completed=0）并建议核实，未编造结论。
+- **问 2**"SAL-ORD-2026-00023 为什么还不能发运？"（HTTP 200，6.2s，RUN-COORD-920A6B000D5A）：
+  - 调用链（4 步，与问 1 不同——动态性证据）：`lookup_order_link` → `track_real` → **`quality.get_real_package`** → **`check_real_ship_gate`（LLM 自主传 quotation_approved=false）**；
+  - 回答：唯一阻塞"报价/订单未审批（ERP Draft）"，质量门禁通过（SOP/Control Plan 2 份已发布、0 未关闭问题）、生产 90% 达标；明确"只读权限无法代办审批"；并如实标注 OpenMES 无订单级质量放行 API 的边界。
+- 页面级：问答面板实测通过，回答与调用链（4 次调用·3 轮推理）正常显示，截图 `gui-test-screenshots/2026-09-29_assistant_dynamic_coordination_q2.png`。
+- 协调运行持久化复验：`GET /api/real-orders/agent-runs?agent_type=coordinator` 返回 3 条（问 1/问 2/页面问）。
+- **动态性验收结论**：同一入口两个问题产生两条不同的真实调用链，每个数字可追溯到工具返回的真实记录；全程 ERP/MES 零写入。
+
+**写入说明**：本阶段全部为只读查询通道（ERP/MES 零写入）；analyze_procurement/get_real 仅写本地业务记录表（与 8 步流程一致），不写真实 ERP/MES。
+
+### 3.15 本轮继续开发：阶段六方案化协同（2026-09-29）
+
+**已完成**（按 next_development_plan.md 阶段六任务清单 0-7 全部执行）：
+
+1. **git 提交保护**：提交 `3a14196`（2015 文件，阶段 1-5 全部工作；acps-sdk-src 以 vendored 文件入库并移除其上游 .git，origin=AIP-PUB/ACPs-community v2.2.0 已记录；services/（OpenMes、frappe_docker 独立克隆）与 .trae-html-share-packages/ 加入 .gitignore）。
+2. **新增真实技能函数**（real_order.py，均带 @_agent_run 留痕）：
+   - `assess_cost_impact(plan_id, option_id)`：缺料换供应商方案的成本影响（订单收入=报价真实 Selling 价；基准材料成本=方案 net_requirement 真实 Buying 价；方案成本=供应商特定价合计；输出差值/单件加价/材料毛利前后/证据链）。价格缺失返回 DATA_MISSING 明确拒绝估算；口径如实标注"仅材料成本，无工时/制费"。
+   - `assess_delivery_impact(work_order_id, material_ready_date)`：物料到货（由方案 lead_time_days 推算）vs 工单交期（真实 track_order 数据），输出 buffer_days 与 verdict（arrival_in_time/arrival_after_due/not_needed）；无速率数据不推算剩余产量 ETA（assessment_scope 如实声明）。
+   - `find_quotation_by_erp_order(erp_order_id)`：按 ERP 订单号反查已保存报价（erp_draft_id 精确匹配，最新优先），补齐"工单→报价→采购方案"问答链。
+3. **AIP 接线**：quotation_aip 增加 `quotation.find_real_by_erp_order`/`quotation.assess_cost_impact`；tracking_aip 增加 `tracking.assess_delivery_impact`。
+4. **协调者方案合成**：能力目录扩至 11 个真实工具（含用途描述引导方案场景）；system prompt 增加方案类问题规则（多方案+真实数字+人工确认、数据缺失不得编造第三方案）；`_collect_proposal` 把工具结果原样汇集为结构化 `proposal_options`（缺料/供应商选项/成本评估/交期评估/缺失项，零二次计算）。
+5. **前端**：方案对比卡片（推荐徽标/覆盖/总价/交期/成本影响/单件加价/毛利变化/推荐理由/交期影响/数据缺失块，"最终由人工确认"标注）；回答轻量 Markdown 渲染（标题/加粗/表格，HTML 先转义）。
+6. **修复**：DeepSeek 工具循环偶发空回答 → 确定性恢复机制（追加"只基于以上工具结果用中文直接回答"的无工具调用，recovered 标志透明记录）；MAX_TOOL_ROUNDS 8→12（复杂方案链 13-14 步调用会顶格）。
+7. **测试** `tests/test_proposal_skills.py` 12 例：成本差值/单件加价/毛利计算断言、DATA_MISSING 分支、缺失方案/选项报错、延期/提前/非法日期、范围诚实性、订单反查（含无匹配）、_collect_proposal 汇集与 data_missing、新技能 AIP 注册一致性。全量 **64 passed**，compileall/build 通过。
+
+**真实验收（DeepSeek 驱动，全部真实 ERP/MES 数据）**：
+
+- **问 3（缺料方案）**"SAL-ORD-2026-00023 的物料有缺口…给我几套可执行的采购方案"（HTTP 200，约 30s，13-14 步调用链）：LLM 自主链 = 查关联 → 反查报价（新技能）→ 报价分析 → 工单进度 → 采购分析 → 逐方案成本评估（OPT-1/2/3）→ 逐方案交期评估（中途一次参数为空的调用失败后自恢复重试）→ 汇总回答。输出：OPT-1 上海铸锻厂（唯一 3/3 全覆盖，+1180 元、单件 +0.59、毛利 132100→130920、物料 10-14 到货早交期 17 天不延期，推荐）；OPT-2/OPT-3 部分覆盖，LLM **批判性指出其负成本差异是"未覆盖全部缺料造成的口径假象，不可直接比较"**；proposal_options 结构化卡片页面渲染正常（截图 `gui-test-screenshots/2026-09-29_assistant_proposal_cards.png`）。
+- **问 4（加急）**"客户希望交期尽量提前，能不能做到"（HTTP 200，约 42s，14 步调用链，与问 3 又不同——多了质量包与发运门禁）：结论诚实——"物料不是瓶颈（所有方案到货都早于交期），但能否提前无法给出确切日期，因 MES 无剩余产量排程数据，工具明确不推算 ETA"；指出真正限制在审批（Draft）与生产排程。全程未编造"能提前 X 天"。
+- 协调运行记录持久化可查（agent_type=coordinator）。
+
+**写入说明**：本阶段新增技能全部只读或本地记录读写；ERP/MES 零写入。采购分析每次调用生成新本地方案记录（PROC-*），属正常业务留痕。
+
+### 3.16 本轮继续开发：阶段七执行闭环（2026-09-29）
+
+**已完成**（next_development_plan.md 阶段七任务 1-7；写入审批依据：用户 2026-09-29 指令"开始"执行阶段七计划，计划中明确包含卡片批准→PO 草稿写入）：
+
+1. **新真实技能** `procurement.assess_combination(plan_id, option_ids)`：分单采购组合的确定性评估——组合成本=各选项真实价格记录合计（无折扣/系数假设）、覆盖并集、最长物料级交期；同一物料被多选项重复覆盖时明确告警（组合成本含重复采购）；任一选项价格不完整返回 DATA_MISSING。修复了初版漏返回 evidence 字段的问题（测试抓出）。
+2. **协调者**：能力目录扩至 13 个真实工具；prompt 规则 E（组合方案必须用 assess_combination 计算，禁止自行相加；重复覆盖/未覆盖告警必须原样转告）；_collect_proposal 增加 combination_assessments 汇集。
+3. **前端执行闭环**：方案卡片"选择此方案并起草 PO（需人工确认）"→ 内联确认面板（明示写入内容：方案号/选项/供应商/金额/docstatus=0 + 审批人输入框）→ 调既有审批门禁端点 approve → po-from-plan → 卡片回显审批号与 PO 草稿号 + 回读状态；执行中/已执行状态防重复提交。
+4. **验收发现并修复状态联动断链**：首轮验证"方案批准了吗"时协调者如实回答查不到（未乱猜）——根因是问答链 analyze_real 生成的报价没有与 ERP 订单的关联（erp_draft_id 仅在 8 步流程创建草稿后存在）。修复：①analyze_quotation 新增可选 source_erp_order_id（**声明式上下文**：仅当调用方明确给出订单号时记录，不做事后推断）；②find_quotation_by_erp_order 同时匹配 erp_draft_id 与 source_erp_order_id，返回值附带最新方案摘要；③新技能 procurement.find_real_plan_by_quotation（按报价查最新方案状态：审批号/选定选项/PO 草稿号）。
+5. **真实验收（修复后）**：
+   - 卡片批准：PROC-F7422D68E79C + OPT-1（上海铸锻厂 39080 CNY）→ 审批 APR-BCC4EE93ACF6 → PO 草稿 PUR-ORD-2026-00009（首轮）；修复后复验 APR-9005E70E94FC → PUR-ORD-2026-00010（回读确认，docstatus=0）。
+   - 状态联动：问"SAL-ORD-2026-00023 的采购方案批准了吗？PO 草稿生成了吗？"→ 协调者 2 步链（find_real_by_erp_order → find_real_plan_by_quotation）准确回答：方案 PROC-959804A88AA9 状态 PO_DRAFT_CREATED、审批号 APR-9005E70E94FC、PO 草稿 PUR-ORD-2026-00010，与卡片操作一致；并主动指出"报价单本身状态仍为 DRAFT，与方案侧审批状态不一致，建议一并核实"（真实治理观察：问答链报价未走报价审批，记录为待办）。截图 `2026-09-29_proposal_exec_closed_loop.png`、`2026-09-29_proposal_status_linkage.png`。
+   - LLM 在方案问答中主动调用 assess_combination 计算分单组合（方案 B），并原样转告工具告警"无重复覆盖、无未覆盖"。
+6. **测试**：assess_combination 5 例（组合数学/覆盖并集/重复覆盖告警/单选项未覆盖告警/DATA_MISSING/未知选项报错/AIP 注册）；find_latest_plan_by_quotation 间接覆盖。全量 **69 passed**，compileall/build 通过。
+
+**写入说明（真实 ERP 写入记录）**：PUR-ORD-2026-00009/00010 采购订单草稿（docstatus=0，回读确认）；对应审批记录 APR-BCC4EE93ACF6/APR-9005E70E94FC（本地持久化）。协调者本身无写权限；写入全部经人工卡片确认 + 审批门禁。
+
+**遗留（新增）**：问答链报价未走报价审批（方案侧已批准 vs 报价 DRAFT 不一致）——建议方案卡片批准时同步校验报价审批状态或引导先审批报价，列为下一迭代。
+
+### 3.17 阶段八进行中快照：质量异常协同 + 审批一致性（2026-09-29，⚠️ 暂停交接）
+
+> 本节按用户 2026-09-29 指令如实记录阶段八中断状态，供下一个执行者（人或 AI）接手。
+> 完整任务清单与交接说明见 docs/next_development_plan.md 阶段八；写入依据：用户"开始"（阶段八计划批准）。
+
+**已完成并验证**：
+
+1. **新真实技能 `quality.assess_quality_impact(work_order_id)`**（real_order.py，@_agent_run("quality","impact")）：质量问题清单（未关闭按严重度排序）+ 批次关联 + 质量门禁 + 生产进度交叉 → 影响结论（发运阻断/交期风险）；数据缺口如实列出（检验 0 条、SN 无 API、NCR NOT_SUPPORTED、批次读取失败记为缺口不伪造为空）；处理选项均标注需人工确认。
+2. **MES 批次读取**：客户端 `list_work_order_batches`（GET /api/v1/work-orders/{id}/batches，Bearer）、适配器 `get_work_order_batches`、base.py 协议、mock.py 空实现。
+3. **AIP 接线**：quality_document_aip 注册 `quality.assess_quality_impact`（9000 健康检查实测列出）。
+4. **协调者**：工具目录新增该技能（描述引导质量异常场景）；`_collect_proposal` 汇集 `quality_impacts` 与 `quotation_status`。
+5. **前端**：方案卡片双审批线（报价未审批→确认面板①报价审批②方案审批两行，各自审批人输入，依次 approveQuotationApi→approveProcurementPlan→createPoFromPlan，回显两笔审批号）+ 质量影响问答区块（异常表/批次/结论/处理选项/数据缺口）；api.ts 新增 QualityImpactResult/quotation_status 类型与 approveQuotation 封装；样式追加。**npm run build 通过**。
+6. **测试**：quality impact 5 例（未关闭排序、干净工单无阻断、批次经适配器、批次失败为数据缺口、汇集器采集）；全量 **74 passed**；compileall 通过。
+
+**做到一半（未完成，接手者从这里继续）**：
+
+- **Q6 真实验收中断**："WO-2026-001 这个工单有质量异常吗？会影响交付吗？该怎么处理？"已真实执行（HTTP 200）：协调者 4 步链交叉核实后如实回答"WO-2026-001 在系统中查不到"（assess_quality_impact/get_real_package 因参数非数字 id 被远端拒绝、track_real NOT_FOUND、lookup_order_link ERP_ORDER_NOT_FOUND），给出 3 条补数路径——**行为正确但暴露缺口：用户说工单编号、工具只收数字 id**。
+- **修复做了一半**：`real_order.find_work_order_by_no(work_order_no)` 函数已写完并编译通过（精确编号匹配、未命中返回 existing_work_orders 建议），但 **AIP 未注册、协调者目录未加、测试未写、后端未重启**（当前 9000 进程无该技能）。
+- **剩余验收**：重启后端 → Q6 重跑（期望 find_by_no→assess_quality_impact，回答含 WO-2026-001 真实质量状态）→ 双审批线卡片批准验收（两笔 approval_id + PO 草稿回读）→ 状态一致性复查（报价不再是 DRAFT 不一致）→ 截图 → 全量回归 → git 提交。
+
+**本阶段 ERP/MES 写入**：暂无（find_work_order_by_no 为只读；双审批线功能未做真实验收写入）。测试 74 passed；前端 build 通过；**阶段八全部改动未提交 git**。
+
+**遗留问题清单（更新，优先级从高到低）**：
+
+1. 阶段八收尾（见上：编号→id 接线 + 剩余验收）；
+2. 检验记录补录 seed（用户未批准，检验维度如实显示"无数据"）；
+3. 质量写回真实用户/角色身份治理（现为服务端令牌 + 页面自报 approved_by）；
+4. NCR close/disposition 接入（NOT_SUPPORTED 如实标注）；
+5. 旧 Mock 场景后端隔离（Mock 注册表与真实链共用进程）；
+6. 速率 ETA（依赖 MES 排程/报工时序数据，当前无数据源）；
+7. Wutong 外部注册发现 + ACS 能力文件同步真实技能。
+
+### 3.18 阶段八继续开发：工单编号桥接与审批状态一致性（2026-09-30）
+
+**已完成并验证**：
+
+1. `tracking.find_real_by_no` 已注册到 `tracking` AIP 服务；协调者能力目录和系统提示已明确要求：用户给出 `WO-...` 编号时，必须先精确换取数字 `work_order_id`，禁止把编号中的数字当数据库 ID。
+2. 新增编号桥接单元测试和协调者两步调用链测试（`find_real_by_no → assess_quality_impact`）；未命中时返回已有工单编号建议，不猜测 ID。
+3. `_collect_proposal` 不再把采购方案状态误当报价状态；采购分析结果新增 `quotation_status`，取自持久化报价记录。真实报价审批状态为 `APPROVED` 时，方案卡片不会重复要求报价审批。
+4. 报价审批、采购方案审批和 PO 草稿创建增加幂等回读：重复点击复用原 `approval_id`/草稿编号；已批准方案不能改选供应商；已存在 PO 草稿时不会再次调用 ERP 创建单据。
+5. 9001/9002 临时后端已加载新代码并完成真实只读复验：
+   - `GET /aip/tracking/health` 列出 `tracking.find_real_by_no`；
+   - AIP `tracking.find_real_by_no({work_order_no: WO-2026-001})` 返回 `work_order_id=2`、`customer_order_no=SAL-ORD-2026-00001`、`authority=OpenMES`；
+   - AIP `quality.assess_quality_impact({work_order_id: 2})` 返回 `open_issues_count=0`、`missing_documents=[SOP, Control Plan]`、生产完成率 `0%`，并列出 `inspections/sn_traceability/ncr_full_disposition` 数据缺口。
+6. 阶段八中间快照验证结果：后端 **80 passed**，`compileall` 通过，前端 `npm run build` 通过；收尾后的全量结果为 **83 passed**（见 §3.20）。
+
+**仍未完成**：
+
+- DeepSeek 驱动的 Q6 自然语言问答与 ERP/MES 数据链已在用户授权后完成，详见 §3.20 的 `RUN-COORD-24CA66BD6EC5`。
+- 双审批线到 ERPNext 的真实写入/回读已完成，报价、采购方案、审批号和 PO 草稿状态已通过协调者状态问答复核，详见 §3.20。
+- 检验记录仍为 0 条，NCR close/disposition 和真实用户角色治理仍按原计划保留。
+
+### 3.19 工程可维护性：修正核心服务代码被误忽略（2026-09-30）
+
+- 根目录 `.gitignore` 原规则 `services/` 会匹配任意层级目录，意外忽略核心 `backend/app/services`；现已改为保留第三方服务目录忽略，同时显式放行 `backend/app/services/**`，并继续忽略其 `__pycache__`。
+- `git status` 现在能够发现 `backend/app/services/{real_order,coordinator,order_linkage,llm_quotation}.py`，不会再把核心业务代码当成不可追踪文件。
+- 该修复只影响版本控制可见性，不改变业务运行逻辑；阶段八的 ERPNext 草稿写入记录见 §3.20。
+- 阶段八中间快照回归结果为后端 **80 passed**，收尾后的全量结果为 **83 passed**（见 §3.20）。
+- 9000 端口已重启并加载阶段八修复；9001/9002 临时验证进程已关闭。
+
+### 3.20 阶段八收尾：方案汇总一致性与真实双审批验收（2026-09-30）
+
+**代码修复**：
+
+1. `_collect_proposal` 优先使用本轮 `procurement.analyze_real` 生成的当前方案；`procurement.get_real_plan` 只在方案编号相同的情况下补充审批/PO 状态，历史方案不会覆盖当前 `plan_id`、缺料清单或供应商选项。
+2. 成本与组合评估若携带其他 `plan_id` 会被汇总层过滤，避免前端方案卡片混入旧方案数字；系统提示同时要求后续评估沿用分析返回的 `plan_id`。
+3. 新增 3 个回归用例，覆盖旧方案覆盖、同方案状态补充和跨方案成本评估过滤。
+
+**真实验收**：
+
+- 缺料问答运行 `RUN-COORD-24CA66BD6EC5`：报价 `QUO-93AAB835646A`、本轮分析方案 `PROC-5217CEF9507D`，方案卡片已指向当前分析方案，报价状态正确显示 `DRAFT`；调用链 13 步，成本/组合/交期数据均来自 ERPNext/OpenMES。
+- 报价双审批：`QUO-93AAB835646A` → `APPR-2DD01946C804`（`sales_manager`），状态 `APPROVED`。
+- 采购方案审批：`PROC-5217CEF9507D` + `OPT-1` → `APR-A6595BD82781`（`purchase_manager`），状态 `APPROVED`。
+- ERPNext PO 草稿：`PUR-ORD-2026-00011`，供应商上海铸锻厂，总额 `39080.00 CNY`，交期 `2026-10-14`，回读 `docstatus=0` 且 `read_back_verified=true`；方案状态更新为 `PO_DRAFT_CREATED`。
+- 状态问答运行 `RUN-COORD-3DF81B85C2FA`：协调者两步反查准确返回报价 `APPROVED`、方案 `PO_DRAFT_CREATED`、审批号和 PO 草稿号。
+
+**验证结果**：后端 **83 passed**，`compileall` 通过，前端 `npm run build` 通过。外部 DeepSeek 调用和 ERPNext 草稿写入已在用户授权后完成，不再是待验收项。
+
+### 3.21 ACS 能力描述与真实 AIP 注册表同步（2026-09-30）
+
+- `backend/app/aip/generate_acs.py` 新增真实技能同步逻辑：从 `REAL_SKILL_TOOLS` 读取当前协调者能力目录，按四个 AIP 智能体追加真实技能，并按技能 ID 去重。
+- 重新生成 `backend/acs/{quotation,procurement,tracking,quality_document}_acs.json`；机器可读 ACS 现在包含阶段五至阶段八接入的真实技能（报价 4、采购 4、跟单 5、质量 2）。
+- 新增 `backend/tests/test_acs_sync.py`，校验每个 ACS 文件存在、技能 ID 不重复、真实技能集合与能力目录一致。
+- 验证：ACS 生成脚本通过，ACS 同步测试 **1 passed**，`compileall` 通过；本步骤只修改本地能力描述文件，不写入 ERPNext/OpenMES。
+
+### 3.22 真实审批身份与角色来源（2026-09-30）
+
+**实现内容**：
+
+1. 新增 `backend/app/services/identity.py`：从 ERPNext `frappe.auth.get_logged_user` + `User` 详情，或 OpenMES `GET /api/auth/me` 解析当前认证主体；不再把浏览器提交的 `approved_by` 当作身份凭证。
+2. 新增 `REAL_IDENTITY_PROVIDER=auto|erpnext|openmes` 与可选 `REAL_IDENTITY_ROLE_MAP` JSON 配置。ERPNext/OpenMES 返回的 `Sales Manager`、`Purchase Manager`、`Quality Manager` 等角色统一归一化为业务角色；平台管理员保留真实用户名并按管理员权限通过角色门禁。
+3. 报价审批、销售订单草稿、采购方案审批、采购订单草稿及质量处理审批接口均校验后端解析的主体与业务角色。请求体中的 `approved_by/requested_by` 仅作兼容提示，缺省时由后端填入真实主体，若与真实主体不一致返回 403 `actor_mismatch`。
+4. 新增 `GET /api/real-orders/identity/me`；真实业务页面显示当前身份/来源/角色，审批卡片移除 `sales_manager`/`purchase_manager` 自报输入，使用解析出的 `actor_id`。
+5. 审批写入返回 `authenticated_identity`，使审批记录同时可追溯外部身份源、主体和角色。
+
+**验证**：
+
+- 9000 重启后 `GET /api/real-orders/identity/me` 返回 HTTP 200：`subject=Administrator`、`authority=ERPNext`、`provider=erpnext`，角色来自真实 ERPNext `User.roles` 列表。
+- 已对既有报价 `QUO-93AAB835646A` 重放审批请求（不产生新记录），HTTP 200，返回原审批号 `APPR-2DD01946C804` 并附当前认证身份。
+- 定向身份测试 **7 passed**；后端全量 **91 passed**；`compileall` 与前端 `npm run build` 通过。
+- 本次没有新增 ERPNext/OpenMES 业务写入；报价审批重放命中既有幂等记录，未产生新审批或草稿。
+
+**遗留与下一步**：
+
+- 当前真实部署使用 ERPNext 集成账号 `Administrator` 作为上游认证主体；接入企业 SSO/OIDC 后，将 `REAL_IDENTITY_PROVIDER` 替换为对应 provider 或扩展同一解析接口即可，审批接口无需改动。
+- NCR `close/disposition` 与纠正措施校验已接入（见 §3.23）；订单级质量放行仍为 `NOT_SUPPORTED`，随后处理速率 ETA、Wutong 外部发现。
+
+### 3.23 NCR disposition / close 与纠正措施校验（2026-09-30）
+
+**实现内容**：
+
+1. 根据仓库内 OpenMES 源码核对并接入真实契约：`PUT /api/v1/issues/{id}/disposition`、`GET /api/v1/issues/{id}/actions`、`POST /api/v1/issues/{id}/close`；请求字段来自 `SetDispositionRequest`，纠正措施状态来自 `IssueActionService` 的 `open → in_progress → done → verified` 生命周期。
+2. OpenMES 客户端与真实适配器新增 disposition 写回和纠正措施读取；Mock 适配器明确拒绝这些真实写操作，避免 Mock 冒充真实结果。
+3. 新增三段式人工审批门禁：disposition 请求/批准/写回，close 请求/批准/写回；写回前校验问题属于工单、根因和遏制措施非空、审批编号/真实身份匹配，close 额外要求问题已 `RESOLVED`、disposition 已登记、所有纠正措施均为 `VERIFIED`。
+4. 每次真实写回都重新读取质量包并比较 disposition、根因、遏制措施或 `CLOSED` 状态；不一致返回 `WRITE_UNVERIFIED`，不宣称成功。
+5. 协调者新增只读技能 `quality.check_issue_closure`；质量资料包将 NCR 能力标记为 `AVAILABLE_WITH_APPROVAL`，只有订单级质量放行仍为 `NOT_SUPPORTED`。
+
+**验证**：
+
+- 真实工单 `work_order_id=2`、问题 `issue_id=1` 执行只读 `GET /api/real-orders/quality/issues/1/closure-check?work_order_id=2`：HTTP 200，真实状态 `RESOLVED`，`disposition=pending`，关闭校验明确 `closure_ready=false`，纠正措施读取成功且无数据伪造。
+- 真实 OpenMES 质量包返回 NCR 能力 `AVAILABLE_WITH_APPROVAL`，`unsupported_capabilities` 仅剩订单级质量放行。
+- 新增客户端/服务层生命周期测试 **5 passed**；阶段相关定向回归 **18 passed**；全量回归、compileall 和前端构建在提交前复验。
+- 本阶段没有对真实 NCR 执行 disposition 或 close 写入；所有真实验证均为只读，写入仍必须经过真实用户角色 + 服务端令牌 + 两步审批。
+
+### 3.24 Mock 后端与真实业务表面隔离（2026-09-30）
+
+**实现内容**：
+
+1. 新增 `MOCK_DEMO_ENABLED` 运行时开关。未显式配置时，`APP_ADAPTER_MODE=real` 自动只暴露真实业务表面；设置为 `true` 才允许合成场景与真实链共存。
+2. 真实表面中间件拦截旧 Mock 路由（`/api/projects`、`/api/scenarios`、`/api/approvals`、`/api/agents`、`/api/plans`、`/api/audit`、`/api/replay`、旧 `/api/quotation`），返回 404 `mock_surface_disabled`，不会把 synthetic_demo_only 数据误当业务数据。
+3. AIP 服务新增技能收缩能力；真实表面只暴露协调者 `REAL_SKILL_TOOLS` 中的真实技能，Mock AIP 技能不再从真实 RPC 路由可见。开发/演示表面仍保留原 Mock 技能。
+4. 新增 `GET /api/runtime/surface`；前端按返回能力隐藏 Mock 导航，真实页面和 MES 完工读取入口保持可用。
+
+**验证**：
+
+- 9000 重启后 `GET /api/runtime/surface` 返回 HTTP 200：`mock_demo_enabled=false`、`aip_mock_skills_enabled=false`；访问 `GET /api/projects` 返回 HTTP 404 `mock_surface_disabled`。
+- `GET /aip/quotation/health` 只列出 4 个真实报价技能，未暴露 `quotation.calculate_cost/create_draft` 等 Mock 技能。
+- 定向隔离测试 **3 passed**；相关协调者/ACS 回归 **16 passed**；全量后端 **99 passed**；前端构建通过。
+- 真实 ERPNext/OpenMES 数据链没有写入；本阶段仅改变路由暴露和页面导航。
+
+## 8. 当前结论
+
+阶段 1（ERP↔MES 关联）已完成：字段确认、只读接口、关联值回填（WO-2026-001 → SAL-ORD-2026-00001）、LINKED 验证。
+
+阶段 2（2026-09-28）：报价与采购 Agent 真实化完成——
+
+- 已删除全部占位计算（固定成本/加成/固定交期/固定公司仓库/0.7 系数/50 元占位/编造推荐理由），逐项清单见 3.5.1
+- 数量折扣已按用户决策删除（报价按真实价格原价）；供应商业务数据已按用户批准补录并回读（3.5.5）
+- 报价：真实 Selling 价、真实 BOM 子价（无加成）、真实库存、真实 MES 排程交付估算；缺价 → DATA_MISSING 并拒绝出价与草稿
+- 采购：真实缺料计算（含 MOQ）、供应商差异化方案（Item Supplier 过滤+供应商特定价+物料级交期）、推荐规则 lowest_total_cost_v2、缺价拒绝创建 PO
+
+阶段 3（2026-09-28，见 3.6/3.7）：五项优先级任务完成——
+
+1. **持久化**：报价/审批/采购方案迁移 SQLite，重启后可查、审批门禁跨重启有效（实测 SAL-ORD-2026-00008）
+2. **采购前端**：8 步流程（采购分析/方案审批/PO 草稿），浏览器实测全流程通过（含真实价格记录号、交期、MOQ、推荐理由、数据限制标注）
+3. **质量接口**：检验记录与工程文档接口接入（0 条数据如实显示）；质量放行与 NCR 写回标注 NOT_SUPPORTED，不伪造
+4. **残留清理**：删除固定数据草稿端点、交期默认值改为显式拒绝
+5. **全流程验收**：ERP↔MES 关联→报价（85 元原价+17 天真实排程）→审批→SO 草稿→采购（3 缺料差异化方案）→审批→PO 草稿（真实交期）→质量门禁→发运门禁，全链路 200 且交付被真实质量状态正确阻断
+
+当前验收结论（2026-09-30 第五次更新，依据 3.13/3.14/3.15/3.16/3.17/3.20）：
+
+```text
+四 Agent 真实业务链已端到端跑通；报价→采购→跟单→质量→发运门禁全链可用
+页面级双场景验收完成：场景 A（0% 进度）正确阻断、场景 B（90%+文档+审批）正确放行，均有截图证据
+动态协同（阶段五）验收通过：自然语言提问→协调智能体经 AIP 动态调用四个真实智能体→带证据回答；
+两问产生两条不同调用链（动态拓扑达成）
+方案化协同（阶段六）验收通过：缺料场景输出 ≥3 套方案对比（含"部分覆盖口径假象"批判性审查）；
+加急场景诚实给出"物料不是瓶颈、ETA 缺排程数据"；讨论稿例子二/例子四落地
+执行闭环（阶段七）验收通过：方案卡片批准→审批门禁→PO 草稿回读（PUR-ORD-2026-00009/00010）；
+状态联动复验通过（协调者查到方案状态/审批号/PO 草稿号）
+阶段八（质量异常协同 + 审批一致性）✅ 已完成（§3.17/§3.18/§3.20/§3.22/§3.23/§3.24/§3.26）：编号→数字 id 桥接、报价状态一致性、审批/草稿幂等保护、真实身份角色门禁、NCR 处置校验、Mock/真实表面隔离、真实 DeepSeek 问答和双审批 ERP 写入均已完成；后续收尾补上身份 envelope、NCR 对象绑定/幂等和 WebSocket 隔离（103 passed）。
+阶段八及后续收尾提交：`8ef554c`、`fcf0d0b`、`e8d09e4`、`f92a78a`、`2e03100`，本轮治理收尾待提交。
+工程可维护性已修正：核心 `backend/app/services` 已重新纳入 Git 可见范围
+测试与安全：pytest 独立测试库（103 passed）、失败验证矩阵补齐、无硬编码凭据；身份来源与角色门禁已接入，ACS 已与真实 AIP 注册表同步。
+仍余（生产可用验收前）：检验数据补录决策、订单级质量放行、
+请求级企业 SSO/OIDC 身份源接入、NCR 真实写入验收、Wutong 外部发现
+
+### 3.25 速率 ETA：真实执行速率或明确缺数（2026-09-30）
+
+**已完成**：
+
+1. OpenMES 适配器保留 `process_snapshot.steps` 和批次工序中的实际执行字段：`completed_qty/passed_qty`、`started_at/completed_at`、`actual_elapsed_minutes/actual_run_minutes`；计划开始/结束时间单独保留，不能被当作实际耗时。
+2. `track_order` 新增观测速率 ETA：使用最后一个有效工序样本的实际产量 ÷ 实际耗时，计算剩余产量和剩余小时；输出 `eta_status=RATE_BASED`、`eta_basis=observed_production_rate`、`observed_rate` 和来源字段。顺序工序可能重复报告同一数量，因此不跨工序累加。
+3. 没有同时具备实际产量与实际耗时/开始时间时，输出 `eta=null`、`eta_status=DATA_MISSING` 和明确 `eta_data_gaps`；`due_date` 仅作为交期字段和风险依据，禁止作为 ETA 占位。已完成工单仅在真实状态为终态时标记 `COMPLETED`。
+4. 跟单页面显示 ETA 状态、速率依据或缺失原因，避免把交期日期误显示成生产预测。
+
+**验证**：
+
+- `GET /api/real-orders/mes/track/2`：HTTP 200，真实 OpenMES 工单 `WO-2026-001`，`completed_qty=0`；返回 `eta=null`、`eta_status=DATA_MISSING`，明确说明没有实际速率记录，未使用 `due_date=2026-10-15` 冒充 ETA。
+- 9000 后端已重启并加载新代码；`/aip/tracking/health` 真实技能注册正常，Mock 表面仍关闭。
+- 速率 ETA 定向测试 3 passed；后端全量 **102 passed**；`compileall` 和前端 `npm run build` 通过。
+- 本阶段没有写入 ERPNext/OpenMES；真实复验为只读。
+
+**边界与遗留**：当前生产工单没有历史报工速率，因此真实页面只能给出 `DATA_MISSING`。积累含实际耗时和实际产量的 OpenMES 工序/批次记录后，下一次查询会自动切换到速率 ETA；在此之前不提供固定天数预测。身份请求级会话、NCR 写入验收和 Wutong 发现仍是后续任务。
+
+### 3.26 治理缺口收尾：身份解析、NCR 幂等与 Mock 表面（2026-09-30）
+
+**已修复**：
+
+1. OpenMES `auth/me` 身份解析支持 `data.user` 等嵌套 envelope；角色对象只读取 `role/role_name/name`，排除随机 `id`，避免把数据库行标识当业务角色。服务端仍明确使用集成账号，尚未把浏览器会话接入审批身份。
+2. NCR resolve 写回要求审批 `reference_id` 与 URL 的 `issue_id` 一致；disposition/close 写回要求审批载荷中的 `work_order_id` 与请求一致。disposition 回读比较 disposition、根因、遏制措施及存在的数量/来源字段，已登记的相同处置和已关闭问题返回幂等成功而不重复调用 OpenMES。
+3. Mock 表面隔离覆盖 WebSocket `/api/projects/{id}/stream`；真实模式握手直接以 1008 `mock_surface_disabled` 拒绝。前端加载运行时表面前默认隐藏 Mock 导航，流地址支持 `VITE_WS_BASE_URL`，默认跟随当前主机连接 9000。
+4. `generate_acs.py` 现在生成与真实 AIP 运行表面一致的 ACS；四个静态 ACS 已重新生成，仅含当前真实技能（报价 4、采购 4、跟单 5、质量 3）。
+
+**验证**：身份、NCR 生命周期、ACS 同步定向回归 **14 passed**；前端构建和后端 `compileall` 通过。尚未对真实 NCR 执行写入，WebSocket 拒绝路径未写入业务数据。
+
+### 3.27 Wutong/ACPs 外部发现只读通道（2026-09-30）
+
+**已完成**：
+
+1. 根据仓库内 vendored ACPs Discovery 契约确认并实现 `WUTONG_DISCOVERY_URL` 客户端：`POST /discover` 请求 `type/query/limit/filter`，严格读取 `result.agents`、`result.acsMap`、`result.routes` 和可选 `aliveMap`；远端 `error`、格式缺失和 HTTP/网络错误均转为明确集成错误，不回退本地静态目录冒充外部发现。
+2. 新增只读 API `POST /api/real-orders/discovery/search` 与配置状态 `GET /api/runtime/discovery`。未配置 discovery URL 时返回 HTTP 503 `discovery_not_configured`；当前没有实现注册/写入远端 Registry，避免在未确认 Wutong 鉴权契约时误写外部系统。
+3. `IntegrationSettings.public_status()` 增加 Wutong discovery/registry/tenant 配置状态，不返回 URL 中的凭据；`.env.example` 标注 discovery 为可选只读接入。
+
+**验证**：Wutong 客户端成功响应、租户请求头、远端错误和无 `acsMap` 数据缺口测试通过；后端全量 **106 passed**、`compileall` 和前端构建通过。当前运行环境 `WUTONG_DISCOVERY_URL` 为空，因此真实 API 验证为 HTTP 503 配置缺口，没有外部网络写入。
+
+**边界与下一步**：跨实例调用仍需在获得 Wutong Registry 注册和鉴权契约后接入；当前 discovery 结果只读返回给业务侧，不改变协调者本地真实技能目录。
+
+### 3.28 请求级 Bearer 身份会话门禁（2026-09-30）
+
+**已完成**：
+
+1. `require_real_identity` 读取请求 `Authorization: Bearer <token>`；请求会话存在时，身份解析优先使用该令牌调用 OpenMES `GET /api/auth/me`，而不是继续使用服务端集成 token。
+2. 请求 Bearer 解析失败、格式错误或当前 provider 不支持会话时直接返回身份错误，禁止静默降级为 `Administrator` 等服务账号；CORS 同时允许 `Authorization` 请求头。
+3. 没有请求会话时保留原有服务端 ERPNext/OpenMES 身份解析，兼容当前本地部署；`REAL_IDENTITY_PROVIDER=auto|openmes` 才接受请求 Bearer，会话主体和角色仍由上游返回。
+
+**验证**：新增请求会话优先级、ERPNext provider 拒绝降级、嵌套 OpenMES 用户响应测试；后端全量 **108 passed**、`compileall` 通过。当前运行环境仍使用服务端 ERPNext `Administrator`（没有浏览器 Bearer 会话），因此没有新增真实系统写入。
+
+**边界与下一步**：前端尚未内置企业 SSO 登录页；接入 OIDC/ERPNext/OpenMES 登录后，只需把短期 Bearer 会话附加到 API 请求即可复用现有角色门禁。长期 token 不写入项目配置或审计日志。
+
+### 3.29 真实身份会话与 NCR 人工操作面板（2026-09-30）
+
+**前端实现**：
+
+1. `frontend/src/api.ts` 新增浏览器会话级 Bearer 注入：`sessionStorage` 仅保存短期会话，所有 API 请求自动附加 `Authorization: Bearer <token>`；新增本地写入令牌的会话级注入，仍不写入项目配置、URL、Agent 运行参数或日志。
+2. `RealBusinessPage.tsx` 新增可选会话设置区，可保存/清除短期 Bearer 与 `REAL_WRITE_API_TOKEN` 对应的本地写入令牌，并重新解析后端身份；未配置时继续使用服务端集成身份，不伪造企业登录流程。
+3. 质量面板新增真实 NCR 操作链：处置方案由人工选择（`scrap/rework/return_to_supplier/use_as_is`），依次执行“建立处置审批 → 批准 → OpenMES 写回”；关闭依次执行“读取 closure-check → 建立关闭审批 → 批准 → OpenMES 写回”。每一步展示审批号、身份来源、前置校验、失败原因、幂等命中和回读验证状态。
+4. 写回成功后重新读取质量资料包与发运门禁，避免页面继续显示旧状态；任何失败都不会宣称真实系统已完成。
+
+**验证**：
+
+- `npm run build`：通过。
+- `..\\.conda-env\\python.exe -m pytest -q tests`：**108 passed**。
+- `python -m compileall -q app`、`git diff --check`：通过。
+- 9000 实时只读探针：`GET /api/health`、`GET /api/runtime/surface`、`GET /api/real-orders/identity/me` 均 200；身份为 ERPNext `Administrator`。
+- `GET /api/real-orders/quality/package/2` 返回 OpenMES 真实质量记录 `issue_id=1`；`GET /api/real-orders/quality/issues/1/closure-check?work_order_id=2` 返回 200，`status=ok`、`closure_ready=false`（`RESOLVED=true`、`disposition_recorded=false`、纠正措施已验证）。本子任务没有调用 disposition/close 写回接口，没有新增 ERPNext/OpenMES 业务记录。
+
+**边界与下一步**：当前没有企业 OIDC/SSO 登录契约，前端只提供安全的短期 Bearer 注入入口；真实 NCR 仍需业务人员明确选择处置并具备角色与写入令牌后才能执行。下一步继续核对 Wutong Registry 注册契约，或在获得真实业务处置决策后做最小范围 NCR 写入回读验收；订单级质量放行仍保持 `NOT_SUPPORTED`。
+
+### 3.30 Wutong Registry 只读契约适配（2026-09-30）
+
+**实现内容**：
+
+1. 根据仓库内 `acps-sdk-src/registry-server` 与 `acps-cli` 的真实路由确认 Registry 公共契约：`GET /health`、`GET /api/v1/agent/public/recent`；客户端支持根 URL 或 `/api/v1` URL，并透传可选 `X-Wutong-Tenant`。
+2. 新增 `WutongRegistryClient`，严格校验 URL、响应 JSON 和 `items` 列表；HTTP/网络/格式错误转为明确集成错误，不回退本地 ACS 或协调者静态目录。
+3. 新增 `GET /api/runtime/registry` 配置状态与只读声明，以及 `GET /api/real-orders/registry/agents?limit=5` 最近已审批 Agent 查询。没有 `WUTONG_REGISTRY_URL` 时返回 HTTP 503、`registry_not_configured`；没有实现 `/agent/client` 注册/更新/提交写操作。
+
+**验证**：
+
+- `tests/test_wutong.py`：**5 passed**（Discovery 3 + Registry 2），覆盖租户头、路径推导、健康/列表响应和缺失 `items` 不回退。
+- `python -m compileall -q app`、`git diff --check`：通过。
+- 重启 9000 后：`GET /api/health` 200；`GET /api/runtime/registry` 200，返回 `configured=false`、`read_only=true`、`writes_enabled=false`；`GET /api/real-orders/registry/agents` 返回 HTTP 503 `registry_not_configured`。当前 `WUTONG_REGISTRY_URL` 为空，没有外部网络访问或写入。
+
+**边界与下一步**：Registry 账户/OIDC/mTLS 资料和注册审批策略仍未配置；在部署方明确认证契约前，继续保持只读。下一项优先处理真实 NCR 处置的业务输入与最小范围回读验收，或在取得 Registry 认证资料后扩展跨实例 AIP 调用。
+
+### 3.31 页面级渲染检查（2026-09-30）
+
+- 本地前端 `http://127.0.0.1:5173/` 刷新后真实业务页正常读取 9000：显示 ERPNext/OpenMES 真实连接、解析身份 `Administrator（ERPNext）`、客户/物料真实列表，页面不再出现 `Failed to fetch`。
+- 通过页面键盘交互展开“会话设置”，确认 Bearer 会话、本地写入令牌输入框、保存/清除按钮和“仅当前浏览器会话保存”提示均可见；检查过程中没有输入令牌、没有提交表单、没有调用任何写入接口。
+- NCR 操作控件已由 TypeScript 构建验证；真实工单 2 的 quality package 当前有 issue 1，页面进入跟单质量步骤后按该记录渲染处置/关闭门禁，处置下拉默认空值，不自动选择业务决策。
+```
+
+### 3.32 OpenMES 短时会话登录与身份噪音过滤（2026-09-30）
+
+**实现内容**：
+
+1. 按 vendored OpenMES 认证契约（`POST /api/auth/login`，Sanctum token，默认 15 分钟 TTL）新增 `backend/app/services/session_auth.py`：转发用户名/密码换取短时会话，并用登录令牌回读 `GET /api/auth/me` 解析业务身份（与请求级 Bearer 会话同一路径，共用 `resolve_openmes_identity`）。
+2. 新增 `POST /api/real-orders/auth/login`：凭据只转发给已配置的 OpenMES 认证端点，不落日志、不持久化；上游 401/403/422 映射为 401 `invalid_credentials`，未配置 503 `not_configured`，空输入 422。刻意不代理 logout/refresh——OpenMES 的 logout 会吊销该上游用户全部 token、refresh 会轮换当前 token，都可能波及服务端集成令牌；本地登出只清除浏览器会话。
+3. Laravel 契约适配：校验失败仅在携带 `Accept: application/json` 时返回 422 JSON，否则 302 回登录页 HTML（真实部署实测：无头 302 text/html，带头 422 application/json）；登录请求已显式携带该头。
+4. 前端会话面板新增“OpenMES 账号登录（推荐）”表单：登录成功把短时令牌写入 `sessionStorage` 并重新解析身份；上游 `force_password_change` 约束如实提示；手工粘贴 Bearer 保留为后备入口。
+5. ERPNext 身份噪音过滤：`_from_erpnext` 剔除 User 文档上随机生成的 10 位字母数字角色 docname（如 hn3orhl918），只影响展示，角色门禁不受影响（Administrator 角色列表 85 → 45 条，`Translator` 等真实角色保留）。
+
+**验证**：
+
+- `pytest tests -q`：**117 passed**（新增 session_auth 6 例 + ERPNext 噪音角色过滤 1 例；身份回读断言使用登录会话令牌而非服务端集成令牌）。
+- `compileall`、`npm run build`、`git diff --check`：通过。
+- 真实错误链路（页面级）：假凭据 → 后端 401 `invalid_credentials`（透传上游真实报错 "The provided credentials are incorrect."）→ 前端错误横幅显示；截图 `gui-test-screenshots/2026-09-30_openmes_session_login_error_path.png`。
+- 真实身份接口：噪音剔除后 subject=Administrator、45 条角色、无随机 docname。
+- 未执行任何 ERPNext/OpenMES 业务写入；未使用真实账号执行成功路径登录（部署未提供业务账号凭据）。
+
+**边界与下一步**：
+
+- ERPNext 侧用户名/密码登录依赖 frappe 会话/OIDC 契约，部署未提供，保持服务端集成身份不变；
+- **成功路径已于本日完成 API 与页面双重验收**：部署只有 `admin` 一个 OpenMES 账号，经用户同意后通过 artisan 重置其密码；`POST /api/real-orders/auth/login` 返回 provider=openmes、subject=admin、roles=[Admin]、force_password_change=false（真实 OpenMES Sanctum 令牌）；页面上用该凭据登录成功，审批身份行变为 `Administrator（admin，OpenMES，角色：…）`，截图 `gui-test-screenshots/2026-09-30_openmes_session_login_success_page.png`；登录失败提示已改为会话面板内联显示（`fba5609`）；ERPNext 密码登录/OIDC 仍待部署契约；
+- **登录会话的角色门禁配套**：OpenMES admin 会话原生只有 `Admin` 角色，会话下执行审批会被 403 拦截；已在部署 `.env` 配置 `REAL_IDENTITY_ROLE_MAP={"admin": ["sales_manager", "purchase_manager", "quality_manager"]}`（仅显式授予部署管理员业务审批角色，不提交仓库），重启后页面身份行显示 `Admin、purchase_manager、quality_manager、sales_manager`，会话内审批可用；
+- NCR 真实写入最小范围验收仍等待业务处置决策 + 具备质量角色的会话 + 写入令牌。
+
+### 3.33 检验/报工数据补录：已批准，交由外部执行（2026-09-30）
+
+- 用户批准按演示故事线补录 `TEST_` 标记的检验记录与带实际耗时的报工数据（解锁质量检验维度展示与速率 ETA）；
+- 执行方式由用户决定为**外部执行**，本项目不代跑；完整执行提示词（四条故事线设计、幂等要求、验收标准、文档收尾要求）已固化到 `docs/prompt_seed_test_data.md`；
+- 本节为占位记录：外部执行完成后，由执行者在下方追加实际写入的表/接口、验收返回、测试结果与截图；在此之前检验维度仍如实显示"无数据"、ETA 保持 `DATA_MISSING`。
+
+### 3.33 阶段九：质量待办面板（2026-09-30）
+
+**实现内容**：
+
+1. OpenMES 客户端新增 `list_issues(status, page)`（`GET /api/v1/issues`，契约以 vendored 源码 `routes/api.php:663` + `Api/V1/IssueController::index` 与 2026-09-30 实测 payload 为准：status 过滤、固定 20/页分页、`work_order.order_no`/`issue_type.severity`/`assigned_to` 用户对象或 null）；同时给 OpenMES 客户端全部请求补上 `Accept: application/json`（Laravel 认证/校验失败仅在带该头时返回 401/422 JSON，否则 302 HTML 使错误信息失真——与 §3.32 登录路径同根因，本次在只读路径一并修复）。
+2. 适配器新增 `list_open_issues()`：OPEN/ACKNOWLEDGED/RESOLVED 三态聚合（CLOSED 不进待办），跟随 `meta.last_page` 翻页（封顶 10 页），按 reported_at 倒序、跨态去重；任一态读取失败直接抛出，不回退空列表。
+3. `real_order.quality_todo_list()`：聚合 + 每条附 `reported_days`（按 reported_at 与当前时间差；缺失/无法解析如实返回 null）。
+4. 新端点 `GET /api/real-orders/quality/todo`（只读，走 `require_real_identity`；集成错误按 `_integration_status_error` 映射，payload 无效 502 `openmes_issues_invalid`）。
+5. 前端"质量待办"面板（智能协同问答下方）：工单号/标题/严重度/状态/处置/已报告天数（>3 天红色）/去处置；仅 OpenMES 登录会话（identity.provider=openmes）可见数据，否则显示"登录后查看质量待办"；空列表如实显示"当前没有未关闭质量问题"；失败显示原因 + 重试。
+6. "去处置"：先反查工单关联 ERP 订单与持久化报价拿真实报价审批状态（不猜），再加载该工单 track/quality/ship-gate 并跳到第 8 步，滚动高亮该 issue 的既有 NCR 卡片（`ncr-issue-focus`）；NCR 审批处置流程零改动。
+
+**验证**：
+
+- `pytest tests -q`：**125 passed**（新增 test_quality_todo.py 8 例：三态聚合与字段映射、分页跟随、失败传播、reported_days 计算、端点接线与错误映射）；`compileall`、`npm run build`、`git diff --check` 通过。
+- 真实接口验收：`GET /api/real-orders/quality/todo` 返回 2 条 OpenMES 真实 issue——issue 2（WO-2026-002，铸铁毛坯库存不足，CRITICAL，OPEN）与 issue 1（WO-2026-001，制动盘外径尺寸超差，MEDIUM，RESOLVED，disposition=pending，按验收要求出现在待办中）；`authority=OpenMES`、`data_source=openmes_issues`、`reported_days=2`。
+- 页面验收（登录会话 admin/OpenMES）：待办表格两条真实记录渲染正常（截图 `gui-test-screenshots/2026-09-30_phase9_quality_todo_panel.png`）；点击"去处置"跳到第 8 步并高亮 issue 1 的 NCR 卡片，处置表单与"① 建立处置审批/读取关闭前置条件"按钮原样（截图 `2026-09-30_phase9_todo_go_dispose_ncr_focused.png`）。
+- 无会话/过期会话不泄露数据：过期令牌下 identity 解析 503、面板仅显示登录提示，无数据渲染。
+- 本阶段无任何 ERPNext/OpenMES 写入。
+
+**遗留与下一步**：
+
+- OpenMES 登录会话 15 分钟 TTL 过期后需重新登录（refresh 刻意不代理，见 §3.32）；过期时面板表现符合"如实报错"要求。
+- 质量待办的"去处置"仍不代选处置方案；真实 disposition 写入验收仍等待业务决策（执行计划第 2 项）。
+- issues 列表分页封顶 10 页（200 条/状态），超出时不再向后翻页（当前部署 2 条，余量充足）。
+
+### 3.34 检验/报工数据补录（TEST_ seed，2026-09-30，依据 prompt_seed_test_data.md 执行）
+
+**写入方式**（任务规则要求记录）：`materials` 表为空导致官方 `POST /api/v1/inspections`（要求已存在 material_id）不可用，因此统一经 `docker exec openmes-postgres psql` 直接写 `openmmes` 库；全部数据 `TEST_` 前缀、幂等可重跑（按 code/lot_number 查存在再插 + 固定时间戳覆盖写入）。**未触碰 ERPNext；未改动任何业务代码；未动 id=2（WO-2026-001）的任何记录。**
+
+**补录内容**（`backend/seed_inspection_eta.py`）：
+
+1. 检验线：1 个 TEST_ 物料（`TEST-BD-2401-SEED`）+ 3 条检验记录（`TEST-IQC-20260930-01` / `TEST-IPQC-20260930-01/02`，status=pass、disposition=accept、检验员 Administrator）；
+2. ETA 线：工单 9（TEST_WO_PAGE_00023）批次 3（`TEST_LOT_PAGE_9`）及其步骤 `TEST_Final_Assembly` 补真实执行窗口 `2026-09-29 12:00→14:30 UTC`（150 分钟），并将此前官方 complete API 写入的 `actual_elapsed_minutes=30`（与窗口不一致）统一为 150，速率 1800 件/150 分钟 = **720 件/小时**；
+3. 阻断线（id=2）与缺失线（SN 追溯）刻意不动。
+
+**验收结果（对照 prompt_seed_test_data.md 五节）**：
+
+1. `GET /api/real-orders/quality/package/9`：检验维度返回 3 条 TEST_ 记录（pass/accept，inspection_id 7/8/9）；SOP/Control Plan released、`quality_gate_passed=true`；
+2. `GET /api/real-orders/mes/track/9`：`eta_status=RATE_BASED`、`eta_basis=observed_production_rate`、`observed_rate={quantity:1800.00, elapsed_minutes:150.0, units_per_hour:720.0, remaining_qty:200.00, estimated_remaining_hours:0.28}`；
+3. 协调者问答（DeepSeek）"SAL-ORD-2026-00023 什么时候能做完"：回答含 RATE_BASED 估算（2026-09-30 06:08 UTC）、真实记录编号与调用链 2 步留痕（`RUN-COORD-1F88B4AF6609`：lookup_order_link → track_real），并主动提示"ETA 为实测外推、工单状态仍 PENDING"的口径提醒；"质量检验数据怎么样"回答 3 条检验记录全部合格 + 如实标注"无订单级质量放行 API / 无 SN 追溯 API"缺口；
+4. id=2 阻断线不受影响：`quality/package/2` 仍 `open_issues=0` + SOP/Control Plan 缺失；`mes/track/2` 仍 `completion=0.0%`、`eta_status=DATA_MISSING`；
+5. `pytest tests -q` **125 passed**、`compileall` 通过、`npm run build` 通过（本阶段零业务代码改动）；
+6. seed 脚本重复执行 3 次，materials=1、inspections=3、批次时间戳不变，无重复记录；
+7. 截图：`gui-test-screenshots/2026-09-30_seed_eta_rate_based_answer.png`（ETA 展示）、`2026-09-30_seed_inspection_data_answer.png`（检验数据展示）。
+
+**遗留与说明**：
+
+- seed 过程中发现并修复脚本自身 bug（scalar() 双次执行导致 INSERT 重复），已清理重复数据并复验幂等；
+- 批次步骤 `duration_minutes` 同步写为 150；批次级 started/completed 同步更新；
+- 工单 9 状态仍为 PENDING（与 90% 进度不一致）——协调者已在回答中如实提示，状态口径属 OpenMES 业务数据，不在本 seed 范围内擅改。
+
+### 3.35 NCR 真实写入最小范围验收 + 演示加固（2026-09-30）
+
+**NCR 处置真实写入（用户批准处置 = 返工 rework）**：
+
+1. 前置就绪：`REAL_WRITE_API_TOKEN` 已配置（写入门禁激活，无效令牌 403）；OpenMES admin 登录会话（REAL_IDENTITY_ROLE_MAP 授予 quality_manager）。
+2. 页面真实执行链（身份 admin · 来源 OpenMES）：质量待办 → "去处置" issue 1 → 人工填表（rework / 不合格数量 1800 / NC 来源=内部 / 根因 / 遏制措施）→ ① 建立处置审批（**审批号 QDISP-1BC2B3498AAE**）→ ② 批准 → ③ 写回 OpenMES。
+3. 验收中发现并修复一个真 bug：首次写回的回读比对把 `non_conforming_qty` 按**字符串**比较（审批载荷 JSON number → `1800.0`，OpenMES 回读 → `"1800"`），OpenMES PUT 实际已成功写入，但被误报 `WRITE_UNVERIFIED`。修复为 Decimal 数值比较（`_same_quantity`），未验证分支补充明确错误信息"已写入但回读比对不一致，请人工核对"；新增回归测试 `test_disposition_qty_format_difference_does_not_fail_verification`。修复后页面重按 ③ → `DISPOSITION_RECORDED · 回读已验证 · 幂等命中`，卡片状态"已登记处置"。
+4. OpenMES 真实状态回读确认：issue 1 `status=RESOLVED`、`disposition=rework`、root_cause/containment_action/nc_source=internal/non_conforming_qty=1800 全部与审批载荷一致；质量待办行同步显示 `rework`。
+5. 关闭前置条件：`closure_ready=true`（问题已解决/已登记处置/已记录根因/已记录遏制措施/纠正措施已验证 五项全 ✓）。按最小范围验收**不执行 close**（保留 issue 1 在待办中作演示；close 链路审批/写回/回读代码与门禁就绪）。
+6. id=2 阻断线无扰动（0% 进度 + SOP/Control Plan 缺失不变）。
+
+**演示加固**：
+
+1. `scripts/start_demo.ps1` 一键启动 + 环境预检：幂等（端口占用跳过）、等待就绪、真实连通性检查（后端/表面/ERPNext/OpenMES/身份/DeepSeek/写入令牌），预检失败如实退出。实测全部通过（UTF-8 BOM 修正 PowerShell 5.1 解析、OpenMES check 端点改 POST）。
+2. 加急场景（例子四）页面级验收补齐：提问"客户要求把 SAL-ORD-2026-00023 提前交货……" → 三维度结论（`can_ship=true`：报价已审批 + 质量门禁通过 + 完成率 90%）+ 方案 A/B 成本风险对比（真实价格记录，方案 `PROC-5585148630C1`）+ 边界如实说明（"最多提前多少被物料交期锁死 15 天，剩余 200 件完工数据不足不编造"）。截图 `gui-test-screenshots/2026-09-30_expedite_scenario_page_acceptance.png`。
+3. `docs/demo_script.md` 演示剧本：六条故事线（动态协同/速率 ETA/缺料双审批/质量待办+处置写回/加急/诚实性）+ 关键记录编号速查 + 注意事项。
+
+**验证**：`pytest tests -q` **126 passed**（新增 1 例）、`compileall`、`npm run build` 通过。本阶段真实写入：OpenMES issue 1 处置字段（经审批）；ERPNext 无写入。
+
+**遗留**：close 写回链路未真实执行（有意保留待办演示项）；工单 9 状态 PENDING 与 90% 进度不一致属 OpenMES 业务数据口径，协调者会如实提示。
+
+### 3.36 全功能本地重测报告（2026-09-30，用户授权全量重测含故障注入）
+
+**范围与方法**：6 组共 49 项检查 + 1 次真实写回链重跑，覆盖单元/接口/页面/LLM 问答/幂等门禁/故障注入。零业务代码改动；含一次 OpenMES 停机注入与一次 DeepSeek key 摘除注入（均已恢复）。
+
+| 组 | 项数 | 结果 |
+|---|---|---|
+| T1 基础回归（pytest/compileall/npm build） | 3 | ✅ 3/3（126 passed） |
+| T2 真实接口逐项探针（健康/表面/身份/待办/质量包×2/ETA×2/发运门禁×2/报价/方案/运行记录/关闭前置/ERP 客户/OpenMES 工单） | 17 | ✅ 17/17 |
+| T3 页面级（登录会话/待办渲染/无会话不泄露/8 步表单 ERP 数据/运行记录面板/MES 完工页） | 6 | ✅ 6/6 |
+| T4 协调者问答（ETA 速率线/诚实缺数线/质量协同线/报价线/SN 诚实缺口） | 5 | ✅ 5/5 |
+| T5 幂等与门禁（重复报价审批幂等复用 APPR-2DD01946C804/错写入令牌 403/缺令牌 403/Mock 表面 404 mock_surface_disabled/非 Bearer 401/NCR 全链重走幂等命中） | 6 | ✅ 6/6 |
+| T6 故障注入（停 openmes-backend：todo 502、package 500、track NOT_FOUND+如实缺口，不回退空数据，恢复验证 ✓；摘 DEEPSEEK_API_KEY：ask 503 llm_not_configured"不使用固定话术伪造回答"，恢复验证 ✓；Mock 404） | 3 | ✅ 3/3 |
+
+**关键证据**：
+
+- T5.1 NCR 全链重走：新审批 `QDISP-95702E8DA994` → 批准 → 写回 → `DISPOSITION_RECORDED · 回读已验证`（OpenMES 已是 rework，数据级幂等，无重复写入）；
+- T2.5 质量待办 2 条（#1 RESOLVED/rework 即本次写回结果）；T2.9 track/9 `RATE_BASED` 720 件/h；T2.10 id=9 `can_ship=true` 与 T2.11 id=2 正确拦截对照；
+- T4.3 质量问答正确反映写回后现状（RESOLVED + 返工已登记），并如实指出真正阻塞是"文档缺失 + 未开工"；
+- T4.4 报价链引用真实价格记录（ERPNext Standard Selling 85 元/件）。
+
+**发现与结论（无系统缺陷，3 条小项）**：
+
+1. 探针笔误：`/api/real-orders/mes/work-orders` 不存在（404），正确端点为 `/api/mes/work-orders`（9 条工单）——测试脚本问题，非系统缺陷；
+2. 错误码不一致（改进项）：OpenMES 停机时 `quality/todo` 502 而 `quality/package` 500，均如实失败但映射不统一，后续可统一为 502；
+3. 措辞精度（改进项）：MES 停机时 `track` 返回 `NOT_FOUND`+"工单不存在"，更准确表述应为"MES 不可达"；不构成数据伪造。
+4. 测试过程新增 1 条 NCR 处置审批记录（QDISP-95702E8DA994，幂等写回），审计留痕属正常业务数据。
+
+**结论**：全部功能在本地真实环境重测通过；两条演示线（id=2 阻断 / id=9 通过）、治理门禁、诚实性故障行为均符合设计。
+
+### 3.37 阶段十：工厂级工程质感（2026-09-30，比赛定位）
+
+**定位**：仅为比赛——目标是让系统在评委审视下站得住"工厂级"标准，不做真实试点部署（HTTPS/真实账号/监控告警等生产部署项按定位跳过）。
+
+**10.1 NCR 工作流状态刷新后恢复**：新只读端点 `GET /api/real-orders/quality/workflow-states`（按 issue 聚合最近的处置/关闭审批，含载荷里的 work_order_id/disposition）；前端在质量面板加载（loadTracking / 去处置）后自动合并恢复审批号、批准态与表单处置值，不覆盖进行中的状态。页面刷新后处置进度不再丢失，配合数据层幂等不会重复建立审批。实测：issue 1 正确恢复 `QDISP-95702E8DA994`。
+
+**10.2 会话过期提醒**：登录时在 sessionStorage 记录签发时间；会话有效且超过 13.5 分钟（15 分钟 TTL 前 90 秒）显示黄色提醒横幅，20 秒轮询；无签发时间的历史会话保守立即提醒。过期后既有兜底（面板回退登录提示）不变。
+
+**10.3 错误码统一与措辞修正**：`quality/package` 增加 IntegrationError 映射（OpenMES 停机 500 → 502）；`track_order` 前置 `get_work_orders_strict` 可达性探测——MES 不可达时返回 `status=MES_UNREACHABLE`、`eta_basis=mes_unreachable` + 如实缺口，不再把"连不上"误报成"工单不存在"（真不存在的工单仍报 NOT_FOUND）。
+
+**10.4 检验维度按批次 lot 关联**：`quality_package` 拉取工单批次 lot，检验记录按"精确相等或前缀扩展"过滤（全局计数保留在 `gate_details.inspections_total`），`inspections_scope` 标注口径；批次读取失败时如实返回空集。adapter 的 inspections 映射补 `lot_number`。seed 补录 lot 改为批次前缀（`TEST_LOT_PAGE_9-IQC/…`）。实测 package/9：`inspection_count=3 / total=3 / scope=work_order_batch_lots`；package/2（无批次）如实为 0。开发中发现并修复自建过滤器的"精确相等漏掉前缀扩展"缺陷，以单元测试锁定。
+
+**10.5 组件拆分（第一批）**：纯函数 `formatAssistantAnswer` 抽出至 `src/lib/markdown.ts`；质量待办面板抽出为 `src/components/QualityTodoPanel.tsx`（props 化），主文件瘦身并建立 lib/ + components/ 结构，后续面板按同模式继续。
+
+**10.6 前端关键行为测试（vitest，6 例）**：markdown 渲染（HTML 转义防注入/加粗/表格）、会话令牌（sessionStorage 隔离/空白清除/签发时间）、写入头注入（X-Real-Write-Token + 幂等键）。`npm test` 脚本可用。
+
+**10.7 业务库迁移 PostgreSQL**：专用容器 `autoparts-db`（postgres:17-alpine，15432）；一次性迁移脚本 `backend/migrate_sqlite_to_postgres.py`（按外键拓扑排序、pg 列类型驱动的布尔强转、幂等跳过非空表），17 表 2765 行迁入；alembic stamp head 后应用启动校验通过。实测：报价 52 / 方案 27 / 协调者运行 50 / 工作流恢复，全部从 PG 读取。SQLite 文件保留作回退（.env 的 DATABASE_URL 一行切换）。测试套件仍使用独立临时库，不受影响。
+
+**验证**：后端 **128 passed**（新增 2 例：工作流恢复、检验关联过滤）、`compileall` 通过；前端 vitest **6 passed** + `npm run build` 通过。本阶段无 ERPNext/OpenMES 业务写入（仅本地业务库迁移）。
+
+**遗留（阶段十未完成项）**：主文件剩余面板（问答/NCR/8 步流程）继续按 10.5 模式拆分；CI 配置；问答流式输出（可选）。
+
+### 3.38 交接状态（2026-09-30，交由下一任 AI 继续）
+
+> 本节是交接快照：正在做的事、已完成的事、后面要做的事。接手者从这里开始，先读本节再读 §3.37 及之前各节。
+
+#### 一、当前系统状态（交接时实测）
+
+- 分支 `codex/real-integration-layer`，全部工作已提交（最新 `d581a30`），工作区仅 4 个约定不提交的本地文件（见下）。
+- 测试基线：后端 `pytest tests -q` **128 passed**；前端 `vitest` **6 passed** + `npm run build` 通过；`compileall` 通过。
+- 运行时（全部健康）：后端 9000（业务库已切 PostgreSQL `autoparts-db` 容器，端口 15432）、前端 5173、OpenMES（caddy/backend/reverb/postgres）与 ERPNext 容器组运行中。
+- 演示入口：`powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`（幂等 + 环境预检），剧本 `docs/demo_script.md`（六条故事线）。
+
+#### 二、正在做的事（阶段十"工厂级工程质感"，比赛定位）
+
+阶段十 7 项中 **5 项完成、2 项部分/未开始**，交接点如下：
+
+| 任务 | 状态 | 交接说明 |
+|---|---|---|
+| 10.1 NCR 工作流刷新后恢复 | ✅ 完成 | `GET /api/real-orders/quality/workflow-states` + 前端自动合并恢复 |
+| 10.2 会话过期提醒 | ✅ 完成 | 13.5 分钟阈值 + 20s 轮询横幅 |
+| 10.3 错误码统一 + MES 不可达措辞 | ✅ 完成 | package 502 映射；track `MES_UNREACHABLE` |
+| 10.4 检验按批次 lot 关联 | ✅ 完成 | 精确相等/前缀扩展均关联；seed 已对齐 |
+| 10.5 前端组件拆分 | 🟡 **第一批完成，进行中** | 已抽出 `src/lib/markdown.ts` + `src/components/QualityTodoPanel.tsx`；**剩余**：问答面板、NCR 面板、8 步流程面板、Agent 运行记录面板，按同模式继续（props 化、纯函数进 lib/、每抽一个跑 vitest+build） |
+| 10.6 前端关键行为 vitest | ✅ 完成 | `npm test` 可用（6 例） |
+| 10.7 业务库迁移 PostgreSQL | ✅ 完成 | 17 表 2765 行迁入；`migrate_sqlite_to_postgres.py` 幂等；SQLite 文件保留回退（.env 的 DATABASE_URL 一行切回） |
+
+#### 三、后面要做的事（优先级从高到低，接手者按序做）
+
+1. **完成 10.5 剩余组件拆分**（进行中的任务）：RealBusinessPage.tsx 仍约 2200 行；每抽一个面板：跑 `npx vitest run` + `npm run build`，页面冒烟（问答提问一次 + 待办渲染），完成后更新本文件与 next_development_plan.md 再继续下一个。
+2. **CI 配置**（未开始）：GitHub Actions 单 workflow——backend（pytest+compileall，注意 conda 环境在自托管机器；或改用 requirements 安装）、frontend（vitest+build）。仓库无 CI 时保持最小：至少跑前端两项（纯 Node）。
+3. **可选：问答流式输出（SSE）**：协调者回答 20-30 秒干等，流式可改善演示观感；改动点：后端 ask 端点改 StreamingResponse，前端问答面板增量渲染。不改也不阻塞演示。
+4. **长期遗留（有外部依赖，勿擅自推进）**：Wutong Registry 写路径（等部署方鉴权/租户契约）；完整 OIDC/SSO（等契约，现有 OpenMES 账号登录已够演示）；NCR close 链路真实执行（**有意保留** issue 1 在待办中做演示，勿关闭）；订单级质量放行/SN 追溯（OpenMES 无 API，保持 NOT_SUPPORTED）。
+5. **演示前检查**（若要再次演示）：跑 start_demo.ps1 预检全绿；登录会话用 OpenMES 账号 admin（密码已于 2026-09-30 重置，具体值询问用户，勿写入文档/代码/提交）。
+
+#### 四、接手必读的约束（铁律，与项目历史一致）
+
+- 所有业务数据必须来自本地真实 ERPNext/OpenMES；接口失败/无数据如实报错，禁止空数组/编造冒充；不绕过审批门禁（写入=人工审批→写回→回读→幂等）。
+- 测试命令：`cd backend && ../.conda-env/python.exe -m pytest tests -q`（基线 128，不许下降）；`../.conda-env/python.exe -m compileall -q app`；`cd frontend && npm test && npm run build`。
+- 每完成一个子任务：先更新 `docs/current_status_and_fix_plan.md`（追加 § 小节）与 `docs/next_development_plan.md`（任务表勾稽），再 git 提交（逐个 add，勿 `git add -A`）。
+- 不提交：`backend/ask_a6.json`、`backend/ask_q6.json`、`backend/uvicorn-9000.log`、`backend/uvicorn-9000.err.log`。
+- 不输出/提交 `.env` 中的任何密钥（ERPNEXT_*/OPENMES_*/DEEPSEEK_API_KEY/REAL_WRITE_API_TOKEN/DATABASE_URL 等）。
+- 后端重启模式：杀 9000 监听进程 → `cd backend && ../.conda-env/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 9000`。
+- 业务库现为 PostgreSQL（autoparts-db 容器）：若容器未启动，`docker start autoparts-db`；数据迁移历史见 §3.37。
+
+### 3.39 阶段十收尾：10.5 组件拆分全部完成 + 身份解析死循环修复 + CI（2026-09-30）
+
+**范围**：接手 §3.38 交接清单第 1、2 项。纯前端重构 + 本地 bug 修复 + CI 配置；零 ERPNext/OpenMES 业务写入（页面只读浏览与问答）。
+
+#### 一、10.5 组件拆分（全部完成，主文件 2368 → 772 行）
+
+按"props 化、纯函数进 lib/、每抽一个跑 vitest+build"模式推进，最终结构：
+
+- `src/types/realBusiness.ts`：14 个共享业务类型（Quotation/ProcurementPlan/TrackingInfo/QualityInfo/NcrWorkflow 等）从主文件抽出，主文件与各面板统一引用。
+- `src/components/AgentRunsPanel.tsx`：Agent 运行记录面板，状态自包含（查询/筛选/详情展开逻辑整体搬入，零 props）。
+- `src/components/AssistantPanel.tsx`：智能协同问答面板（含方案卡片批准执行闭环），props：identity/currentErpDraftId/currentWorkOrderId/notify/onError。
+- `src/hooks/useNcrWorkflows.ts`：NCR 处置/关闭状态机（restore/updateForm/处置三步/关闭三步共 10 个动作）+ `src/components/NcrWorkflowCard.tsx` 单卡展示组件。
+- `src/components/flow/QuotationFlow.tsx`（步骤 1-3）、`flow/ProcurementFlow.tsx`（步骤 4-6）、`flow/TrackingFlow.tsx`（步骤 7-8，内嵌 NcrWorkflowCard）。
+- 每步验证：`npx vitest run`（6 passed）+ `npm run build`（tsc -b 严格类型检查 + vite build）通过后才进入下一步。
+
+#### 二、冒烟发现并修复身份解析死循环（既有 bug，非拆分引入）
+
+- **现象**：页面打开后 `GET /api/real-orders/identity/me` 每秒 2-3 次持续请求（日志 94 万行），页面主线程被打满，浏览器自动化 click 全部 3 秒超时。
+- **根因**：主组件身份解析 effect 的依赖数组是 `[identity]`，而后端无会话时 identity/me 返回 200 匿名身份对象，每次新引用触发 setIdentity → effect 重跑 → 无限循环。git diff 确认该段代码为原有未动（拆分前就存在，此前未被发现是因为始终有 ERPNext 会话或未做长时观察）。
+- **修复**：依赖数组改为 `[]`（仅初始解析一次）；登录成功、"保存并重新解析身份"、"清除会话"三条路径本就各自显式调用 `getRealIdentity().then(setIdentity)` 刷新，行为无损失。修复后 8 秒日志零增长确认循环停止。
+- **页面冒烟（修复后）**：问 1"SAL-ORD-2026-00023 什么时候能做完？"→ 6 秒返回真实回答（ERP 订单 SAL-ORD-2026-00023 ↔ MES 工单 TEST_WO_PAGE_00023 id=9、完成率 90%（1800/2000）、速率 ETA 2026-09-30 09:39 UTC、口径 RATE_BASED 720 件/小时），调用链 2 步可视化（tracking.lookup_order_link 216ms → tracking.track_real 205ms，记录 RUN-COORD-F18E5884E69B），LLM 主动指出 PENDING 状态与 90% 完成率口径不一致。客户/物料下拉加载真实 ERPNext 数据（上汽集团等 3 客户、BD-2401 等 9 物料）。质量待办未登录提示正常。截图 `gui-test-screenshots/2026-09-30_assistant_smoke_after_split.png`。
+
+#### 三、CI 配置（GitHub Actions）
+
+- 新增 `.github/workflows/ci.yml`，双 job：
+  - backend：Python 3.12 → `pip install -e backend`（pyproject 依赖清单已具备）+ `pip install pytest==9.1.1 pytest-asyncio==1.4.0`（与本机 conda-env 版本对齐）→ `compileall -q app` → `pytest tests -q`（conftest 自包含临时 SQLite + 全部 env 默认值，无需外部服务与 .env）。
+  - frontend：Node 20 + npm cache → `npm ci` → `npx vitest run` → `npm run build`（含 tsc -b 类型检查）。
+- 触发：push main / codex/real-integration-layer + 全部 PR。尚未 push，首次运行结果待推送后确认。
+
+#### 四、验证与记录
+
+- 测试：后端 `pytest tests -q` **128 passed**（基线不下降）；前端 vitest **6 passed** + `npm run build` 通过。
+- 写入：无任何 ERPNext/OpenMES 写入；无业务库 schema 变更（组件拆分）。
+- 修改文件：`frontend/src/RealBusinessPage.tsx`（2368→772 行）、新增 `frontend/src/types/realBusiness.ts`、`frontend/src/components/{AgentRunsPanel,AssistantPanel,NcrWorkflowCard}.tsx`、`frontend/src/components/flow/{Quotation,Procurement,Tracking}Flow.tsx`、`frontend/src/hooks/useNcrWorkflows.ts`、`.github/workflows/ci.yml`；文档两份同步更新。
+
+#### 五、遗留与下一步
+
+1. 问答流式输出（SSE，可选，不阻塞演示）——交接清单第 3 项，未开始。
+2. CI 首次真实运行验证：推送到 GitHub 后确认两 job 绿。
+3. 演示前检查（若要再次演示）：跑 start_demo.ps1 预检；登录会话用 OpenMES 账号 admin（密码询问用户，勿记录）。
+4. 长期遗留不变（§3.38 第三节第 4 条）：Wutong 写路径 / 完整 OIDC / NCR close 真实执行（有意保留 issue 1 做演示）/ 订单级质量放行，均有外部依赖或有意保留，勿擅自推进。
+
+### 3.40 前端信息架构优化：RealBusinessPage 页签化（2026-09-30）
+
+**背景**：用户反馈"所有东西都塞在一个页面，很臃肿"。§3.39 完成了组件级拆分，但信息架构上问答/质量待办/8 步流程（含已完成步骤面板）/运行记录仍单页纵向堆叠，走到第 8 步时页面过长、第一屏无重点。经用户确认采用 **Tab 页签分区**方案（备选：仪表盘布局、单页折叠摘要）。
+
+**改动**：
+- `RealBusinessPage.tsx`（773 → 814 行）：新增 `activeTab` 状态与 `TAB_ITEMS`（协同问答 / 订单流程 / 质量中心 / 运行记录，默认订单流程）；顶部页签栏（`role=tablist`，质量中心页签有待办数徽标）；四个面板改为按页签条件渲染；**全局错误横幅**从流程区内提出到页签栏下方（任何页签的操作失败都可见）。
+- 跨页签联动：质量待办"去处置"自动切回"订单流程"页签再滚动高亮目标 NCR 卡片（focus effect 依赖加 `activeTab`，保证切换渲染后再滚动）；`QualityTodoPanel` 说明文案同步。
+- `styles.css`：新增 `.real-tabs / .real-tab / .real-tab-count` 样式，沿用现有 teal 主色与圆角/阴影变量，与 stepper/nav 视觉一致。
+- `docs/demo_script.md` 同步操作位置描述（故事线 A 改为"协同问答"页签，故事线 D 改为"质量中心"页签 + 去处置切页签）。
+
+**过程记录**：初次用脚本整体搬移 JSX 时，因 error banner 的通用行（`      )}`）与步骤块闭合行完全相同，`行 not in 误删列表` 判断误删了多个步骤块的闭合行，tsc 报错暴露；放弃补丁，`git checkout` 恢复后改用小块手工 Edit 重做（教训：对 JSX 的脚本级搬移要先核对块的闭合行唯一性）。
+
+**验证**：`npm run build`（tsc -b + vite）通过、vitest 6 passed；页面冒烟——四个页签切换全部正确渲染（协同问答→问答面板、订单流程→stepper+当前步骤、质量中心→待办、运行记录→运行列表），默认"订单流程"，身份解析无循环（上节修复持续有效）。截图接口本轮超时，以 DOM 快照为证据；未登录会话"去处置"端到端跳转留待下次登录演示时顺带复核。
+
+**写入**：无 ERPNext/OpenMES 写入。
+
+**遗留**：① 协调问答（SSE 流式）仍为可选未开始；② CI 首跑验证待 push；③ App.tsx（469 行，含 MES 完工数据页）如需可按同模式继续拆分，优先级低。
+
+### 3.41 问答流式输出（SSE）+ 面板级 ErrorBoundary（2026-09-30）
+
+**范围**：§3.38 交接清单第 3 项（问答 SSE）+ 演示容错（面板降级）。后端只读通道逻辑零变更（同一个 ask()，新增可选 on_step 回调）；零 ERPNext/OpenMES 写入。
+
+#### 一、问答流式输出（SSE）
+
+- **后端**（`app/services/coordinator.py` + `app/main.py`）：
+  - `BusinessCoordinator.ask` 新增可选参数 `on_step`：每完成一次工具调用即回调当前调用链步骤（`call_chain[-1]`）；不传时行为与同步端点完全一致（恢复机制、持久化、proposal 汇集均复用）。
+  - 新端点 `POST /api/real-orders/assistant/ask/stream`（`text/event-stream`）：后台任务运行 ask，经 asyncio.Queue 推事件——`step`（每次智能体调用完成）、`done`（完整结果，结构与同步端点一致）、`error`（IntegrationError/内部异常如实推送，不让事件流静默挂死）；15 秒无事件发 `: ping` 心跳防代理断连；客户端断开时 cancel 后台任务并关闭协调者。DeepSeek 未配置同样返回 503。
+- **前端**（`src/lib/sse.ts` + `src/api.ts` + `AssistantPanel.tsx`）：
+  - `SseParser`：增量行协议解析（跨 chunk 半包、CRLF、心跳注释、多行 data），纯函数配 vitest 锁定。
+  - `askAssistantStream(question, context, {onStep})`：fetch POST + ReadableStream 解析；**回退语义**——传输层失败（网络异常/非 200/流中断）抛普通 Error，面板捕获后回退同步端点 `/ask`；协调者执行失败（SSE `error` 事件）抛 `AssistantStreamExecError`，不回退（同步重试必然同样失败）。
+  - AssistantPanel：流式优先；等待期间渲染"协调智能体工作中，已完成 N 次智能体调用…"+ 调用链逐条点亮（复用 `.assistant-step` 样式）；完成或回退后切换最终回答。
+- **页面冒烟（真实 DeepSeek）**：问"SAL-ORD-2026-00023 为什么还不能发运？"（5 步链）采样时间线——t=1.4s 首步点亮 → t=3.2s 五步全亮 → t=7.7s 最终回答渲染。等待体验从"黑屏干等"变为"协同过程实时展示"。curl 直连端点验证事件序列 step×2→done（简单问题）。
+
+#### 二、面板级 ErrorBoundary（演示容错）
+
+- 新组件 `src/components/ErrorBoundary.tsx`（class 组件，getDerivedStateFromError + componentDidCatch 控制台留痕）：面板渲染崩溃时降级为"XX · 模块暂时不可用"卡片（含错误消息与"重试恢复该面板"按钮），**不影响其他面板与页签**。
+- 包裹 4 处：智能协同问答、质量中心、Agent 运行记录三个页签内容 + 订单流程页签内 Step 8"跟单质量与发运门禁"（NCR 卡片最复杂、演示关键；step 1-7 不受其崩溃影响）。
+- vitest 3 例（jsdom + react-dom/client + act）：正常渲染不出现降级卡、崩溃降级含面板名与错误信息、重试恢复后重新渲染正常内容。
+
+#### 三、测试与记录
+
+- 后端 `pytest tests -q` **134 passed**（新增 6 例：on_step 回调 2 + 流式端点 4——事件序列/协调者关闭/错误事件/503/空问题 422）。
+- 前端 vitest **14 passed**（原 6 + SSE 解析器 5 + ErrorBoundary 3）；`npm run build` 通过。
+- 后端已重启生效（uvicorn 9000）；截图接口本轮持续超时，以 DOM 采样时间线与 curl 事件流为证据。
+- 修改文件：`backend/app/services/coordinator.py`、`backend/app/main.py`、`backend/tests/test_assistant_stream.py`（新）、`frontend/src/lib/sse.ts`（新）、`frontend/src/lib/__tests__/sse.test.ts`（新）、`frontend/src/api.ts`、`frontend/src/components/AssistantPanel.tsx`、`frontend/src/components/ErrorBoundary.tsx`（新）、`frontend/src/components/__tests__/ErrorBoundary.test.tsx`（新）、`frontend/src/RealBusinessPage.tsx`、`frontend/src/styles.css`。
+
+#### 四、遗留与下一步
+
+1. 演示剧本可在故事线 A 补一句"等待时调用链会逐步点亮"（演示观感卖点）。
+2. CI 首跑验证仍待 push。
+3. 深度优化候选（未排期）：回答 token 级流式（DeepSeek stream=True，当前为"步骤流+完整回答"，已覆盖主要等待感）；App.tsx（469 行）按页签模式拆分。
+
+### 3.42 通用能力实测（剧本外任意输入）与无 BOM 伪结论修复（2026-09-30）
+
+**背景**：用户明确要求——演示不能只依赖剧本预设数据，"无论遇到什么情况都能实现"。本轮对系统做"任意输入"实测，发现并修复一个通用性 bug，摸清全部能力断点。
+
+#### 一、OpenMES 写入 API 面调研（源码级，services/OpenMes）
+
+此前认为"只有只读查询能力"的三个写入端点实际全部存在（Laravel /api/v1，Sanctum 会话即可调用，admin 角色权限充分）：
+- **工单创建** `POST /api/v1/work-orders`：`customer_order_no` 是官方字段（迁移 2026_06_21_100000，注释"客户自己的订单/PO 号"），创建后 status=PENDING 并冻结工艺快照 → **step 7"ERP 草稿→MES 工单"的人工断点可以产品化**。
+- **真实报工链路** `POST /work-orders/{id}/batches` → `/batch-steps/{step}/start` → `/batch-steps/{step}/complete`（complete 接受 `actual_elapsed_minutes/actual_setup_minutes/actual_run_minutes`，正是此前 seed 直写数据库的字段）→ **任意新工单的速率 ETA 可用真实 API 产生**。
+- **质量问题创建** `POST /api/v1/issues`（work_order_id/issue_type_id/title/description）→ **"现场制造一个质量问题再走 NCR 闭环"成为可能**。
+
+#### 二、任意问题清单实测（5 个剧本外问题，真实 DeepSeek）
+
+| 输入 | 行为 | 结论 |
+|---|---|---|
+| "BD-2402 现在 500 件多少钱？"（缺客户） | 工具失败→如实说明缺 customer_id、不编价格 | ✅ 诚实 |
+| "SAL-ORD-2099-00001 什么时候能做完？"（不存在） | ERP_ORDER_NOT_FOUND 如实报告 | ✅ 诚实 |
+| "WO-2026-999 现在什么状态？"（不存在） | found:false 如实报告并列出现有工单 | ✅ 诚实 |
+| "BRG-6204 库存够不够 1000 件？" | 灵活复用报价分析技能查真实 Bin（1500 件）答"够" | ✅ 动态协同 |
+| "现在厂里最紧急的质量问题是什么？" | 如实说明无全厂扫描接口，请给线索 | ✅ 诚实，**暴露缺口：协调者缺"全厂质量待办"技能（数据在 quality todo 已有）** |
+
+#### 三、新订单实测发现并修复无 BOM 伪结论（通用性 bug，BD-2401 精修路径踩不到）
+
+- **现象**：非预设物料 BD-2402（ERP 无 BOM）走新订单流程：报价正常（真实价格 78 CNY，QUO-155D21601EFE），但采购分析返回 `has_shortage:false` + `missing_data:[]` + 方案文案"库存充足，无需采购"（NO_SHORTAGE）——**表面"不缺料"，实际是"无 BOM 无法展开子件需求"，属伪结论**；前端还会据此直接跳 step 7，链路断裂。
+- **修复**：`compute_net_requirement` 新增 `shortage_evaluable` 字段（无 BOM 时 false 并在 missing_data 标注"BOM 缺失，评估不可用+补录指引"）；`analyze_procurement` 无 BOM 时返回 `status: EVALUATION_BLOCKED`（recommendation_rule=not_applicable_bom_missing，绝不输出"库存充足"）；前端 `analyzeProcurement` 三分叉（缺料→step5 / 评估不可用→停留 step4 展示阻断卡片 / 真无缺料→step7），`ProcurementAnalyzePanel` 新增阻断卡片（补录指引）。
+- **真实复测**：BD-2402 新订单（QUO-3DD73A37B674）→ `EVALUATION_BLOCKED` + 中文如实说明与补录指引，`shortage_evaluable:false`。
+- **测试**：后端 **135 passed**（新增 test_missing_bom_blocks_shortage_evaluation）；前端 build 通过。
+
+#### 四、断点分类总账（"任意输入都能实现"的差距清单）
+
+| 断点 | 分类 | 处置 |
+|---|---|---|
+| 无 BOM 物料伪结论 | 通用性 bug | ✅ 本轮已修复 |
+| 协调者无"全厂质量待办"技能（只读，数据已有） | 可补能力 | 待办（无需审批，纯只读） |
+| 新订单 step 7：ERP 草稿后无 MES 工单（原靠人工在 OpenMES 手建） | 可补能力（写入） | OpenMES API 已确认；**等用户批准**后做"工单下达"审批门禁能力（创建工单+customer_order_no 关联+回读） |
+| 任意工单无报工数据→ETA 如实缺数 | 可补能力（写入） | OpenMES 报工 API 已确认；**等用户批准**后做"批次+报工"审批门禁能力（真实 API 替代 seed 直写） |
+| 现场无质量问题可演示处置 | 可补能力（写入） | OpenMES issues API 已确认；**等用户批准**后做"质量问题登记"能力 |
+| 工单状态 PENDING vs 完成率 90% 口径不一致 | 数据口径 | 建议保留（LLM 主动发现=诚实卖点）；如需推进工单状态走真实报工 API |
+
+### 3.43 工单下达（ERP 草稿 → OpenMES 真实创建）与全厂质量待办技能（2026-09-30）
+
+**背景**：§3.42 断点总账中，"新订单 step 7 依赖人工在 OpenMES 手工建单"是任意新订单走通全链路的最大断点。OpenMES 官方 `POST /api/v1/work-orders`（customer_order_no 为官方字段）已确认。本轮按既有铁律实现"工单下达"审批门禁能力（用户方向性要求"无论什么情况都能实现"；写入全部走 人工审批→写回→回读→幂等）。
+
+#### 一、全厂质量待办只读技能（修复 §3.42 问答缺口）
+
+- AIP 注册 `quality.list_open_issues`（`quality_document_aip.py`，透传 `real_order.quality_todo_list`）；协调者能力目录加条目（问"现在有哪些质量问题/最紧急的质量问题"无需指定工单）；ACS json 同步（test_acs_sync 锁定）。协调者测试 12 passed（含能力目录-AIP 注册一致性）。
+
+#### 二、工单下达（三步审批门禁，与 NCR 处置同构）
+
+- **后端**（`real_order.py`）：`request_work_order_dispatch`（① 建审批 WOD-xxx，记录将创建的工单内容：order_no 由 ERP 订单号派生 `WO-SO-YYYY-NNNNN`、customer_order_no、数量、交期，不写入）→ `approve_work_order_dispatch`（② 人工批准，审批人来自真实身份）→ `dispatch_work_order_to_openmes`（③ 审批校验 → **幂等**：get_work_orders_strict 拉取后按 customer_order_no 精确匹配，已有关联工单直接返回既有工单（idempotent=true 零写入）→ OpenMES create_work_order → **回读验证** customer_order_no 精确相等 + 数量相等，不匹配如实报错）。
+- **适配器**（`openmes_adapter.py`）：新增 `create_work_order`（Sanctum 会话写操作）与 `get_work_order_raw`（回读原始记录，不做映射）透传；幂等检索复用既有 `get_work_orders_strict`（不猜列表 API 的服务端过滤能力，本地精确匹配）。
+- **API**（`main.py`）：`POST /real-orders/work-orders/dispatch-request` / `dispatch-approvals/{id}/approve` / `dispatch`，全部挂写入门禁（require_real_write_access）与真实身份依赖。
+- **前端**：`WorkOrderSelectPanel` 在"无关联工单"提示下新增下达区块——确认面板展示三步将执行内容 → 一次确认自动串行执行（审批号/批准/创建+回读全程留痕显示）→ 成功后刷新工单列表并自动选中新工单；api.ts 新增三个函数与类型。
+- **顺带修复既有 bug**：`_same_quantity` 工具函数被误贴 `@_agent_run` 装饰器（返回 coroutine 恒真），导致 NCR 处置回读的数量比对形同虚设且污染运行记录——已去除装饰器，数量比对恢复真实语义。
+
+#### 三、真实链路验证（全部真实系统，审批门禁内）
+
+以通用性实测创建的报价 QUO-3DD73A37B674（BD-2402 · 长城汽车 · 800 件）走完整链路：
+1. 报价审批 `APPR-80C4E238759C` → ERP 销售订单草稿 `SAL-ORD-2026-00024` 创建并回读验证（docstatus=0）；
+2. 工单下达：审批 `WOD-66A9397EDE8E`（首次 500 发现端点漏 await，修复）→ 审批 `WOD-AA9E1833517A` → 批准 → **真实创建 OpenMES 工单 id=10（WO-SO-2026-00024）**，customer_order_no=SAL-ORD-2026-00024 回读验证通过，status=PENDING；
+3. 幂等复测：再次下达返回 idempotent=true、written=false、零新写入；
+4. `/mes/work-orders` 列表可见新工单且关联正确（step 7 下拉可选中）。
+- **新订单全链路自此打通**：任意客户+物料 → 报价（真实价格）→ 审批 → ERP 草稿 → 采购分析（无 BOM 如实阻断，有缺料走方案审批）→ 工单下达（审批门禁真实创建+自动关联）→ 跟单/质量/发运门禁。
+- 小待办：工单 product_name 为空（未映射 OpenMES product_type；物料信息在 description 留痕）——后续可用 product_type external_code 映射。
+
+#### 四、测试与文件
+
+- 后端 **139 passed**（新增 4 例：审批前拒绝/创建+回读+幂等/回读不匹配拒绝/无 ERP 草稿拒绝）；前端 vitest 14 passed + build 通过。
+- 文件：`backend/app/services/real_order.py`（工单下达三步 + _same_quantity 修复）、`backend/app/adapters/mes/openmes_adapter.py`（create/raw 透传）、`backend/app/aip/agents/quality_document_aip.py`、`backend/app/services/coordinator.py`、`backend/acs/quality_document_acs.json`、`backend/app/main.py`（三个端点 + await 修复）、`backend/tests/test_real_order_realdata.py`、`frontend/src/api.ts`、`frontend/src/RealBusinessPage.tsx`、`frontend/src/components/flow/TrackingFlow.tsx`、`frontend/src/styles.css`。
+
+#### 五、待用户确认的剩余补强（写入类，未开工）
+
+1. 真实报工（批次 + batch-step complete 带 actual_elapsed_minutes）：任意新工单的速率 ETA 用真实 API 产生，替代 seed 直写；
+2. 质量问题登记（POST /api/v1/issues）：任意工单现场创建质量问题后立即走既有 NCR 处置闭环。
+
+### 3.44 通用能力补强两项写入（2026-10-01，接手 handoff_2026-09-30_report_and_issue.md）
+
+**状态（本节先记计划与前置调研，实现与验证结果随后续小节补记）**：用户批准开工（"可以，先写文档，然后开始"）。任务定义、API 契约、铁律、验收标准以 `docs/handoff_2026-09-30_report_and_issue.md` 为准。
+
+#### 一、开工前调研发现（影响设计，已按源码 + 真实系统确认）
+
+1. **报工链路依赖"批次步骤"**：`POST /work-orders/{id}/batches` 创建批次时，`WorkOrderService::createBatch` 只在工单 `process_snapshot` 非空时才从快照生成批次步骤（`createBatchStepsFromSnapshot`）；无快照步骤的工单建出的批次没有可 start/complete 的步骤，官方报工 API 走不通。
+2. **快照由 `product_type_id` + BOM 工艺模板生成**（`WorkOrderService::createWorkOrder` → `buildProcessSnapshot`，取该产品类型激活模板）。§3.43 下达的工单 id=10（WO-SO-2026-00024，BD-2402）创建时未传 product_type_id，且真实系统确认 **BD-2402（product_type id=3）没有任何工艺模板**——因此 id=10 无法通过官方 API 报工，只能如实标注（不做任何伪造补数）。
+3. **product_types.code 与 ERP item_code 同码**（真实系统：id=2 code=BD-2401、id=3 code=BD-2402），BD-2401 有激活模板 `TEST_BD2401_QUALITY_FLOW`（1 道工序）——工单下达补 product_type 映射（只读查 product-types 列表按 code 精确匹配）即可让新订单的批次有步骤；这同时完成 §3.43 遗留小待办（工单 product_name 为空）。
+4. **速率 ETA 无需改动**：`get_work_order_batches` 已映射步骤 `passed_qty/actual_elapsed_minutes`，`_rate_sample`（§3.25）读同字段——真实报工完成后 track 自动转 `RATE_BASED`。
+5. **批次完成回写**：`BatchService::finishBatchIfComplete` → `completeBatch` 同时回写批次 `produced_qty` 与工单 `produced_qty`（=各批次之和，BatchService.php:632-648）——回读验证两个层面都有真实数据可对。
+6. **issue-types 真实现状**：`GET /api/v1/issue-types` 返回 11 类（Material Defect/Material Shortage/In-process Quality — Control Failed 等），前端下拉直接用，无需先建类型。
+
+#### 二、实现设计（沿用 §3.43 工单下达三步审批范本）
+
+**任务 1 真实报工（审批前缀 `RPT-`）**：
+
+- 适配器/client 层透传三端点：`create_batch(work_order_id, payload)` → `start_batch_step(step_id)` → `complete_batch_step(step_id, payload)`（照 `create_work_order` 透传写法，Sanctum 用户会话）。
+- 服务层三步（`real_order.py`）：
+  - ① `request_production_report`：预检（工单存在且批次步骤可用——读 raw 工单 `process_snapshot.steps`，为空则**写前如实拒绝**"该工单无工艺快照步骤，无法报工"，不产生孤儿批次；批次 target_qty 合计不超 planned_qty 预检）→ 建 `RPT-` 审批，登记 work_order_id/target_qty/lot_number/produced_qty/actual_elapsed_minutes（可选 setup/run），不写入。
+  - ② `approve_production_report`：人工批准，审批人来自真实身份。
+  - ③ `execute_production_report`：审批校验 → **幂等**（`get_work_order_batches` 按 lot_number 精确匹配，已存在直接返回既有，零写入）→ 建批次 → 从响应 `data.steps[0].id` 取步骤 → start → complete（produced_qty + actual_elapsed_minutes）→ **回读验证**（批次步骤 status=完成且数量/耗时与审批一致、工单 produced_qty 相应增加），不匹配如实报错。
+- API（`main.py`）三端点挂 `require_real_write_access` + `require_real_identity`（照 dispatch 端点，注意 await）。
+- 前端：Step 8 跟单面板（`TrackingFlow.tsx` 的 `TrackingQualityGatePanels`）加"报工（需人工审批）"区块：数量 + 实际耗时（+批次号）→ 确认面板 → ①→②→③ 串行执行留痕（照 WorkOrderSelectPanel 下达区块抄）→ 成功后自动刷新进度/ETA。
+- **顺带（任务 1 的前置）**：`request_work_order_dispatch` 补 product_type 映射——按 item_code 在 `product-types` 列表精确匹配 code，命中则 create payload 带 `product_type_id`（快照有步骤、product_name 有值）；未命中如实记录不阻断下达（主数据缺失是真实状态）。
+
+**任务 2 质量问题登记（审批前缀 `QISS-`）**：
+
+- 适配器/client 透传 `create_issue`（POST /api/v1/issues）+ 只读 `list_issue_types`；新增只读端点给前端下拉。
+- 服务层三步：① `request_issue_registration`（QISS- 审批，登记 work_order_id/issue_type_id/title/description）→ ② 人工批准 → ③ 审批校验 → **幂等**（同工单同 title 的未关闭 issue 已存在则返回既有）→ 创建 → 回读验证（work_order_id + title 匹配）。
+- 前端：Step 8 质量面板加"登记质量问题（需人工审批）"区块（issue type 下拉用真实 11 类）；登记成功刷新质量包后新 issue 即出现 NCR 卡片，可直接走既有处置三步。
+
+#### 三、真实验证计划（全部真实系统，审批门禁内）
+
+- 任务 1：**BD-2401 全新订单**走全链路（报价→审批→ERP 草稿→下达[含 product_type 映射→快照步骤]→真实报工）→ track 该新工单 ETA 变 `RATE_BASED`；重复报工幂等。工单 id=10 的 ETA 缺数保持如实标注（补数属主数据工程：BD-2402 需先建工艺模板，超出本轮范围）。
+- 任务 2：对上述工单真实登记质量问题 → `quality/package` 与全厂待办出现新条目 → NCR 卡片可处置（处置闭环演示可复用既有链路）。
+- 铁律不变：写入=人工审批→写回→回读→幂等；审批依据记入返回；每步跑测试；文档先更新再提交（逐个 add）。
+
+#### 四、验证结果（2026-10-01 实现 + 真实验证完成）
+
+**测试基线**：后端 **154 passed**（新增 15 例：工单下达 product_type 映射 2 + 真实报工 7 + 质量问题登记 6），`compileall` 通过；前端 vitest **14 passed** + `npm run build`（tsc 严格检查）通过。
+
+**任务 1 真实报工（全部真实系统，审批门禁内）**：
+
+- 链路 A（全额报工 → COMPLETED）：报价 `QUO-E15130196052`（BD-2401·上汽集团·400 件·交期 2026-11-20，真实价格 85 CNY/件）→ 审批 `APPR-215FE775C6E4` → ERP 销售订单草稿 **SAL-ORD-2026-00025**（docstatus=0；首次未带交期被如实拒绝——"报价缺少交期不能创建草稿"，无默认值）→ 工单下达审批 `WOD-43F4AA8D9F97`（**product_type 映射命中：id=2 制动盘-前轮**，product_type_match=resolved）→ 批准 → **真实创建 OpenMES 工单 id=11**（WO-SO-2026-00025，customer_order_no 回读验证通过）→ 报工审批 `RPT-FBE8161972A7`（400 件/50 分钟，lot=TEST_LOT_WO11_1）→ 批准 → **官方报工链路真实执行**（批次 id=4 创建 → 步骤开工 → 完工带 actual_elapsed_minutes）→ 回读验证通过（批次步骤 DONE、工单 produced_qty=400.00）；重复执行幂等（idempotent=true，零写入）；track/11 ETA 口径 `COMPLETED`（400/400）。
+- 链路 B（部分报工 → RATE_BASED）：`QUO-1DB191C271FA`（300 件）→ 审批 → **SAL-ORD-2026-00026** → 下达 → **工单 id=12**（WO-SO-2026-00026，product_type 映射命中）→ 报工审批 `RPT-415078956178`（100 件/20 分钟，批次号留空自动派生 `LOT-0B24E68049E0`）→ 回读验证通过（工单 produced_qty=100.00）→ **track/12：完成率 33.3%、实测速率 300 件/小时、ETA=2026-10-01 01:24（本地），eta_status=RATE_BASED**。
+- 顺带完成 §3.43 遗留小待办：工单下达按 item_code 精确匹配 `product-types.code` 传 product_type_id（新工单有工艺快照、product_name 有值）；未命中/查询失败如实记录（product_type_match=not_found/lookup_failed），不阻断下达。
+- **工单 id=10 保持如实缺数**：BD-2402 在 OpenMES 无激活工艺模板（真实状态），官方报工 API 无法在其上执行；服务层对无快照步骤工单写前如实拒绝（附补模板指引），不做任何伪造补数。
+
+**任务 2 质量问题登记（全部真实系统，审批门禁内）**：
+
+- 只读端点 `GET /real-orders/quality/issue-types` 返回真实 11 类（Material Defect·HIGH / Material Shortage·CRITICAL 等）。
+- 登记链路：登记审批 `QISS-8B341F69A022`（工单 id=11 · 类型 Material Defect(HIGH) · "制动盘端面跳动超差（现场登记验证）"）→ 批准 → **真实创建 OpenMES issue id=3** → 回读验证通过（work_order_id 与标题精确匹配）；重复执行幂等（written=false）。
+- 可见性验证：`quality/package/11` 出现新记录（record_id=3·HIGH·OPEN，质量门禁正确转为未通过）；全厂质量待办出现新条目（待办 2→3 条）。**issue 3 有意保留 OPEN**，作为现场处置三步闭环的演示素材（与 issue 1 同策略）。
+
+**页面级说明**：两个新区块（Step 8 报工 / 登记）复制 §3.43 页面已验收的下达区块模式（tsc 严格类型检查通过）；端到端页面冒烟需 OpenMES 登录会话（密码仅用户掌握），留待下次演示登录时顺带复核——API 级验证已覆盖页面所调用的同一路径与同一校验。
+
+**写入记录**（均为人工审批门禁内真实写入，审批依据=用户 2026-10-01 批准按交接文档开工并验收）：ERPNext 销售订单草稿 SAL-ORD-2026-00025/00026（docstatus=0）；OpenMES 工单 id=11/12、批次 4 与 LOT-0B24E68049E0、issue id=3。全部回读验证通过、无未审批写入、无 Mock 兜底。
+
+**修改文件**：`backend/app/adapters/mes/openmes.py`（batch×3/issue-types/create_issue/get_issue）、`backend/app/adapters/mes/openmes_adapter.py`（透传 + list_product_types）、`backend/app/services/real_order.py`（RPT/QISS 三步 + 下达 product_type 映射）、`backend/app/main.py`（7 个端点：报工 3 + 登记 3 + issue-types 只读）、`backend/tests/test_real_order_realdata.py`（+15 例）、`frontend/src/api.ts`、`frontend/src/components/flow/TrackingFlow.tsx`（报工/登记两区块，自包含状态）、`docs/demo_script.md`（故事线 B/D + 记录速查）。
+
+**遗留与下一步**：① 页面级冒烟（待用户登录演示时复核两个新区块）；② BD-2402 等物料的 OpenMES 工艺模板属主数据工程，补模板后新订单即可报工；③ CI 首跑验证仍待 push。
+
+### 3.45 可部署性整改：别人 clone 后能跑起来（2026-10-01）
+
+**背景**：用户问"别人从 GitHub 下载下来能直接部署吗？怕 ERP/MES 连接出问题"。调研结论：代码/测试/种子脚本完整、真实模式连接失败必然明确报错（不回退 Mock，有故障注入测试锁定），但存在 5 个部署卡点——无部署文档、services/ 上游仓库不在 git（.gitignore 有注释但无指引）、`.env.example` 过期（缺 REAL_WRITE_API_TOKEN、VITE_API_BASE_URL 写 8000）、OPENMES_TOKEN 无干净获取路径、start_demo.ps1 硬编码本地 .conda-env。用户批准全部整改。
+
+#### 一、本地部署拓扑调研（编排文件的事实依据）
+
+- **OpenMES**：compose project `openmes`，官方镜像 `ghcr.io/mes-open/openmes:latest` + 其仓库自带 `docker-compose.yml`（postgres/backend/caddy/reverb 4 服务，端口 80/443）；管理员与 APP_KEY 由容器入口脚本首启自动创建/生成（docker-entrypoint.sh:35 生成 APP_KEY）。
+- **ERPNext**：compose project `erpnext`，frappe_docker 官方 `compose.yaml` + mariadb/redis/noproxy 三个 override（10 服务，frappe/erpnext:v16.36.0，HTTP_PUBLISH_PORT=8080，站点名 `localhost`，FRAPPE_SITE_NAME_HEADER=localhost）。
+- **关键发现：不能做单 include 编排文件**——OpenMES 与 frappe_docker 的 compose 都有叫 `backend` 的服务，compose include 会把同名服务静默合并成一个（实测 `docker compose config` 合并后只剩 12+1 个服务、OpenMES backend 被覆盖）。因此改为**双 project 部署脚本**，与本机验证拓扑完全一致。
+- 种子脚本凭据来源：`seed_erpnext/seed_supplier_data` 读根目录 .env；`seed_openmes*.py` 读 `services/OpenMes/.env` 的管理员凭据登录取 token；`seed_inspection_eta.py` 直写库补录（TEST_ 前缀、幂等）。
+- `backend/get_openmes_token.py`（此前未提交）核验无硬编码凭据：读 services/OpenMes/.env 登录 `/api/auth/login`、验证 `/api/auth/me`、缺失时经官方 `/api/v1/api-keys` 创建 ERP 集成 key、写回根目录 .env——正是"干净取 token"路径，纳入版本管理。
+
+#### 二、交付物
+
+1. **根目录 `README.md`（新建）**：从零部署指南——前置要求 → 克隆本仓库 + 两个上游仓库 → `scripts/deploy_services` 一键起双系统 → OpenMES 自动初始化/ERPNext 建站（`bench new-site localhost`，站点名必须 localhost）→ `.env` 逐项配置表（含 token 获取路径）→ 种子脚本顺序与幂等性说明 → 启动 + 验证清单 → 测试与 CI → **排障表**（401 换 token/403 写入令牌/15 分钟会话/EVALUATION_BLOCKED 属诚实设计/无工艺模板不可报工等）→ 第 10 节"诚实声明"（编排与本地验证环境逐项一致，但全新机器端到端未完整重放过）。
+2. **`.env.example` 重写**：补 `REAL_WRITE_API_TOKEN`（含生成方式与 403 行为说明）、`VITE_API_BASE_URL` 修正为 9000、`APP_ADAPTER_MODE=real` 为默认并注明 real/auto 差异（auto 会回退 Mock 的误导风险）、补 ERPNext/OpenMES 双系统默认地址、compose 专用变量注释（ERPNEXT_VERSION/DB_PASSWORD 等）。
+3. **`scripts/deploy_services.ps1` + `deploy_services.sh`（新建）**：检查 Docker 与上游仓库克隆 → 自动生成两份 .env（OpenMES 用上游模板、ERPNext 用本仓库 `scripts/templates/erpnext.env.example`）→ 分两个 compose project 启动（`--project-name openmes/erpnext`，与本地验证一致）→ 打印首次初始化待办。bash 版经 `bash -n`、PowerShell 版经 PSParser 语法校验。
+4. **`scripts/templates/erpnext.env.example`（新建）**：frappe_docker .env 模板（v16.36.0、HTTP_PUBLISH_PORT=8080、FRAPPE_SITE_NAME_HEADER=localhost，与本地验证环境一致）。
+5. **`scripts/start_demo.ps1` 增强**：Python 解释器探测（.conda-env → backend/.venv → .venv → 系统 python）+ 后端依赖预检（缺 uvicorn 给出 `pip install -e backend` 指引而非启动后报错）+ 预检新增 `APP_ADAPTER_MODE=real` 检查（非 real 明确警告"会静默回退 Mock"）。**实测全流程通过**（现有环境 8 项预检全绿，新模式检查生效）。
+6. **`backend/get_openmes_token.py` 纳入 git**（README 第 4 节引用）。
+
+#### 三、验证
+
+- `docker compose --project-name X -f … config` 两个 project 分别通过（OpenMES 4 服务 / ERPNext 10 服务；APP_KEY 未设仅为 warning，入口脚本首启自动生成）；单 include 合并方案的静默服务名冲突已实测并规避。
+- `start_demo.ps1` 真实运行全绿（Python 探测 → .conda-env；real 模式检查通过）。
+- bash -n / PSParser 语法校验通过。
+- 未运行 `up -d`（本机同名容器已在运行会端口冲突；新机器行为由 compose config + 与本地一致的项目结构保证）。
+
+#### 四、写入与遗留
+
+- 无任何 ERPNext/OpenMES/业务库写入；无业务代码改动（README/示例配置/脚本三件套）。
+- 遗留：① 全新机器端到端重放（需一台干净环境，属外部动作）；② ERPNext API Key 生成仍是 UI 手工步骤（可写脚本但涉账密，暂不做）。
+
+#### 五、推送与 CI 首跑验证（2026-10-01，销账 §3.39/§3.45 遗留③）
+
+- 分支 `codex/real-integration-layer` 已推送 GitHub（`DOGE-k/auto-parts-agents`，84da16b → 4c4119a 共 42 个提交，随后 CI 修复 `8a04fa4`）。
+- **CI 首跑失败并修复**：backend job 在 pytest 收集阶段全量 `ModuleNotFoundError: No module named 'acps_sdk'`——vendored 的 ACPs SDK（`acps-sdk-src/acps-sdk`，本地以 editable 方式导入）未进 CI 环境；frontend job 首跑即绿。修复：ci.yml 在 `pip install -e backend` 前加 `pip install -e acps-sdk-src/acps-sdk`（后端仅用 SDK 核心 acs/aip 模块，可选 extra amp-sign 的 jcs/cryptography 本地亦未装，无需安装）。
+- **修复后 CI 双 job 全绿**：Backend (pytest + compileall) ✅ / Frontend (vitest + build) ✅（run on 8a04fa4）。
+- 注：仓库为私有，CI 状态经 git 凭据（未输出密钥）调用 GitHub API 核验。
+
+### 3.46 文档整理与后续 AI 接手计划（2026-10-01）
+
+本轮只整理文档，没有修改业务代码或真实 ERP/MES 数据。
+
+- 新增 `docs/AI_HANDOFF_PLAN.md`，统一记录最终产品目标、四个智能体边界、当前真实状态、P0/P1/P2 开发路线、执行模板、验收标准和禁止事项。
+- 更新 `docs/README.md`，明确推荐阅读顺序，并标出当前依据、历史交接稿、字段映射和 TEST 数据提示词的用途边界。
+- 在 `docs/next_development_plan.md` 顶部增加历史计划提示，避免接手者把早期未勾选任务当成当前待办。
+- 当前后端测试基线仍以本次复核的 `154 passed` 为准；接手者开始新阶段前应重新运行测试和真实接口检查。
+- 运行检查发现 `/api/mes/work-orders` 当前返回空列表，而历史记录曾有工单数据；该差异列为接手后的首个核对项，解决前不得把工单数量写死到演示或新文档。
+
+### 3.47 OpenMES 认证自愈与适配器错误传播修复（2026-10-01，接手 §3.46 首个核对项）
+
+**背景**：§3.46 记录 `/api/mes/work-orders` 返回空列表。本轮查明根因并按用户确认的规则修复（只做认证恢复与错误处理，未写入任何 ERP/MES/业务数据）。
+
+#### 一、根因结论（每一环均有实证）
+
+1. `.env` 的 `OPENMES_TOKEN` 是 `get_openmes_token.py` 用 admin 登录换取的 Sanctum **会话令牌**，OpenMES 源码（`services/OpenMes/backend/app/Services/Auth/AuthService.php:37`）在签发时即写入 15 分钟过期（`now()->addMinutes(openmmes.default_token_ttl_minutes, 15)`）——把会话令牌当长期凭据，过期是结构性必然。
+2. 实证：令牌表（personal_access_tokens）中 `.env` 引用的令牌 id=23 已不存在；现存最新令牌均已过 TTL。
+3. 后端所有 `/api/v1/*` 读取走该 Bearer 令牌 → 全部 401 `Unauthenticated.`；`X-Api-Key`（持久 API Key）仅覆盖 3 个 ERP 作用域端点。
+4. `openmes_adapter.py` 非严格 `get_work_orders` 捕获全部异常后 `return []`，把 401 吞成空列表——这就是"历史有 4 条、当前返回空"的差异来源。
+5. 数据无丢失：`openmes-postgres` 只读查询 work_orders 表 **12 条**；ERPNext 全程正常（Administrator 认证可用）。
+
+#### 二、修复内容（错误传播 + 令牌自动刷新）
+
+| 文件 | 改动 |
+|------|------|
+| `backend/app/adapters/mes/openmes_adapter.py` | 5 处吞错修复：`get_work_orders`（委托 strict）、`get_operation_progress`、`get_wip`、`get_production_documents`、`read_authoritative_events` 全部改为失败抛出；只有 OpenMES 正常返回 200 且数据为空才返回空列表；`get_production_documents` 缺 work_order_id 抛 ValueError 而非空列表 |
+| `backend/app/integrations/openmes_session.py`（新增） | `OpenMESUserSessionManager`：令牌只存进程内存（默认 14 分钟缓存，留 1 分钟 TTL 余量）；凭据仅从 `services/OpenMes/.env` 读取且只在登录调用瞬间使用；401 刷新带并发去重（其他请求已换新则复用）；登录失败包装为 `openmes_relogin_failed` 明确错误（不含凭据）。`UserTokenRetryTransport`：仅对带 Authorization 的请求在 401 时刷新重试一次（X-Api-Key/匿名 401 不重试），重试后仍 401 原样抛出不循环 |
+| `backend/app/adapters/mes/openmes.py` | 客户端支持 `user_session`；请求头构建顺序=内存缓存 → 静态引导令牌 → 主动登录；`_require_user_token` 感知会话模式；24 处 Bearer 头统一经 `_user_auth_headers()` |
+| `backend/app/adapters/factory.py` | real/auto 模式的 MES 客户端改经 `build_openmes_client`（自动刷新默认开启） |
+| `backend/app/main.py` | 3 个直构点接入；新增 `_mes_status_error`：401/`openmes_relogin_failed`→HTTP 401 `mes_auth_expired`，timeout/network→502 `mes_unreachable`；4 个 `/api/mes/*` 路由全部挂映射 |
+| `backend/app/services/identity.py` | 无浏览器会话时的服务端身份回退同样挂自动刷新（浏览器会话路径不变，仍用请求令牌原样解析） |
+| `.env.example` | 新增 `OPENMES_SESSION_AUTO_REFRESH`（默认 true）与 `OPENMES_SESSION_TTL_SECONDS`（默认 840）说明 |
+
+#### 三、真实验证记录（全部只读）
+
+| 步骤 | 结果 |
+|------|------|
+| 阶段1 刷新令牌（get_openmes_token.py） | 登录成功（令牌 id=34）；工单端点 12 条；X-Api-Key 验证 completions=2、quality issues=3 |
+| 重启后端后 `/api/mes/work-orders` | HTTP 200，**12 条工单**（含 WO-2026-001→SAL-ORD-2026-00001、TEST_WO_PAGE_00023→00023、WO-SO-2026-00024/25/26 全部关联正确） |
+| `/api/integrations/openmes/work-orders` | HTTP 200 |
+| `GET /api/real-orders/mes/track/2` | 200：WO-2026-001 真实数据（0%、ETA DATA_MISSING 如实） |
+| `GET /api/real-orders/mes/track/9` | 200：`eta_status=RATE_BASED`（真实速率线不受影响） |
+| `GET /api/real-orders/quality/todo` | HTTP 200（恢复） |
+| **阶段3 自愈验证** | 将 `.env` 令牌替换为失效占位值 → 重启后端 → 首次请求 401 → **自动重登（令牌表新增 id=36，时间与首次请求一致）** → `/api/mes/work-orders` 返回 200+12 条；第二次请求命中内存缓存 |
+| 身份回退 | `GET /api/real-orders/identity/me` 200：Administrator（经 build 路径） |
+| 日志泄漏检查 | uvicorn-9000*.log 中 0 处令牌/占位值出现 |
+
+#### 四、测试
+
+- 新增 `backend/tests/test_openmes_session_refresh.py` **23 例**：会话缓存/TTL/并发去重/登录失败包装/凭据缺失、传输层 401 单次重试与二次 401 传播、X-Api-Key 与网络错误不重试、请求头三级回退、适配器 5 处错误传播、空数据仍为空列表、`_mes_status_error` 映射、端到端 401→`mes_auth_expired`。
+- 全量：**177 passed**（基线 154 + 新增 23）；`compileall` 通过。
+
+#### 五、边界与下一步
+
+- `.env` 的 `OPENMES_TOKEN` 现在定位为**引导令牌**（自动刷新关闭时或冷启动首请求前使用）；正常运行期由内存会话自愈，无需重启。
+- 写操作（报工/登记/处置/下达）同样经重试传输层：401 时首次尝试未达服务端，重登后重试一次安全；写入本身仍全部走审批门禁。
+- 下一步按用户确认顺序开始 P0 会话与槽位检查开发（数量改→只读重报价+下游重确认标记；选第二方案→展示序号+option_id 快照；上下文沿用回显；90 天可配置保留）。
+
+### 3.48 P0 任务型协同问答：会话/业务任务上下文 + 槽位追问 + 确定性指令（2026-10-01）
+
+**依据**：用户 2026-10-01 确认的五条业务规则（自动重登/数量改只读重报价/选第 N 方案/上下文沿用回显/保留策略）。本节实现其中的会话与槽位层（自动重登见 §3.47）。
+
+#### 一、数据模型与迁移
+
+- 新表 `assistant_sessions`（会话锚点）/ `assistant_messages`（原始消息，带 `expires_at`）/ `business_tasks`（业务任务：entity_context/active_plan 快照/stale_downstream/summary，**永久保留**）。
+- `real_agent_runs` 新增 `session_id`/`business_task_id`/`expires_at` 三列：审批/方案/写入/回读/幂等记录 `expires_at=NULL` 永久；协调者原始问答（含中间工具参数）按 `ASSISTANT_RETENTION_DAYS`（默认 90，0=永久）过期。
+- 迁移 `b5d9e6a41c77` 已对运行库 PostgreSQL（autoparts-db）执行并验证三表存在；SQLite 回退库同构。
+- 惰性清理：每次问答前 `purge_expired_assistant_data()` 删除过期消息与协调者运行记录；业务任务/审批/写入证据不在清理范围。凭据/令牌从不进入任何持久化内容（消息/任务/运行记录均无凭据字段）。
+
+#### 二、确定性上下文层（`app/services/assistant_context.py`，不依赖 LLM）
+
+- 编号提取（全部来自项目已验证的真实编号格式）：SAL-ORD / PUR-ORD / WO-* / QUO-* / PROC-* / 物料编码；同字段多编号即视为歧义，不猜。
+- "数量改成 N"（数量改成/改为/变更为/调整为/换成 + N 或 N 件）与"第 N 个方案"（中文/数字序号）的确定性解析。
+- 意图分类（报价/采购/跟单/质量）+ 必填槽位（AI_HANDOFF_PLAN P0-2）：缺什么、为什么需要、补充后调用哪个智能体。
+- `merge_context`：新值覆盖旧值（CONTEXT_FIELDS 白名单）；`format_context_echo`："当前沿用人=…；如果需要修改请直接说明。"
+- `validate_ordinal_selection`：按 `supplier_options` 展示顺序（1 开始）映射稳定 option_id；方案不存在→"请先问一次缺料方案"；方案过期（get_procurement_plan 为 None）→"已不存在"；选项顺序/内容与快照不一致→要求重新选择。
+
+#### 三、会话服务（`app/services/assistant_session.py`）
+
+- `handle_ask(question, coordinator_factory, session_id, page_context, on_step)`：会话/任务建立与沿用 → 信号提取与上下文合并（页面流程上下文键映射为可沿用字段）→ 确定性指令 → 槽位追问 → 协调者兜底（惰性构造，用后关闭）。
+- **数量变更处理器**：沿用客户/物料/交期（缺失时从任务携带的已保存报价记录确定性解析——真实存储数据）→ 调 `analyze_quotation`（只读，仅生成本地报价记录）→ 新报价进入上下文 → 旧报价/采购方案/ERP 草稿/MES 工单全部标记 `stale_downstream`，任务状态 `RECONFIRMATION_REQUIRED` → 回答明确"没写入 ERP、没自动审批"。
+- **方案选择处理器**：展示序号→option_id+快照存入 `active_plan` 与 `pending_selection`，回答明确"选择确认≠执行，写入仍走审批门禁"。
+- **追问**：意图明确且信息不足时直接返回 `needs_input=true` + `missing_slots`（不调用大模型，DeepSeek 未配置也可用）。
+- 协调者分支：沿用上下文以 `沿用_*`/`页面_*` 注入 context；从调用链**入参**确定性回写实体上下文（白名单字段）；proposal 含 plan_id 时快照入 `active_plan`。
+
+#### 四、API 与前端
+
+- `POST /api/real-orders/assistant/ask` 与 `/ask/stream` 接受 `session_id`，响应新增 `session_id/business_task_id/applied_context/context_updates/needs_input/missing_slots/stale_downstream/pending_selection/handled_by`。流式端点在 DeepSeek 未配置时改为 error 事件（kind=llm_not_configured）而非 503——确定性路径不依赖 LLM；同步端点保留 503 契约。
+- `AssistantPanel`：session_id 存 sessionStorage（跨页签保持）+「新会话」按钮；渲染上下文回显条、追问块（缺什么/为什么/补充后调用谁）、下游需重新确认红色块、选择确认蓝色块。
+- `RealBusinessPage` 默认页签改为**协同问答**（P0-4：协同问答作为真实业务页面主要入口）。
+- `.env.example` 新增 `ASSISTANT_RETENTION_DAYS=90` 说明。
+
+#### 五、测试与真实验证
+
+- 新增 `backend/tests/test_assistant_session.py` **21 例**：信号提取（数量改/序号/编号歧义过滤）、回显、覆盖合并、方案校验（顺序变化/过期/越界）、数量变更（沿用上下文+下游标记+绝不调用审批/写入函数+DATA_MISSING 如实+从携带报价解析）、追问不调 LLM、调用链入参回写、保留期（过期清理且审计永久、0=永久可配置）、端到端会话沿用（同 task 同 session、无凭据入持久化）。`test_assistant_stream.py` 更新假协调者 run_meta 签名与 llm_not_configured 事件契约。
+- 后端全量 **198 passed**；前端 vitest **14 passed** + `npm run build`（tsc 严格检查）通过。
+- **真实多轮问答验证**（真实 DeepSeek + 真实 ERPNext/OpenMES，页面流程上下文为空、零业务写入）：
+  1. 问 1 "SAL-ORD-2026-00023 缺料了怎么办？给我几套方案"（27.9s，协调者 12 步链）：创建 `ASST-22E7C428EAF9` / `TASK-C391350B470F`，回显"当前沿用订单=SAL-ORD-2026-00023"，方案 `PROC-58B02304A321`（3 选项）快照入任务。
+  2. 问 2 "数量改成 3000"（**0.43s，无 LLM**）：从沿用报价 `QUO-93AAB835646A` 解析客户=上汽集团/物料=BD-2401/交期=2026-10-31 → 只读重报价 `QUO-9B0CC78C6864`（85 CNY × 3000 = 255000，DRAFT 未审批）→ 旧报价/采购方案/MES 工单 9 三项标记需重新确认。首次实测在无携带报价解析路径时正确追问（不猜测），补解析路径后复测通过。
+  3. 问 3 "选第二个方案"（**0.04s，无 LLM**）：映射 OPT-2（宁波紧固件有限公司，2400 CNY，7 天），快照保存，回答明确执行需走审批门禁。
+  4. 持久化核验（autoparts-db）：该会话 8 条消息全部带 `expires_at`；business_tasks 1 条；ERPNext/OpenMES 零写入（仅本地报价记录，与 8 步流程留痕口径一致）。
+
+#### 六、遗留与下一步
+
+- 页面级多轮演示冒烟（含默认页签、回显/追问/过期标记渲染）留待下次登录演示时复核（API 级已覆盖同一契约）。
+- P1 待启动：事件触发协作（质量异常/缺料/延期自动协同）、能力目录从 AIP/ACS 注册构建深化。
+
+### 3.49 P0 页面级走查：新 UI 全部验证 + 确定性回答契约 bug 修复（2026-10-01）
+
+**范围**：销账 §3.48 遗留①（页面级多轮演示冒烟）。浏览器自动化实测（Chrome 1440×900，真实 DeepSeek，未登录审批会话——走查项均不依赖登录），截图存 `gui-test-screenshots/2026-10-01_p0_*.png`。
+
+#### 一、走查结果（全部通过）
+
+| 检查项 | 结果 |
+|---|---|
+| 默认页签 = 协同问答（P0-4 主要入口） | ✅ 打开页面即选中 |
+| 会话提示行 + 「新会话」按钮 | ✅ 显示 `当前会话 ASST-…`；点击后 sessionStorage 清空、新一轮换新会话号（实测 ASST-E1B4A98868B5） |
+| 会话跨页面刷新保持 | ✅ reload 后 sessionStorage 恢复同一 session_id |
+| Q1 回显条 + 方案卡片 + 调用链 | ✅ "当前沿用订单=…"回显条；3 张方案卡片（推荐徽标/成本影响红绿色/交期）+ 交期影响条；16 步调用链逐条可读（含一次对不存在 OPT-4 的诚实失败 ✗） |
+| Q2 数量改成 3000 | ✅ 秒级返回；红色"以下已有结果需要重新确认"块三项（报价/采购方案/MES 工单）；"确定性处理（未调用大模型）"标识 |
+| Q3 选第二个方案 | ✅ OPT-2 宁波紧固件 + 快照，明确"选择确认≠执行" |
+| 新会话后追问 | ✅ 黄色"需要补充信息（不猜测）"块：customer_id + 为什么 + 补充后调用报价智能体；回显"当前沿用料=BD-2401、数量=500" |
+| 页签切换 | ✅ 订单流程 stepper 8 步正常渲染 |
+
+#### 二、走查发现并修复一个真实 bug（确定性回答契约缺口）
+
+- **现象**：页面提交"数量改成 3000"后，AssistantPanel 崩溃——ErrorBoundary 按设计降级为"智能协同问答 · 模块暂时不可用（Cannot read properties of undefined (reading 'map')）"，其他页签不受影响（降级机制本身验证有效）。
+- **根因**：确定性处理器（数量变更/方案选择/追问）的返回体没有 `call_chain` 字段，前端 `assistantAnswer.call_chain.map()` 直接崩溃。API 级测试用 `.get()` 宽松读取未暴露；前端 tsc 也不能捕获运行时 undefined。
+- **修复（双层）**：
+  1. 后端 `assistant_session._finish`：契约保证 `call_chain=[]`、`rounds=0`、`tool_count=0`、`coordination_run_id=""` 恒存在；
+  2. 前端 `AssistantPanel`：`(call_chain ?? []).map` 防御性守卫 + 调用链头部显示"确定性处理（未调用大模型 / 信息不足）"标识与空记录占位"—"。
+- **回归测试**：新增 `frontend/src/components/__tests__/AssistantPanel.session.test.tsx` **3 例**（确定性回答不崩溃+标识、追问块渲染、回显/选择确认渲染；mock 流式端点按真实传输失败语义 reject 验证回退路径）。
+- 验证：后端 **198 passed**、前端 vitest **17 passed** + `npm run build` 通过；页面复测三问全部正常。
+
+#### 三、本轮真实数据说明
+
+- 页面走查产生的真实问答链（Q1 协调者 16 步）与两轮确定性重报价（QUO-FD9684D4410C、QUO-25B8E04930D0 等）均为**本地报价记录**（与 8 步流程留痕口径一致），ERPNext/OpenMES 零写入、零审批。
+- 已知小冗余（非缺陷）：确定性数量变更回答中，红色结构化标记块与正文文字列举同样的下游清单——红块为结构化视图、正文为完整话术，暂保留双通道展示。
+
+### 3.50 P1 第一片：质量异常事件 → 跨智能体只读协同（2026-10-01，用户指令"开工"）
+
+**范围**：AI_HANDOFF_PLAN 第 6 节事件协作的最小闭环——质量问题经人工审批真实登记后，自动触发"质量影响 → 生产交期 → 供应商风险"只读协同，事件全程编号、去重、可重试、可人工接管。不含缺料/延期事件（后续扩展点）。
+
+#### 一、交付物
+
+| 件 | 说明 |
+|---|---|
+| `collaboration_events` 表 + 迁移 `c7e2f9a84d15` | 事件编号 `EVT-…`、`dedup_key` 唯一约束（`quality_issue_raised:{wo}:{issue}`）、status（PENDING/PROCESSING/COMPLETED/FAILED/MANUAL_HANDLED）、payload/result/error JSON、failure_count/max_retries（默认 3）、taken_over_by/at；已对 PostgreSQL 业务库执行 |
+| `app/services/collaboration.py` | `trigger_quality_issue_event`（幂等触发：同键未接管事件直接返回）→ `process_event`（只读三维度协同：`assess_quality_impact` → `track_order` → 采购维度经 `get_work_order_raw.customer_order_no` → `find_quotation_by_erp_order` → `analyze_procurement`；任一环缺失/失败记入 data_gaps，不猜测）；`retry_event`（FAILED 且未达上限）；`takeover_event`（人工接管 + 操作者/备注留痕）；确定性结论汇总（只复述真实数据） |
+| 钩子（`real_order.execute_issue_registration`） | ③ 登记写回验证成功后触发事件；事件失败不影响登记结果（留 FAILED 供重试） |
+| API（main.py） | `GET /real-orders/collaboration/events`（列表，含 result）、`GET …/{event_id}`、`POST …/{event_id}/retry`、`POST …/{event_id}/takeover`；retry/takeover 走真实身份 |
+| 前端 `CollaborationEventsPanel` | 质量中心页签新增面板：事件卡片（编号/状态徽标/工单·问题·标题/时间）、展开三维度结论条+明细+数据缺口（如实标注）；FAILED 显示失败原因与"重试协同"（达上限拒绝）；"人工接管"记录操作者。样式与页签视觉一致 |
+
+**铁律核对**：协同全程只读（零 ERPNext/OpenMES 写入）；事件不代表已执行写入；处置仍走既有 NCR 审批门禁；结论末条固定声明"处置与写入仍需人工走审批门禁"。
+
+#### 二、真实验证（真实 OpenMES/ERPNext，全部 TEST_ 标记）
+
+1. 三步登记：审批 `QISS-2C4D1245F52E` → 批准 → **OpenMES issue id=4**（工单 11，回读验证通过）→ **事件 `EVT-BC106E127BA2` 自动产生，COMPLETED**。
+2. 事件结论全部真实可溯：质量维度（未关闭问题、门禁未通过）；生产维度（完成率 100%（400/400）、ETA 口径 COMPLETED——工单 11 是 §3.44 全额报工的真实工单）；采购维度（真实反查 `QUO-E15130196052` → 采购分析 `PROC-5992CBCCE31E` → 库存充足无缺料）；数据缺口如实 3 条（检验 0 条/SN 无 API/不自动 NCR 写回）。
+3. 幂等去重：同一审批重放 execute → idempotent=true 零新写入、**零新事件**（dedup_key 计数 1）。
+4. 人工接管：`EVT-BC106E127BA2` → MANUAL_HANDLED，taken_over_by=Administrator。
+5. 第二条登记（issue id=5）→ `EVT-04B253B5193D` COMPLETED——列表同时呈现"已完成/已人工接管"两种状态（截图 `gui-test-screenshots/2026-10-01_p1_collab_events_panel.png`）。
+
+#### 三、验证中发现并修复两个集成 bug
+
+1. **接管端点 500**：`require_real_identity` 返回 `RealIdentity` 对象，端点误用 `.get("actor_id")` → 改 `getattr(identity, "actor_id", "")`（retry 同修）。
+2. **列表展开为空**：列表摘要未携带 `result`，前端"查看协同结论"按钮状态翻转但无内容 → `_event_summary` 恒含 `result`（单条体量小，免二次请求）。浏览器走查截图证实修复。
+
+#### 四、测试
+
+- 后端新增 `tests/test_collaboration_events.py` **7 例**（编号/去重/真实形状结论/采购缺口如实/失败+重试+上限/接管停协同/路由注册）；全量 **205 passed**。
+- 前端新增 `CollaborationEventsPanel.test.tsx` **4 例**（列表渲染+空提示/展开三维结论/失败重试链路/接管链路）；全量 vitest **21 passed** + `npm run build` 通过。
+
+#### 五、遗留与下一步（P1 后续）
+
+- 事件类型扩展：关键物料短缺（缺料分析发现 CRITICAL 短料触发）、生产延期（进度低于计划触发）——服务结构已预留 event_type 维度；
+- 事件协同目前同步执行（无 LLM，秒级）；后续可按事件量改异步队列；
+- 处置联动：面板"人工接管"后引导跳转 NCR 面板（复用质量待办的 goToQualityDispose 模式）。
+
+### 3.51 P1 第二片：关键物料短缺事件 + 生产延期事件（2026-10-01，用户指令"先改文档，然后继续"）
+
+**文档先行**：本轮先把 `docs/AI_HANDOFF_PLAN.md` 的 P0 完成/P1 第一片状态勾稽、`docs/next_development_plan.md` 加 2026-10-01 勾稽提示并提交（`6085832`），再继续开发。
+
+#### 一、新增两个事件类型（事件表/端点/面板复用 §3.50 基础设施）
+
+1. **`material_shortage`（关键物料短缺）**：`analyze_procurement` 发现真实缺料（`has_shortage=true`）后触发——事实触发，无业务阈值。去重键 = `报价号 + 缺料内容签名`（排序物料+缺料量的 md5）：同画面不重复协同，数量/物料变化才产生新事件。协同：采购维度（方案与选项，分析已产出）→ 成本维度（报价智能体 `assess_cost_impact` 推荐方案）→ 交期维度（跟单智能体 `assess_delivery_impact`，经报价 → ERP 订单 → customer_order_no 正式关联反查工单，到货日 = 今天 + 推荐方案 lead_time_days）；任一环缺失如实记 data_gaps（无推荐/无 ERP 草稿/无关联/价格缺失）。
+2. **`production_overdue`（生产延期预警）**：`track_order` 成功路径后做**事实型**检查——工单已过交期且未完成（状态非终态且完成率 <100%）才触发；**"提前 N 天预警"类阈值属业务规则，未获用户确认前不做**（如获确认可在此基础上加配置）。去重：每工单每天一条。协同：事实汇总（过期天数/完成率/ETA 口径）+ 如实边界（"是否通知客户、如何追赶需人工决策，系统不代承诺客户"）。
+3. 前端：事件卡片新增类型徽标（质量异常/物料短缺/生产延期），api.ts 增 `collaborationEventTypeLabels`。
+
+#### 二、真实验证（真实 ERPNext/OpenMES）
+
+| 验证 | 结果 |
+|---|---|
+| 真实缺料分析触发 | `POST /real-orders/procurement/analyze`（QUO-93AAB835646A，3000 件，0.7s）→ **`EVT-C62C5AE50AA9` 自动产生，COMPLETED**：缺料 3 项/3 供应商选项/推荐 OPT-1（方案 PROC-806DCF2D5774）；成本维度 +1180 CNY（毛利 132100→130920，真实价格记录口径）；交期维度物料 2026-10-16 到位 vs 交期 2026-10-31 不延期（真实关联工单 TEST_WO_PAGE_00023）；数据缺口 0 |
+| 去重 | 同报价重复 analyze → `material_shortage:QUO-93AAB835646A:*` 事件数仍为 1 |
+| 延期无假阳性 | track 未过期工单 2/9/11 各一次 → `production_overdue` 事件数 0（过期路径由单元测试覆盖） |
+
+#### 三、测试
+
+- 后端新增 **6 例**（缺料：成本+交期全链/同签名去重+变签名新事件/无推荐与无关联缺口如实/无缺料跳过；延期：过期触发+事实结论+同日去重/未到期·已完成·完成率100%·无交期四种不触发），全量 **211 passed**。
+  - 测试设计说明：unittest 按方法名字母序执行，缺料去重键含报价号，各测试必须用独立报价号（曾因此互相去重，已修正并注释）。
+- 前端 vitest **21 passed**（api mock 补事件类型标签）+ `npm run build` 通过。
+
+#### 四、P1 状态与剩余
+
+- 已完成：质量异常（§3.50）、关键物料短缺、生产延期（本节）三类事件——AI_HANDOFF_PLAN 第 6 节的四个场景中三个已落地（质量门禁未通过→禁止发运已有既有门禁+待办承接）。
+- 剩余：事件"去处置/去处理"与对应业务面板的跳转联动（复用 goToQualityDispose 模式）；事件量大后同步改异步；提前预警阈值等业务规则确认。
+
+> **历史截至说明**：以上是 §3.51 当时的剩余项；§3.52 已完成事件去处置/去处理导航和三项接手缺口收口。事件量增大后的异步队列、提前预警阈值仍属于后续边界。
+
+### 3.52 协同事件去处置联动 + 接手缺口收口 + SQLite 回退一致性（2026-10-02，依据 docs/handoff_2026-10-01_event_disposal_and_stabilization.md）
+
+**范围**：交接文档定义的任务 A/B/C/D 与 §二点五 三个已知缺口；不新增业务规则、不新增预警阈值、不改真实 ERP/MES 写入流程。
+
+#### 一、三个已知缺口的修复（均有回归测试锁定）
+
+1. **人工接管后事件重触发撞 dedup 唯一约束**（缺口③）：三处触发函数（质量/缺料/延期）重构为公共幂等入口 `_trigger_with_dedup`——同键存在未接管事件返回既有；已有事件全部人工接管后同一业务事实再次发生 → 产生**新事件**（dedup_key 加 `#N` 后缀，不改唯一约束、避免 SQLite/PG 跨库重建表迁移）；并发竞态撞约束时回读未接管事件返回，IntegrityError 不泄漏给登记/采购分析/跟单等原始业务操作。回归：接管 → 再次触发 → 新事件 COMPLETED、后缀 #2、原事件保留 MANUAL_HANDLED。
+2. **数量变更后仍可选旧方案**（缺口①）：选择分支前置检查——`active_plan.plan_id` 出现在 `stale_downstream`（type=procurement_plan）时拒绝并引导"重新发起缺料方案提问"；同时补强 stale 标记本身：数量变更时无论调用链是否带过 plan 参数，**任务的 active_plan 必然基于旧数量**，一律标记为需重新确认。连续回归：缺料方案 → "数量改成 3000" → "选第二个方案" → 拒绝（needs_input，不产生 pending_selection）。
+3. **方案快照完整性**（缺口②）：序号校验在 option_id/供应商/总价之外，增加 **lead_time_days / lead_time_source / coverage / currency** 比较（字段均来自现有 proposal supplier_options 契约，未发明字段）；交期或覆盖变化要求重新选择。
+
+#### 二、任务 A：事件面板"去处置/去处理"导航（只读，不执行审批）
+
+- `CollaborationEventsPanel` 新增 `onGoTarget` prop 与按类型按钮（质量→"去处置"、缺料→"去处理方案"、延期→"查看跟单"）；**面板内先做编号检查**：缺工单/问题/报价/方案编号时显示"事件 EVT-… 缺少关联的…，无法跳转"且不调导航回调；空状态文案覆盖三类事件；缺料事件元信息按类型显示"报价 X · 方案 Y"（修正原先误显示"工单 id ？"）。
+- `RealBusinessPage` 新增 `goToEventTarget`：
+  - 质量事件 → 复用既有 `goToQualityDispose`（先切"订单流程"页签，加载工单三面板并聚焦该问题 NCR 卡片）；
+  - 缺料事件 → 只读加载已持久化报价（`GET /real-orders/quotations/{id}`）与方案（`/procurement/plans` 过滤 plan_id），落到第 5 步方案审批视图；方案不存在时明确报错；
+  - 延期事件 → 反查报价审批状态（不猜）→ track/quality/ship-gate 三面板加载到第 8 步跟单视图。
+- 人工接管语义不变：接管≠已处置，导航不等于审批（页面与测试均锁定该措辞）。
+
+#### 三、任务 C：SQLite 回退一致性（决策：继续支持 SQLite 回退）
+
+- 根因：`backend/data/demo.db` 停在 `b5d9e6a41c77`，缺 `collaboration_events` 表。
+- 处置：对 demo.db 执行 `alembic upgrade head` → 版本 `c7e2f9a84d15`，表与 13 列齐全；以 `DATABASE_URL=sqlite:///./data/demo.db` 启动临时 9001 实例冒烟：`/api/health` ok、`/api/real-orders/collaboration/events` 200（空列表为真实状态）。事件读写路径由测试套件持续覆盖（conftest 即 SQLite 临时库）。
+- 边界说明（写入文档）：`init_database` 的 create_all 只负责新装零依赖场景的初始 schema；**已有库的升级路径是 alembic**，create_all 不会修改已存在表，不掩盖迁移缺失。
+
+#### 四、任务 D：测试与构建收口（实际结果）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `..\.conda-env\python.exe -m pytest tests -q` | **214 passed**（基线 211 + 缺口回归 3） |
+| 后端编译 | `compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **26 passed**（21 + 导航回归 5） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | 通过（本轮未复现 EPERM） |
+
+#### 五、页面级走查（真实系统，只读）
+
+- 事件面板三类徽标与按钮齐全；**"去处置"点击 → 订单流程页签第 8 步 + 工单 11（WO-SO-2026-00025，DONE、3 条质量记录）真实加载 + toast 确认**（截图 `gui-test-screenshots/2026-10-02_event_go_dispose_jump.png`；走查中发现并修复质量分支漏切页签的问题）；
+- **"去处理方案"点击 → 第 5 步方案审批视图，方案 PROC-806DCF2D5774 真实数据（缺料 3 项价格记录号、三家供应商方案）+ toast 确认**（截图 `2026-10-02_event_go_procurement_jump.png`）；
+- 延期事件的"查看跟单"跳转由面板测试覆盖；当前真实工单无过期数据、无延期事件可点——如实记录，不造数据。
+
+#### 六、ERPNext/OpenMES 写入
+
+零写入。本轮全部为本地业务库（事件状态）与只读导航改动；登记/审批/写回流程未触碰。
+
+#### 七、遗留（如实记录）
+
+- 延期事件"查看跟单"的页面级点击验证待真实出现过期工单后补做（按钮与回调路径已由单测锁定）；
+- `npm run build` 的 EPERM 历史问题本轮未复现，继续观察；
+- 交接文档提及的仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）未纳入本轮范围，维持原状未动。
+
+#### 八、2026-10-02 文档整理复核
+
+本次复核只读检查了 §3.52 的代码、提交和文档，并重新运行了本地隔离验证：
+
+| 项 | 命令 | 本次复核结果 |
+|---|---|---|
+| 后端测试 | `..\\.conda-env\\python.exe -m pytest tests -q` | **214 passed，1 warning** |
+| 后端编译 | `..\\.conda-env\\python.exe -m compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **26 passed**（测试中会输出预期的 ErrorBoundary 模拟错误日志） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | **EPERM**：无法写入 `frontend/tsconfig.tsbuildinfo` |
+
+说明：§3.52 执行记录中的 `npm run build` 通过属于上一轮运行结果；本次复核再次遇到 Windows 文件锁，因此当前不能把 build 写成无条件通过。事件去处置、缺口回归和 SQLite 迁移仍以 §3.52 的提交与页面截图为历史执行证据；延期事件页面点击仍待真实出现过期工单后补做。
+
+### 3.53 接手复核：EPERM 收口 + 真实环境只读冒烟（2026-10-02 下午）
+
+按 AI_HANDOFF_PLAN §6.1 建议顺序执行。零写入（ERPNext/OpenMES 均只读），无代码改动；环境操作为启动 Docker Desktop 与三组容器（autoparts-db / openmes / erpnext）。
+
+#### 一、`npm run build` EPERM 诊断与实际结果
+
+- 进程排查：项目自身无残留 node/tsc/esbuild 进程（仅 ZCode 自带浏览器自动化运行时，与本项目无关，未触碰）；`tsconfig.tsbuildinfo` 文件属性正常（非只读）。
+- 本轮 `npm run build` **一次通过**（tsc -b + vite build，41 modules）。结论：EPERM 为间歇性 Windows 文件锁（此前复核轮曾复现），不是稳定存在的占用；不通过关闭无关服务或删除文件"修绿"。观察口径保持：每次复核如实记录当轮结果。
+
+#### 二、测试基线（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `../.conda-env/python.exe -m pytest tests -q` | **214 passed, 1 warning** |
+| 后端编译 | `compileall -q app` | 通过（§3.52 记录口径沿用，本轮未重复跑） |
+| 前端测试 | `npm run test -- --run` | **26 passed**（6 files） |
+| 前端类型 | `npx tsc --noEmit --incremental false --project tsconfig.json` | 通过 |
+| 前端构建 | `npm run build` | **通过**（本轮 EPERM 未复现） |
+
+#### 三、真实环境只读冒烟（本轮全部实时实测，数量为运行时数据，不写死）
+
+环境：Docker Desktop 冷启动 → `docker start autoparts-db` + openmes compose + erpnext compose（按 scripts/deploy_services.ps1 拓扑）→ 后端 `APP_ADAPTER_MODE=real` 起 9000。
+
+| 检查 | 端点/命令 | 结果 |
+|---|---|---|
+| 后端健康 | `GET /api/health` | `{"status":"ok","mode":"local-runtime","database":"connected"}` |
+| ERPNext | `GET http://localhost:8080/api/method/ping` | 200 `pong` |
+| ERPNext 身份 | `GET /api/real-orders/identity/me` | `authenticated=true`，authority=ERPNext |
+| OpenMES 登录（适配器链路） | `GET /api/mes/work-orders?limit=20` | 200 真实工单 **本轮 12 条**（含 4/2/3/8-12 与 1 条历史 DEMO_WO_001；历史轮次出现过 4/空/12，属运行时数据） |
+| ERP 只读 | `GET /api/real-orders/erp/items/search?limit=5` | 200 真实物料（BD-2401/BD-2402 等，authority=ERPNext） |
+| 事件列表 | `GET /api/real-orders/collaboration/events` | 200 **本轮 3 条**：缺料 1（COMPLETED）、质量 2（1 COMPLETED、1 MANUAL_HANDLED by Administrator） |
+| 后端错误日志 | `uvicorn-9000.err.log` | 无 error/traceback |
+
+#### 四、真实延期事件页面验证——本轮结论
+
+- 延期触发口径核对（`app/services/collaboration.py` `trigger_overdue_event_if_needed`）：`track.due_date` 已过且状态未完成、完成率 <100% 才触发；与冒烟检查口径一致。
+- 本轮 12 条工单中**无任何"已过交期且未完成"的真实工单**（最早交期 2026-10-15，无 `production_overdue` 事件），页面级"查看跟单"点击复核**继续保留待真实数据状态**，不造延期数据。组件/回调回归已由 `CollaborationEventsPanel` 测试锁定。
+
+#### 五、清理与遗留
+
+- 清理上次会话遗留临时文件：`backend/ask_a6.json`、`backend/ask_q6.json`、`backend/dis_req_tmp.json`、`frontend/ana1.json`（均为 curl 调试残留）；`.gitignore` 增加 `backend/uvicorn-9000*.log`。
+- 遗留不变：延期页面点击待真实过期工单；提前预警阈值待用户确认业务规则（见 AI_HANDOFF_PLAN §6.1 第 3 条）；能力目录运行时构建与 P2 生产化项后置。
+- 仓库根目录旧 `test_erp_mes_integration.py`（依赖 8001 旧服务）维持原状。
+
+### 3.54 生产临期风险事件（规则 at_risk_v1，经用户确认后实现，2026-10-02 下午）
+
+**业务规则来源**：提前预警阈值此前一直未实现（AI_HANDOFF_PLAN §6.1 第 3 条要求先确认）。2026-10-02 下午用户在对话中明确选择：**交期前 3 天 + 完成率 <50%**、**进事件面板（新事件类型）**、**跟单读取时被动检查**。规则版本号 `at_risk_v1` 写入代码常量与事件 payload，改动须先经用户重新确认。
+
+#### 一、实现内容（最小改动，全部复用既有事件基础设施）
+
+- `backend/app/services/collaboration.py`：
+  - 新事件类型 `production_at_risk`（标签"生产临期风险协同"）+ 规则常量（`AT_RISK_RULE_VERSION`/`AT_RISK_DAYS_BEFORE_DUE=3`/`AT_RISK_COMPLETION_THRESHOLD=50.0`）；
+  - `trigger_at_risk_event_if_needed(track)`：未完成、完成率 <50%、`today <= due_date <= today+3` 才触发；**与延期事件互斥**（`due < today` 由 `production_overdue` 负责）；dedup 键 `production_at_risk:{wo}:{日期}` 每工单每天一条，复用 `_trigger_with_dedup` 幂等入口（含接管后 `#N` 后缀语义）；
+  - `_process_at_risk`：只读结论（剩余天数/完成率/规则版本 + ETA 缺口如实 + 人工决策边界），authority="OpenMES（只读协同，未写入）"；
+  - `process_event` 分发分支补 `EVENT_TYPE_AT_RISK`。
+- `backend/app/services/real_order.py`：track_order 钩子在延期检查后追加临期检查（同一 try，失败不影响跟单查询）。
+- 前端：`api.ts` 标签"生产临期"；`CollaborationEventsPanel.tsx` 增加"查看跟单"按钮与缺工单编号拦截（与延期共用 case）；`RealBusinessPage.tsx` 导航分支扩展到 `production_at_risk`（复用延期事件的跟单三面板加载路径）。
+
+#### 二、测试（先补用例再实现，全部通过）
+
+- 后端 `tests/test_collaboration_events.py` 新增 `AtRiskEventTests` **4 例**：触发含规则版本与事实结论 + 同日去重；交期当天边界（days_left=0）触发；窗口外/完成率 50%/已完成/无交期四类不触发；同一条逾期数据上延期触发且临期不触发（互斥）。用例间用独立工单号避免 dedup 互扰（沿用 §3.51 教训）。
+- 前端 `CollaborationEventsPanel.test.tsx` 新增 **2 例**：临期徽标 + "查看跟单"点击回调携带工单编号；缺工单编号时可见报错且不调导航回调。
+
+#### 三、全量验证（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `pytest tests -q` | **218 passed**（214 + 4） |
+| 后端编译 | `compileall -q app` | 通过 |
+| 前端测试 | `npm run test -- --run` | **28 passed**（26 + 2） |
+| 前端类型 | `npx tsc --noEmit --incremental false` | 通过 |
+| 前端构建 | `npm run build` | 通过 |
+
+#### 四、真实系统回归（只读，零 ERP/MES 写入；事件表零新写入）
+
+- 重启 9000 后端加载新代码后：`GET /api/health` ok；`GET /real-orders/mes/track/11` 200（工单 11 已完成，钩子不破坏跟单查询）；事件列表仍 3 条（正确阴性：无临期候选不产生事件）；uvicorn 错误日志 0 行。
+- 当前真实工单交期最早 2026-10-15（距今日 >3 天，窗口外），故临期事件**无真实触发对象**——与延期事件页面点击一样，真实触发对象出现后可在事件面板复核"生产临期"徽标与"查看跟单"跳转；逻辑已由 6 个新测试用例锁定，不造临期数据。
+
+#### 五、文档同步与边界
+
+- AI_HANDOFF_PLAN §6 事件协作清单补第 4 类事件；§6.1 第 3 条完成；demo_script.md 故事线 D3 补临期事件说明。
+- 边界：被动检查（无人查看跟单不预警）是用户选择，如需全覆盖需新增定时扫描基础设施（未做）；阈值 3 天/50% 是用户确认值，非系统默认值。
+
+### 3.55 统一能力目录运行时构建（P0-5 收口，2026-10-02 下午）
+
+依据 `docs/handoff_2026-10-02_dynamic_capability_catalog.md`（第 1 步只读盘点 → 先补测试 → 最小改动实施）。零 ERP/MES 写入；Wutong Registry 不参与目录构建（维持可选外部只读发现，未配置时端点照旧 503 明确报错）。
+
+#### 一、第 1 步盘点结论（实际代码关系，非假定）
+
+| 来源 | 实际字段 | 用途 |
+|---|---|---|
+| AIP 服务注册（`AipAgentService.register_skill`，运行时可经 `list_skills()`/`/aip/overview` 观察） | `skill_id`、`skill_name`、handler；无 description/parameters/version/权限字段 | 可执行性事实来源 |
+| `REAL_SKILL_TOOLS`（coordinator.py，17 条） | `skill_id`、`agent_type`、`aip_agent`、`description`、`parameters`（object JSON Schema）；本轮补显式 `read_only: True`/`requires_approval: False` | LLM 选择所需元数据（本地受信任声明） |
+| ACS 文件（`backend/acs/*.json`，generate_acs.py 生成的产物，交接文档表格中的 `app/aip/acs/` 为空残留目录） | id/name/description/version(1.0.0)/tags/modes；运行时无代码读取 | 外部发现发布物 |
+| Wutong Registry（可选，未配置） | 现有端点 503 `registry_not_configured`，不冒充外部注册 | 长期遗留（勿擅自推进） |
+
+未知项处理（不发明字段）：输出 schema 无任何来源 → 条目 `output_schema=null`；version 无注册来源 → 声明级常量 `1.0.0`（与 ACS 现值一致）；`authority`/`data_source` 是技能结果级字段 → 目录不声明。
+
+#### 二、实现（回退策略从既有部署契约推导，逐技能拒绝、不吞空成功）
+
+- 新增 `backend/app/services/capability_catalog.py`：`build_capability_catalog(声明, 运行时注册|None)`——必填字段/权限属性校验（缺失 `read_only=True` 或 `requires_approval=False` 即拒绝）、重复 skill_id、未知 aip_agent、声明未注册（拒绝入目录）、注册未声明（Mock 技能，报告暴露且不获得任何写入权限）；来源标记 `aip_runtime+declared_local` / `declared_local`（绝不标 external/registry）；进程内缓存 + `catalog_or_declared()` 使用方入口。
+- 使用方逐个替换：① 协调者 `_tool_specs`/`_tool_index`/`_llm_name_to_skill`（原 import 期模块常量改惰性）读统一目录；② `init_aip_agents` 真实表面白名单改读目录（lifespan 启动时构建并缓存）；③ `generate_acs.py` 改读声明目录，校验失败直接报错不产出漂移 ACS；④ Mock 表面隔离语义不变（Mock 技能不在目录 → 真实表面照旧剔除）。
+- 可观察性：`GET /aip/capability-catalog` 返回 entries/rejections/meta（来源、built_at、计数）；构建时拒绝逐条 warning 日志。
+- `REAL_SKILL_TOOLS` 保留为声明元数据源与安全回退（交接文档 §六 允许），17 条技能 ID、描述、参数与调用行为全部未变。
+
+#### 三、测试（先补用例再实现）
+
+- 新增 `tests/test_capability_catalog.py` **12 例**：真实四服务构建 17 条目（权限属性/来源/端点/版本/output_schema 缺口标记）；声明未注册拒绝；Mock 注册未声明报告且不进目录；重复 ID 首条保留余拒绝；未知智能体/缺 parameters/权限属性缺失或为写 三类拒绝且留可读原因；纯声明目录来源标记（不冒充外部）；全非法声明可见失败（entries 空 + rejections 非空）；缓存 store/get/reset；协调者消费（回退与运行时两种状态下 specs/index/名称映射一致）；目录端点（TestClient + init_aip_agents）与 Mock 隔离。
+- 修正测试自身 4 处断言错误（重复 ID 首条合法、meta.runtime 恒存在、built_at 位置、lifespan 路由需启动期注册——后者以 init_aip_agents 直连测试覆盖）。
+
+#### 四、全量验证（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `pytest tests -q` | **230 passed**（218 + 12） |
+| 后端编译 | `compileall -q app` | 通过 |
+| ACS 零漂移 | 重新生成 4 个 ACS 文件 | 除生成时间戳外逐字节一致 |
+| 前端（未改动，记录现状） | vitest / tsc / build | 28 passed / 通过 / 通过 |
+| 真实系统 | 重启 9000 后端 | `/api/health` ok；`GET /aip/capability-catalog` 200：meta runtime=True、source=`aip_runtime+declared_local`、**17 条目**（tracking 5 / quotation 4 / procurement 4 / quality-document 4）、**14 条拒绝全部为 Mock 技能的 registered_not_declared**（真实表面隔离证据）；`/aip/overview` 正常；错误日志 0 行 |
+
+#### 五、遗留与边界
+
+- 协调者运行时目录为进程内缓存（随 lifespan 构建随进程终止），无 TTL 刷新需求（技能注册只发生在启动期）；注册表接入目录仍属长期遗留（外部依赖，勿擅自推进）。
+- `app/aip/acs/` 空目录为历史残留，未删除（不在本阶段范围）。
+
+### 3.56 真实业务前端信息架构改版（比赛版，2026-10-02 下午）
+
+依据 `docs/handoff_2026-10-02_frontend_information_architecture.md`（§十：先出路由与组件复用方案，再实施；第一阶段只做信息架构与展示层）。零后端改动、零业务规则改动、审批门禁与真实认证链路不变。
+
+#### 一、路由与组件复用方案（实施前确认）
+
+- 一级导航从"页面类型"改为"工厂业务模块"，分组（§4.1）：工作台[业务总览]；业务协同[AI 协同问答（默认）/销售与订单/采购与缺料/生产跟单/质量中心]；记录与管理[审批与审计/系统连接]。Mock 演示页独立成组（仅 MOCK_DEMO_ENABLED 时出现），不与真实业务混组。
+- 视图承载：`RealBusinessPage` 承载全部 8 个真实模块视图，由 App 一级导航传 `activeModule` 控制（组件保持挂载，步骤状态机/会话/身份数据跨模块保持）；`onNavigate` 供事件"去处置/去处理"、模块接续提示卡跳转。
+- 订单 8 步流程按模块分段复用（不重写业务组件）：销售与订单=步骤 1-3；采购与缺料=步骤 4-6；生产跟单=步骤 7-8 + MES 完工数据二级视图；步骤条全链保留在三个模块中显示当前进度。
+- 组件复用清单：AssistantPanel（默认主工作区，新增常用问题芯片/回答内模块跳转/总览预填问题）；QualityTodoPanel + CollaborationEventsPanel（质量中心）；AgentRunsPanel（审批与审计）；原 App.tsx 内联 MesCompletionsPage 迁出为自取数组件并入生产跟单。新增组件：BusinessOverviewPanel（业务总览）、ConnectionSettingsPanel（系统连接）。
+
+#### 二、实施内容
+
+1. `App.tsx`：导航分组重构；默认页 = AI 协同问答；顶栏"当前审批人"摘要 + 连接状态；侧栏底部当前审批人；真实模式下误入 Mock 页自动回问答页；删除独立"MES 完工数据"导航项。
+2. `RealBusinessPage.tsx`：`RealModuleKey` 8 模块视图；页头审批身份压缩为一行摘要（完整角色折叠进"身份详情"，验收 12）；"会话设置"整体迁出页头（验收 8）；会话过期提醒改指「系统连接」；事件跳转改为 onNavigate（质量事件/延期/临期→生产跟单，缺料→采购与缺料）。
+3. 新增 `BusinessOverviewPanel`：报价/方案待审批 KPI（真实端点统计）、质量待办（未登录显示"未登录"，区分只读与需审批——验收 9）、缺料/风险事件计数、"需要处理"列表（未完成未接管事件 + 按类型跳转）、最近业务链（agent-runs）、AI 协同入口（问题预填到问答）。
+4. 新增 `ConnectionSettingsPanel`：数据连接状态 + 审批账号登录/登出 + 会话剩余时间（验收 10）+ Bearer/写入令牌/清除会话收进"高级联调设置"折叠（验收 11）。
+5. `AssistantPanel`：常用问题芯片（填入不自动发送，无订单号时协调者追问）；回答按 context 实体给出"打开销售与订单/去采购与缺料/查看生产跟单/去质量中心"跳转（§4.3 回答中的操作入口调起业务详情）；支持总览预填问题。
+6. `QualityTodoPanel` 登录提示文案改为指向「系统连接」。
+7. 样式：`styles.css` 追加导航分组/芯片/总览/连接/提示卡样式，全部复用既有主题变量。
+
+#### 三、走查中发现并修复的缺陷（均有截图）
+
+- **去处置跳转落错二级视图**：生产跟单内切换到"MES 完工数据"后，事件"去处置"跳转停在完工数据表，而不是 NCR 处置所在的跟单视图。修复：`goToQualityDispose` 与延期/临期事件跳转在 setStep(8) 时强制 `setProductionView("tracking")`；复验通过（截图 `2026-10-02_ia_event_dispose_jump.png`，NCR 卡片自动滚动高亮）。
+- QualityTodoPanel 未登录提示仍写"展开上方会话设置"（设置已迁走），改为指向「系统连接」。
+
+#### 四、验收对照（§八 14 条）
+
+1 默认打开协同问答 ✅；2 自然语言四类问题入口 ✅（芯片+输入框）；3 结论/证据/调用链/下一步 ✅（沿用 AssistantPanel 调用链+新增模块跳转）；4 审批停在人工确认 ✅（未动）；5 真实模式左侧不再只有两个入口 ✅（8 模块）；6 左侧直达订单/采购/生产/质量/AI ✅；7 不同时展开所有模块 ✅（按模块渲染，测试锁定）；8 会话设置不占标题区 ✅；9 未登录区分只读/需审批 ✅（总览"未登录"+质量待办提示）；10 登录后显示审批人与会话剩余时间 ✅（连接页）；11 Bearer/写入令牌默认不展示 ✅（高级联调折叠）；12 角色列表不铺满 ✅（身份详情折叠）；13 事件去处置/订单流程/质量待办/审批/运行记录不回归 ✅（页面走查+组件测试）；14 真实/Mock/连接标签清楚 ✅（mode banner+顶栏+侧栏）。
+
+#### 五、测试与验证（本轮实测）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 前端测试 | `npm run test -- --run` | **36 passed**（28 + 新增 8：RealBusinessPage 模块切换 5 例 + 业务总览 3 例） |
+| 前端类型 | `npx tsc --noEmit --incremental false` | 通过 |
+| 前端构建 | `npm run build` | 通过 |
+| 后端（未改动） | `pytest tests -q` | 230 passed |
+| 页面走查 | 浏览器实测（real 模式，真实 ERP/MES 数据） | 默认问答/总览（报价 0、方案 23、风险事件 1、真实业务链）/销售（真实客户与物料）/采购提示卡/生产二级视图（OpenMES 完工 2 条真实记录）/质量中心（3 条真实事件+去处置复验）/系统连接 全部通过 |
+
+截图证据：`gui-test-screenshots/2026-10-02_ia_*.png`（8 张）。
+
+#### 六、边界与遗留
+
+- Mock 模式下的导航分组走查未重放（当前后端 real 模式；Mock 页面组件与切换逻辑未改动，导航分组代码路径相同）。
+- 业务总览"方案待审批"计数来自全部历史方案（含测试期数据），属运行时真实数据；如需只统计活跃报价的方案，属后续业务口径问题，本阶段不做。
+- 协同事件跳转后跨模块保持组件挂载（状态不丢）；刷新页面回到默认问答页（无 URL 路由持久化，属第一阶段范围外）。
+
+### 3.57 改版复核修复：问答对象定位 + 去 Demo 化 + 连接状态统一 + 审批工作台（2026-10-02 傍晚）
+
+依据外部评审（§3.56 复查）的四项意见逐项修复；零后端改动。
+
+#### 一、评审意见 → 修复对照
+
+| 意见 | 修复 | 实测证据 |
+|---|---|---|
+| ① 问答后只跳模块，不定位到具体订单/报价/工单 | `AssistantPanel` 从**本轮调用链实参**（最可靠）→ `proposal_options` 结构化字段 → 会话实体上下文（`沿用_`/`页面_` 前缀键，键名以 `assistant_context.py` 字段集为准，不猜）提取业务对象编号；`RealBusinessPage` 抽出 `openWorkOrderTracking`/`openProcurementPlanView`/`openQuotationView` 三个定位打开 helper（事件跳转/质量待办/问答共用），问答跳转携带编号自动加载对应对象 | 真实提问 "SAL-ORD-2026-00001 什么时候能做完？" → 回答带真实证据链 → 点"查看该工单跟单 →"自动打开生产跟单·跟单视图，工单号 WO-2026-001（id=2）真实三面板加载（截图 `2026-10-02_r2_jump_opens_wo_tracking.png`） |
+| ② 销售页仍显示完整 1-8 步横向流程（像手动 Demo） | 各模块只显示本阶段步骤条（销售=1-3/采购=4-6/生产=7-8），完整 8 步链收进"查看完整执行链（8 步）"折叠；测试锁定可见步骤条步数与折叠内步数 | 销售页可见步骤条 3 项 + 折叠项；生产跟单可见 7/8 两项（截图佐证） |
+| ③ 连接状态文案不一致（顶栏"已连接" vs 连接页"已配置"） | 连接状态改为**真实探测**：ERPNext=身份解析成功；OpenMES=工单列表真实可读（探测失败不再伪装成"已配置"）；顶栏/侧栏/系统连接页共用同一状态源 `onConnectionStatus`，文案统一为 已连接（附依据）/ 探测中 / 连接异常；审批账号状态独立表达（已登录/未登录·需要审批账号） | 顶栏与侧栏显示"ERPNext + OpenMES · 已连接"（探测通过时）；连接页三行状态（截图历史+本轮代码路径） |
+| ④ 审批与审计页不像审批工作台 | 新增 `PendingApprovalsPanel`：真实统计报价/方案 PENDING_APPROVAL，每项可定位打开对应审批视图（复用 openQuotationView/openProcurementPlanView），置于 Agent 运行记录之上 | 页面显示 23 项真实待处理方案（测试期遗留 QUO-TEST 数据如实显示），点击可打开方案审批视图（截图 `2026-10-02_r2_audit_pending_approvals.png`） |
+
+#### 二、验证（本轮实测）
+
+| 项 | 结果 |
+|---|---|
+| 前端测试 | **39 passed**（36 + 问答定位 2 例 + 待审批面板 1 例 + 模块测试断言更新） |
+| 前端类型 / 构建 | 通过（含 dev server 运行中场景；评审轮曾遇 EPERM，本轮未复现，继续如实记录当轮结果） |
+| 后端 | 未改动（230 passed 沿用） |
+| 页面走查 | ①②③④ 全部浏览器实测通过（真实 ERP/MES 数据；LLM 真实回答一次） |
+
+截图：`gui-test-screenshots/2026-10-02_r2_*.png`（3 张）。
+
+#### 三、遗留与边界
+
+- 追问行为观察（既有后端逻辑，非本轮引入）：问 "WO-2026-001 什么时候能做完？" 时槽位检查先追问销售订单号，且把 WO- 前缀误归入物料上下文（回显"当前沿用物料=WO-2026"）；属 `assistant_context.py` 意图分类/实体提取的口径问题，记录为后续后端待办，不在前端改版范围。
+- 事件/待办/问答三类跳转已统一走定位 helper；"业务总览"的"需要处理"跳转仍只切模块（该处无对象编号上下文，保持现状）。
+
+### 3.58 工单号自然语言识别修复（2026-10-02 晚）
+
+依据 `docs/handoff_2026-10-02_work_order_intent_fix.md`；修复 §3.57 遗留的后端确定性解析口径问题。零 ERPNext/OpenMES 写入，零审批/认证/前端改动。
+
+#### 一、根因与修复（backend/app/services/assistant_context.py）
+
+- 复现（与交接文档一致）：`extract_signals("WO-2026-001 什么时候能做完？")` → `work_order_no=''`、`item_code='WO-2026'`，页面追问销售订单号并回显"物料=WO-2026"。
+- 根因：`extract_signals()` 显式过滤 `WO-2026-*` 工单号（历史口径把 SAL-ORD-2026-00023 与 WO-2026-001 当同字段歧义），过滤后 `_ITEM_RE`（`\b[A-Z]{2}-\d{3,5}\b`）把前缀 `WO-2026` 吃成物料。
+- 修复：① 删除 `WO-2026-*` 特殊过滤，工单号照 `_WORK_ORDER_RE` 原样进 `Signals.work_order_no`；② **工单号优先于物料号**——用匹配区间重叠排除，与工单号重叠的物料候选（WO-2026-001 中的 WO-2026）不作为物料；不重叠时物料与工单属不同字段可并存（BD-2401 + WO-2026-001 各自提取）；③ 多个不同工单号时仍整体不猜（保持空由上层追问）；ERP 订单号正则独立，不受影响。格式范围未扩大，`TEST_WO_*`/`WO-SO-*` 行为不回归。
+
+#### 二、测试（先改旧断言再实现；`tests/test_assistant_session.py`）
+
+- 替换旧断言 `test_entity_codes_extracted`（其注释"同字段歧义过滤工单号"即错误口径来源）为 `test_erp_order_and_work_order_can_coexist`；
+- 新增提取用例 4 例：`test_work_order_number_is_not_material`（修复主断言）、`test_multiple_work_orders_do_not_guess`、`test_material_and_work_order_coexist_when_not_overlapping`、`test_existing_work_order_prefixes_still_extracted`；
+- 新增协调者路径回归 `test_work_order_question_reaches_coordinator_without_clarify`：直接报工单号 → 不追问（`needs_input=false`、非 clarify）→ 协调者上下文带 `沿用_work_order_no=WO-2026-001` 且无 `沿用_item_code` → 任务实体上下文持久化 work_order_no，并随后续调用链补上 work_order_id=2。
+- 全量：**后端 235 passed**（230 + 5 净增）。
+
+#### 三、页面级验收（真实模式、只读，一次真实 LLM 问答）
+
+| 步骤 | 结果 |
+|---|---|
+| 新会话直接输入 `WO-2026-001 什么时候能做完？` | **不再追问销售订单号**；回显"沿用工单ID=2、工单=WO-2026-001"，**无"物料=WO-2026"**；回答带真实证据（work_order_id=2、BD-2401、500、SAL-ORD-2026-00001、OpenMES ETA 数据缺口如实说明） |
+| 点击"查看该工单跟单 →" | 落到生产跟单·跟单视图，本阶段步骤条 ⑦⑧，WO-2026-001 三面板真实加载 |
+| 回归：`SAL-ORD-2026-00001 什么时候能做完？` | 正常关联工单回答（无追问、无物料误识别）、跳转按钮可用 |
+| 构建 | 前端 dev server 关闭后 `npm run build` 通过（EPERM 未复现）；前端测试 39 passed 未受影响 |
+
+全程零写入（问答只读 + 跟单视图只读加载）。
+
+#### 四、遗留
+
+- 沿用回显的双段措辞（"当前沿用工单ID=2；当前沿用工单ID=2、工单=…"）是页面上下文回显拼接的展示小瑕疵，不影响语义，后续顺手项。
+- 本轮未触碰 `assistant_context.py` 以外的意图/实体口径（如 PUR-ORD、报价号等）。
+
+### 3.59 中文紧贴编号识别修复 + 复检杂项收口（2026-10-02 晚）
+
+依据外部复检（16:50）：`\b` 边界在编号紧贴中文时不可靠（Python re 把汉字当 `\w`，中文字符与编号首尾字符间不存在词边界），六类业务编号正则全部受影响。零 ERPNext/OpenMES 写入。
+
+#### 一、P1 修复：编号边界断言（backend/app/services/assistant_context.py）
+
+- 六个编号正则（销售订单/采购订单/工单/报价/采购方案/物料）统一从 `\b` 改为 ASCII 邻接断言 `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])`：编号不嵌在更长 ASCII 词内（`XWO-2026-001` 仍不误报），紧贴中文可完整识别（`工单WO-2026-001什么时候能做完?`）。
+- 评审复现的 5 个失败输入 + 原有空格/无空格场景共 9 例全部通过；格式范围未扩大。
+
+#### 二、复检杂项（同轮收口）
+
+- **回显重复**：`_build_applied_context` 改为"任务沿用上下文 + 仅列与沿用不一致的页面字段"，页面与沿用重复的字段（如"当前沿用工单ID=2"两段）只回显一次；页面独有字段仍回显。新增单测锁定。
+- **业务总览"需要处理"定位**：`BusinessOverviewPanel` 新增 `onOpenEvent`，按钮复用 `goToEventTarget` 携带事件编号定位打开对应工单/方案，不再只切模块。
+- **文档状态**：`AI_HANDOFF_PLAN.md`/`docs/README.md` 中工单号修复由"待修复/最高优先级"更新为已完成（§3.58）。
+- **`frontend/vite-dev.log`**：本地运行日志，加入 `.gitignore`。
+
+#### 三、测试与验证（本轮实测）
+
+| 项 | 结果 |
+|---|---|
+| 后端 | **238 passed**（235 + 中文紧贴 2 例 + ASCII 词内不误报 1 例 + 回显去重 1 例，提取用例归并入同文件） |
+| 前端 | 39 passed / 类型 / `npm run build`（关 dev server 后）全过 |
+| 页面实测 | `工单WO-2026-001什么时候能做完?` → 完整识别、不追问、回显一段且无重复、真实证据 + 定位跳转可用；`物料BD-2401多少钱` → 物料正确回显，确定性追问客户/数量（不耗 LLM） |
+
+#### 四、遗留
+
+- 刷新页面不保留当前模块（无 URL 路由持久化）——复检确认不影响比赛主流程，维持后置。
+
+### 3.60 会话、审批身份、问答体验与流程状态一致性修复（2026-10-02 夜）
+
+依据用户页面实测反馈 8 项 + 后续走查追加 4 项（交接文档 `handoff_2026-10-02_session_identity_chat_ux.md`）。除下列写入门禁外零新增 ERPNext/OpenMES 写入；全轮页面级实测通过。
+
+#### 一、审批身份与写入门禁（P0，用户发现"未登录也能审批"）
+
+- 根源：写路由依赖 `require_real_identity` 在无 Authorization 头时回落 ERPNext 服务端集成账号（Administrator），审批以集成账号名义留痕。
+- 修复：新增 `require_real_human_identity`——**24 个审批/写入 POST 路由**（报价/方案审批、ERP 草稿、工单下达、报工、质量登记/处置/关闭、事件接管/重试）无浏览器登录会话直接 401 `approver_login_required`，不回落；3 个只读 GET（identity/me、质量待办、工作流状态）保留宽松回落。新增 5 条门禁测试（含路由依赖核对）。
+- 前端身份语义同步：未登录页头显示"审批账号未登录"，身份详情标注"ERPNext 数据连接账号：Administrator（服务端集成账号）"；顶栏/侧栏仅 OpenMES 登录后显示 `admin（OpenMES）`。
+
+#### 二、协同问答连续聊天与历史会话
+
+- 后端新增只读端点：`GET /real-orders/assistant/sessions`（最近活跃倒序会话列表）与 `GET /real-orders/assistant/sessions/{id}/messages`（原文按时间升序，不含凭据/工具参数），共 5 条测试。
+- AssistantPanel 重构：多轮消息列表（输入框固定上方——用户拍板覆盖交接文档的"底部"方案）、切模块保持挂载不丢记录、刷新按 sessionStorage 会话号恢复历史、"历史会话"切换器可切回保留期内（90 天）任意旧会话。
+- 新会话隔离：首轮屏蔽页面上下文注入（旧工单/订单不再自动带入），回答明示"本轮未自动带入页面当前工单/订单"，次轮恢复正常策略；单测锁定。
+
+#### 三、会话 TTL 与倒计时（用户决定：保留 15 分钟不改 30）
+
+- 临期黄条与系统连接页实时倒计时（每秒刷新，"剩余 X 分 X 秒"），过期显示"已过期，请重新登录"；共享 `api.ts` 口径（OPENMES_SESSION_TTL_MS/getSessionRemainingMs）。
+- 会话过期后身份解析失败时页头如实显示"审批账号会话已失效"（此前卡"正在解析"误导）。
+
+#### 四、回答分层与销售页交期口径
+
+- 回答首屏保留结论/回显/追问/重确认/方案卡；调用链、质量影响明细、数据缺失明细默认折叠（不截断事实）。
+- 报价卡"预计交期"标注依据：MES 最早未完成工单到期倒计时（单行省略+悬停全文），不随数量变化属刻意设计（固定公式已删）；三种 basis 各有标注。
+
+#### 五、流程页状态一致性（跨订单串页防护）
+
+- "已完成"卡与步骤条高亮改由已加载对象证明（`displayStep`），跳转残留不再伪装第 8 步完成；销售/采购无对象时显示明确空态与入口。
+- 生成新报价自动清除旧采购方案；方案与当前报价不同单时采购页显式提示并提供"重新分析/返回初始状态"。
+- 销售与订单/采购与缺料新增"↺ 返回初始状态（开始新订单）"；resetFlow 补清 workOrderId/dispatchFlow。
+
+#### 六、生产跟单布局与全厂跟单
+
+- 无关联工单时"下达工单"重构为置顶主 CTA 卡（原通栏底条），下达失败提供"重置后重新下达"。
+- 新增"全厂跟单（跨订单）"面板：选择任意未完工工单（按交期排序、标注关联订单）直接加载三面板，复用 openWorkOrderTracking 反查守卫链路，不绑定当前流程。
+
+#### 七、测试与验证
+
+| 项 | 结果 |
+|---|---|
+| 后端 | **248 passed**（238 → 248：历史端点 3 + 会话列表 2 + 身份门禁 5） |
+| 前端 | **45 passed**（39 → 45：连续两问/新会话隔离/上下文注入/刷新恢复/历史会话切换）+ 类型 + `npm run build` |
+| 页面实测 | 未登录审批 401 / 登录 200 双向（curl+UI）；未登录身份显示"未登录"；销售/采购空态；聊天切页保留+刷新恢复；历史会话切回 18 条消息；倒计时；登录+令牌后下达工单全链（WO-SO-2026-00030 创建+回读+自动选中）；跨单跟单加载 WO-2026-001 |
+
+#### 八、文档与遗留
+
+- 新增 `docs/功能介绍.md`（使用者功能总账：功能地图/口径区分/编号速查/诚实性边界），`docs/README.md` 索引首位；交接文档追加实施记录。
+- 遗留：后端 `resolve_real_identity` 的 auto 回落策略保留（identity/me 展示需要），仅写路由收紧；生产跟单"全厂跟单"与流程面板同屏时的语境已在文案中区分，视觉层级后续可再优化。
+
+### 3.61 质量闭环补链 + 门禁可操作化 + 跨历史继续操作 + 库存总览技能（2026-10-03 凌晨）
+
+依据用户页面实测连续反馈 4 项。除验证性写回（issue #3 解决写回，见一）外零新增 ERPNext/OpenMES 写入。
+
+#### 一、NCR"解决"通道补前端缺口（P0，用户卡死点）
+
+- 用户让步接收（use_as_is）写回后，关闭前置条件"问题已解决"（OpenMES issue 状态须 RESOLVED）在界面上无解——后端 resolution 三步通道（resolution-request → 批准 → resolve 写回）早已存在，前端未接线。
+- 修复：api.ts 补三个函数；useNcrWorkflows 补解决状态机（requestNcrResolution/approveNcrResolution/writeNcrResolution，写回后刷新质量包）；NCR 卡片补"解决"块（解决说明必填——让步接收也要写明放行依据）。
+- 页面实测：#3（让步接收）三步走完，OPEN → **RESOLVED**，未关闭 3→2，closure_ready=true。三态语义（处置≠解决≠关闭）写入功能文档。
+
+#### 二、发运门禁阻塞行可操作化 + 未关联/未审批分支
+
+- 报价审批 ✗：显示关联订单号 + "去报价审批 →"（直达该订单报价审批面板）；无报价记录时如实提示"尚无报价记录（系统不伪造审批入口）"。
+- 未关联工单（customer_order_no 为空，如种子工单 WO-2026-002/003）：行文案改为补救指引 + "到 OpenMES 建立关联 ↗"（OPENMES_UI_URL，可用 VITE_OPENMES_URL 覆盖）。
+- 质量门禁 ✗：提示"上方 NCR 卡片走'解决 → 关闭'" + "去质量中心 →"。
+
+#### 三、缺料类 NCR 引导（用户问"不能选补充库存的吗"）
+
+- NCR 处置出口是 OpenMES 上游 API 白名单四种（scrap/rework/return_to_supplier/use_as_is），不含"补库存"——不伪造第五种。
+- Material Shortage 类卡片新增引导块：补库存在「采购与缺料」模块处理（跳转按钮）；到货后一般按"让步接收"关闭并把采购单号写进遏制措施留痕。
+
+#### 四、全厂跟单口径修正 + 继续已有订单选择器
+
+- 全厂跟单排除口径修正：生产完工（DONE）≠ 发运完成，完工单仍需质量关闭与发运判定——只排除 CANCELLED/CLOSED 与 DEMO_ 演示单。
+- 销售与订单空态新增"继续已有订单"（最近 20 条报价：客户/物料/数量/状态/ERP 草稿号）；采购与缺料空态新增"继续已有采购方案"（最近 20 条：所属报价/审批状态/缺料情况）——与全厂跟单对称，三个模块都支持跨历史记录继续操作。
+
+#### 五、全厂库存总览技能（用户问"不能调用 ERP 查库存吗"）
+
+- 缺口本质：`/api/erp/inventory` 接口一直存在，但协调者能力目录未注册"库存总览"技能，LLM 工具箱里没有。
+- 新增 `procurement.inventory_overview`（read_only）：ERPNext Bin 实时余量（actual/reserved/ordered/projected 各自独立口径，不做扣减合并）；ERP 不可达时如实返回 ERP_UNREACHABLE。接入全链路：real_order 服务函数 → ERPNext 适配器（Bin 全列）→ procurement AIP 注册 → coordinator 声明 → 能力目录（17→18）→ ACS 契约重生成（generate_acs.py，防漂移测试通过）。
+- 页面实测：问答"给我看看现在我们所有库存" → 调用链 1 步（239ms）→ 回答为真实 Bin 表格（M10-BOLT 5000 / CI-RAW 800 / BRG-6204 1500 / SEAL-RING 2000，Stores - APM）。
+
+#### 六、测试与验证
+
+| 项 | 结果 |
+|---|---|
+| 后端 | **252 passed**（248 → 252：技能声明/目录包含/真实返回/ERP 不可达 4 例） |
+| 前端 | **45 passed** + 类型 + `npm run build` |
+| 页面实测 | 解决通道全链（#3 OPEN→RESOLVED→closure_ready）；门禁未关联分支（OpenMES 链接）与未审批分支；销售/采购选择器载入；问答库存总览真实返回 |
+
+#### 七、遗留
+
+- ACS 其余三个文件仅时间戳字段重生成差异（2 行），无内容漂移。
+- 全厂跟单与流程面板同屏语境已用文案区分，视觉层级优化后置。
