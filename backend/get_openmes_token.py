@@ -105,7 +105,18 @@ def main():
         print("[4] No ERP API key found - will create one via API")
         # Create ERP API key via the API
         print("    Creating ERP API key ...")
-        body2 = json.dumps({"name": "erp-integration", "scopes": ["erp:production:read", "erp:quality:read"]}).encode()
+        # 新环境的真实种子需要导入产品和工单；按 OpenMES API 文档申请
+        # 最小的读取 + 导入范围。已有 key 不会在这里被修改，避免误改使用者的
+        # 其他集成；已有 key 缺少写入范围时，后续导入会明确返回 403。
+        body2 = json.dumps({
+            "name": "erp-integration",
+            "scopes": [
+                "erp:production:read",
+                "erp:quality:read",
+                "erp:orders:import",
+                "erp:masterdata:write",
+            ],
+        }).encode()
         req2 = urllib.request.Request(
             f"{base_url}/api/v1/api-keys",
             data=body2,

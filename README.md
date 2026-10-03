@@ -14,6 +14,11 @@
 
 > 当前开发状态、真实接口验证记录与遗留问题见 `docs/current_status_and_fix_plan.md`；演示操作剧本见 `docs/demo_script.md`。
 
+> 如果是在另一台 Windows 电脑上复现真实 ERPNext + OpenMES 环境，请先阅读
+> [`docs/真实环境复现部署.md`](docs/真实环境复现部署.md)，再运行
+> `scripts/setup_real_environment.ps1`。该流程会为每台电脑重新创建本地服务和凭据，
+> 不会复制本机 `.env`、Token、API Secret 或数据库；在干净电脑完整重放前，不把它称为已验证的一键部署。
+
 ---
 
 ## 1. 前置要求
@@ -97,6 +102,14 @@ python seed_inspection_eta.py   # 可选：TEST_ 检验记录与批次耗时补�
 - 脚本凭据全部从根目录 `.env` / `services/OpenMes/.env` 读取，不会打印密钥。
 - 除 `seed_inspection_eta.py`（显式幂等，可重跑）外，其余为一次性初始化，**重复执行可能产生重复记录**。
 - 注意：OpenMES 里 BD-2401 配有 BOM 工艺模板（`TEST_BD2401_QUALITY_FLOW`），新下达工单才有批次步骤可报工；其他产品如需报工，先在 OpenMES 给对应产品类型建工艺模板（主数据工程，系统会如实提示而不是伪造数据）。
+
+在另一台真实环境上导入可复现的 `TEST_` 演示工单和质量问题，使用新增的动态查重脚本（不会使用当前库的固定数字 ID）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup_real_environment.ps1 -RunSeeds -RunRealDemoSeed
+```
+
+检验/ETA 的旧补录脚本依赖当前库的固定批次和数据库表结构，默认不会执行；详见 [`docs/真实环境复现部署.md`](docs/真实环境复现部署.md)。
 
 ## 6. 启动应用
 
