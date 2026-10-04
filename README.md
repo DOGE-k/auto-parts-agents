@@ -56,6 +56,25 @@ bash scripts/deploy_services.sh                                          # Linux
 - 就绪检查：`curl -s http://127.0.0.1/api/health` 应返回 `{"status":"ok"}`。
 - 登录页 <http://127.0.0.1/>（这个 admin 密码之后也用于页面"审批身份"登录和种子脚本）。
 
+#### OpenMES 的两种 API 凭据
+
+OpenMES 的个人令牌和机器集成密钥不是同一种凭据：
+
+| 凭据 | 用途 | 请求头/保存位置 |
+| --- | --- | --- |
+| `Settings → API Tokens` 创建的个人令牌 | 管理员用户 API、创建集成密钥；默认有效期约 15 分钟 | `Authorization: Bearer <页面显示的完整令牌>`；前缀以当前实例实际生成为准，不要写死为 `1|` |
+| ERP 集成 API Key | 项目的 `/api/v1/erp/*` 机器接口 | `X-Api-Key: omk_...`；保存到根目录 `.env` 的 `OPENMES_ERP_API_KEY` |
+
+当前 OpenMES 版本可能没有显示 `Settings → API Keys` 页面。此时不要把
+`http://localhost/api/v1/api-keys` 当作网页打开；它是管理员的 `POST` 接口。先在
+`Settings → API Tokens` 创建一个新的完整个人令牌，然后运行项目的
+`python backend/get_openmes_token.py`。脚本会用个人令牌创建集成 Key，并读取响应顶层的
+`plaintext_key`；这个 `omk_...` 明文只在创建时返回一次。
+
+如果脚本或种子脚本提示 `401 Invalid or expired API key`，先重新运行
+`get_openmes_token.py`，确认根目录 `.env` 中保存的是 `omk_...` 集成 Key，而不是
+`Settings → API Tokens` 的个人令牌。OpenMES 的 `401` 表示 Key 缺失或无效，权限范围不足则是 `403`。
+
 ### 3.3 ERPNext 建站（一次性）
 
 ```bash
@@ -80,7 +99,7 @@ cp .env.example .env      # 然后按下面逐项填写
 | 配置 | 怎么拿 |
 |---|---|
 | `ERPNEXT_BASE_URL` / `ERPNEXT_API_KEY` / `ERPNEXT_API_SECRET` | ERPNext 以 Administrator 登录 <http://127.0.0.1:8080> → 用户列表 → 对应用户 → 设置 → **API 访问 → 生成密钥**（Key+Secret 只显示一次） |
-| `OPENMES_TOKEN` / `OPENMES_ERP_API_KEY` | 一键脚本：`python backend/get_openmes_token.py`——它读 `services/OpenMes/.env` 的管理员凭据登录、验证 token、缺失时自动创建 ERP 集成 key，并写回根目录 `.env` |
+| `OPENMES_TOKEN` / `OPENMES_ERP_API_KEY` | 一键脚本：`python backend/get_openmes_token.py`——它读 `services/OpenMes/.env` 的管理员凭据登录，写入短时个人令牌，并在缺失或失效时创建带 `erp:masterdata:write`、`erp:orders:import`、`erp:production:read`、`erp:quality:read` 权限的 `omk_...` 集成 Key |
 | `REAL_WRITE_API_TOKEN` | **自己设一个随机值**（如 `python -c "import secrets;print(secrets.token_hex(24))"`）。所有写真实系统的接口要求请求头 `X-Real-Write-Token` 与之一致；页面"会话设置 → 本地写入令牌"填同一个值 |
 | `DEEPSEEK_API_KEY` | DeepSeek 开放平台申请；不配则协同问答如实返回 503（其余功能不受影响） |
 | `APP_ADAPTER_MODE` | 保持 `real`（演示/验收）。`auto` 会在连不上真实系统时回退内置 Mock——仅本地调试用，页面数据不是真的 |
@@ -171,6 +190,8 @@ npm run build
 | 脚本提示缺少 `DB_PASSWORD` | 编辑 `services\frappe_docker\.env`，填写 `DB_PASSWORD`；保存后回到等待中的脚本窗口按 Enter。若脚本已回到 `PS ...>`，重新运行入口命令。 |
 | 页面报"连不上 ERP/MES"或接口 502 | 确认容器健康：`docker ps` 看 `openmes-*` / `erpnext-*`；`APP_ADAPTER_MODE=real` 下连接失败**必然明确报错**（设计如此，不回退假数据） |
 | OpenMES 接口 401 | `OPENMES_TOKEN` 失效——重跑 `python backend/get_openmes_token.py` 换新 token 后重启后端 |
+| OpenMES 种子报 `401 Invalid or expired API key` | `OPENMES_ERP_API_KEY` 填成了个人 `API Tokens`，或旧集成 Key 已失效；重新运行 `python backend/get_openmes_token.py`，它会读取创建响应顶层的 `plaintext_key` 并写入新的 `omk_...` Key |
+| 直接打开 `/api/v1/api-keys` 跳回 dashboard | 这是需要管理员 Bearer 令牌的 `POST` API，不是网页；从 `Settings → API Tokens` 新建个人令牌后运行上面的脚本 |
 | ERPNext 接口 500、数据库日志出现 `Access denied for user '_xxxx'@'IP'` | 旧版本建站把站点库用户授权绑死在容器 IP 上，容器重启换 IP 后认证失败。修复（保留密码）：进 `erpnext-db-1` 执行 `RENAME USER '_xxxx'@'<旧IP>' TO '_xxxx'@'%'; FLUSH PRIVILEGES;`（按 README 3.3 节带 `--mariadb-user-host-login-scope=%` 新建的站点不会有此问题） |
 | 写接口 403 | 请求头 `X-Real-Write-Token` 与 `.env` 的 `REAL_WRITE_API_TOKEN` 不一致；页面"会话设置"里重新保存令牌 |
 | 登录会话 15 分钟断 | OpenMES Sanctum 会话 TTL（安全设计），重新登录即可 |

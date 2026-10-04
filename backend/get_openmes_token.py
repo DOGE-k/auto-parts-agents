@@ -33,6 +33,73 @@ def api_get(url, headers=None):
     except Exception as e:
         return 0, {"error": str(e)}
 
+
+def create_erp_api_key(base_url, token):
+    """Create an ERP integration key and return its one-time plaintext value."""
+    body = json.dumps({
+        "name": "erp-integration",
+        "scopes": [
+            "erp:production:read",
+            "erp:quality:read",
+            "erp:orders:import",
+            "erp:masterdata:write",
+        ],
+    }).encode()
+    req = urllib.request.Request(
+        f"{base_url}/api/v1/api-keys",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        payload = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        print(f"    HTTP {exc.code}: {exc.read().decode()[:300]}")
+        return ""
+    except Exception as exc:
+        print(f"    FAILED: {exc}")
+        return ""
+
+    print(f"    Response: {json.dumps(payload, ensure_ascii=False)[:300]}")
+    # The current OpenMES controller returns plaintext_key at the top level;
+    # data is deliberately redacted after creation. Keep the nested fallback
+    # for older builds that returned data.key.
+    key = payload.get("plaintext_key", "") or payload.get("data", {}).get("key", "")
+    if not key:
+        print("    FAILED: API response did not include the one-time plaintext key")
+        return ""
+    print(f"    ERP API Key: {key[:8]}...")
+    return key
+
+
+def verify_erp_api_key(base_url, erp_key):
+    """Return whether an existing key can access both required ERP exports."""
+    print(f"[4] Verifying ERP API key ({erp_key[:8]}...) via /api/v1/erp/production/completions ...")
+    code, completions = api_get(
+        f"{base_url}/api/v1/erp/production/completions",
+        {"X-Api-Key": erp_key},
+    )
+    if code == 200:
+        print(f"    OK: {len(completions.get('data', []))} completions")
+    else:
+        print(f"    HTTP {code}: {json.dumps(completions, ensure_ascii=False)[:200]}")
+
+    print("[5] Verifying ERP quality issues endpoint ...")
+    code2, issues = api_get(
+        f"{base_url}/api/v1/erp/quality/issues",
+        {"X-Api-Key": erp_key},
+    )
+    if code2 == 200:
+        print(f"    OK: {len(issues.get('data', []))} quality issues")
+    else:
+        print(f"    HTTP {code2}: {json.dumps(issues, ensure_ascii=False)[:200]}")
+    return code == 200 and code2 == 200
+
 def main():
     om_env = parse_env(OPENMES_ENV)
     admin_user = om_env.get("ADMIN_USERNAME", "admin")
@@ -80,62 +147,18 @@ def main():
     else:
         print(f"    FAILED: HTTP {code}")
 
-    # Step 4: Verify ERP API key
-    if erp_key:
-        print(f"[4] Verifying ERP API key ({erp_key[:8]}...) via /api/v1/erp/production/completions ...")
-        code, completions = api_get(
-            f"{base_url}/api/v1/erp/production/completions",
-            {"X-Api-Key": erp_key},
-        )
-        if code == 200:
-            print(f"    OK: {len(completions.get('data', []))} completions")
-        else:
-            print(f"    HTTP {code}: {json.dumps(completions, ensure_ascii=False)[:200]}")
-
-        print("[5] Verifying ERP quality issues endpoint ...")
-        code, issues = api_get(
-            f"{base_url}/api/v1/erp/quality/issues",
-            {"X-Api-Key": erp_key},
-        )
-        if code == 200:
-            print(f"    OK: {len(issues.get('data', []))} quality issues")
-        else:
-            print(f"    HTTP {code}: {json.dumps(issues, ensure_ascii=False)[:200]}")
-    else:
-        print("[4] No ERP API key found - will create one via API")
-        # Create ERP API key via the API
+    # Step 4: Verify the durable ERP key. A personal token from Settings →
+    # API Tokens is a Bearer session token, not an X-Api-Key and will fail here.
+    # If a stale/wrong key is already in .env, replace it with a new scoped key.
+    if erp_key and not verify_erp_api_key(base_url, erp_key):
+        print("    Existing ERP API key is invalid or lacks the required scopes; creating a new one")
+        erp_key = ""
+    if not erp_key:
+        print("[4] No valid ERP API key found - will create one via API")
         print("    Creating ERP API key ...")
-        # 新环境的真实种子需要导入产品和工单；按 OpenMES API 文档申请
-        # 最小的读取 + 导入范围。已有 key 不会在这里被修改，避免误改使用者的
-        # 其他集成；已有 key 缺少写入范围时，后续导入会明确返回 403。
-        body2 = json.dumps({
-            "name": "erp-integration",
-            "scopes": [
-                "erp:production:read",
-                "erp:quality:read",
-                "erp:orders:import",
-                "erp:masterdata:write",
-            ],
-        }).encode()
-        req2 = urllib.request.Request(
-            f"{base_url}/api/v1/api-keys",
-            data=body2,
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-            },
-            method="POST",
-        )
-        try:
-            resp2 = urllib.request.urlopen(req2, timeout=10)
-            key_data = json.loads(resp2.read())
-            print(f"    Response: {json.dumps(key_data, ensure_ascii=False)[:300]}")
-            erp_key = key_data.get("data", {}).get("key", "")
-            if erp_key:
-                print(f"    ERP API Key: {erp_key[:8]}...")
-        except urllib.error.HTTPError as e:
-            print(f"    HTTP {e.code}: {e.read().decode()[:300]}")
+        erp_key = create_erp_api_key(base_url, token)
+        if not erp_key:
+            return
 
     # Step 5: Write to project .env
     print("\n[6] Writing OpenMES config to project .env ...")
