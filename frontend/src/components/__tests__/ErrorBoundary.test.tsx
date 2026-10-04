@@ -1,4 +1,4 @@
-// ErrorBoundary 组件测试（阶段十演示容错：面板崩溃降级 + 重试恢复）
+// ErrorBoundary 组件测试（阶段十模拟容错：面板崩溃降级 + 重试恢复）
 // @vitest-environment jsdom
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act } from "react";

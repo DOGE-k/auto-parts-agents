@@ -1,4 +1,4 @@
-"""运行时表面开关：真实业务 API 与 Mock 演示 API 可独立启用。"""
+"""运行时表面开关：真实业务 API 与 Mock 模拟 API 可独立启用。"""
 from __future__ import annotations
 
 import os

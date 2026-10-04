@@ -253,7 +253,7 @@ class MockMESAdapter:
                 "work_order_id": "WO-DEMO-001",
                 "production_order_id": "PO-DEMO-001",
                 "product_id": "DEMO-BRACKET-001",
-                "product_name": "演示支架组件",
+                "product_name": "模拟支架组件",
                 "quantity": 120,
                 "completed_qty": 80,
                 "rejected_qty": 2,
@@ -434,7 +434,7 @@ class MockMESAdapter:
             {
                 "doc_id": "SOP-DEMO-001",
                 "doc_type": "SOP",
-                "doc_name": "演示支架组件作业指导书",
+                "doc_name": "模拟支架组件作业指导书",
                 "product_id": "DEMO-BRACKET-001",
                 "operation_id": "OP-010",
                 "version": "v1.2",
@@ -445,7 +445,7 @@ class MockMESAdapter:
             {
                 "doc_id": "CT-DEMO-001",
                 "doc_type": "Control Plan",
-                "doc_name": "演示支架组件控制计划",
+                "doc_name": "模拟支架组件控制计划",
                 "product_id": "DEMO-BRACKET-001",
                 "version": "v1.0",
                 "status": "RELEASED",
@@ -455,7 +455,7 @@ class MockMESAdapter:
             {
                 "doc_id": "PFMEA-DEMO-001",
                 "doc_type": "PFMEA",
-                "doc_name": "演示支架组件过程FMEA",
+                "doc_name": "模拟支架组件过程FMEA",
                 "product_id": "DEMO-BRACKET-001",
                 "version": "v2.1",
                 "status": "RELEASED",

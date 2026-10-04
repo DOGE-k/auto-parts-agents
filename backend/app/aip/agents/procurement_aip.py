@@ -2,7 +2,7 @@
 采购智能体 AIP 服务。
 技能分两类：
 - *.real_*：调用真实业务链（real_order，数据来自真实 ERPNext/OpenMES）
-- 其余：Mock 场景演示技能（tool_registry 合成数据，仅用于 Mock 演示）
+- 其余：Mock 场景模拟技能（tool_registry 合成数据，仅用于 Mock 模拟）
 """
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def create_procurement_aip_service(aic: str = "local-procurement-001") -> AipAge
         handler=real_inventory_overview,
     )
 
-    # ===== Mock 场景演示技能 =====
+    # ===== Mock 场景模拟技能 =====
 
     # 净需求计算
     async def calculate_net_requirement(inputs: dict) -> dict:

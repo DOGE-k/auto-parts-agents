@@ -1,4 +1,4 @@
-﻿"""
+"""
 生成四个智能体的 ACS（Agent Capability Specification）能力描述文件。
 符合 ACPs-spec-ACS-v02.02 规范。
 """
@@ -66,7 +66,7 @@ def _real_skill_specs(agent_key: str) -> list[AgentSkill]:
 def _append_real_skills(spec: AgentCapabilitySpec, agent_key: str) -> None:
     """使 ACS 与真实运行注册表一致，并按 ID 去重。
 
-    基础 ACS 保留的是早期 Mock 演示技能；真实表面会过滤掉这些技能，
+    基础 ACS 保留的是早期 Mock 模拟技能；真实表面会过滤掉这些技能，
     因此静态能力文件也只发布协调者目录中的真实技能，避免发现层宣称
     一个 RPC 实际不会提供的能力。
     """

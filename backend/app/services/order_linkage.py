@@ -269,7 +269,7 @@ async def link_work_order_to_erp_order(
 
     约束：
     - 必须携带人工审批信息（approved_by/approval_note），缺失时拒绝写入
-    - DEMO_* 演示工单不参与真实关联
+    - DEMO_* 模拟工单不参与真实关联
     - update_or_create 会按提交值重写 line/product/planned_qty/priority/
       due_date，因此先读取工单当前值并原样回传，只新增 customer_order_no
     - 写入后立即回读验证，回读不一致视为失败
@@ -302,7 +302,7 @@ async def link_work_order_to_erp_order(
             "authority": {"mes": mes.authority},
         }
     if work_order_no.startswith("DEMO_"):
-        return {"success": False, "error": "DEMO_* 演示工单不参与真实关联"}
+        return {"success": False, "error": "DEMO_* 模拟工单不参与真实关联"}
 
     # 3. 构造导入 payload：当前值原样回传 + 关联字段
     payload: dict[str, Any] = {

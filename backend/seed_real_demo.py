@@ -1,4 +1,4 @@
-"""在每台本地真实 OpenMES 上导入可复现的 TEST_ 演示工单和质量问题。
+"""在每台本地真实 OpenMES 上导入可复现的 TEST_ 模拟工单和质量问题。
 
 这个脚本面向 ``APP_ADAPTER_MODE=real`` 的本地 ERPNext/OpenMES 环境，
 不是 Mock 数据入口，也不复制任何现有数据库或凭据。它只使用 OpenMES
@@ -11,7 +11,7 @@
 5. 回读并打印创建/复用的业务编号。
 
 当前 OpenMES 没有经本脚本确认的工艺模板、检验记录和历史批次导入契约，
-因此本脚本不会猜测这些字段，也不会调用固定容器名的 SQL。ETA/检验故事线
+因此本脚本不会猜测这些字段，也不会调用固定容器名的 SQL。ETA/检验业务流程
 仍需另行按目标 OpenMES 版本核对后处理。
 """
 from __future__ import annotations

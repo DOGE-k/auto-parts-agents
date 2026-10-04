@@ -41,7 +41,7 @@ const realNavGroups: { caption: string; items: { key: RealModuleKey; label: stri
   },
 ];
 
-// Mock 演示导航（合成数据；真实模式下整组隐藏，不与真实业务混在一组）
+// Mock 模拟导航（合成数据；真实模式下整组隐藏，不与真实业务混在一组）
 const mockNavItems: { key: PageKey; label: string; icon: string }[] = [
   { key: "scenarios", label: "场景与回放", icon: "◫" },
   { key: "dashboard", label: "协同驾驶舱", icon: "▦" },
@@ -178,7 +178,7 @@ function App() {
       setProjectId(result.project_id);
       setPage("dashboard");
       await refreshProjects();
-      notify(name === "normal_order" ? "正常订单演示已启动" : name === "material_shortage" ? "缺料协作演示已启动" : name === "quality_hold" ? "质量冻结演示已启动" : "加急协作演示已启动");
+      notify(name === "normal_order" ? "正常订单模拟已启动" : name === "material_shortage" ? "缺料协作模拟已启动" : name === "quality_hold" ? "质量冻结模拟已启动" : "加急协作模拟已启动");
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动场景失败");
     } finally {
@@ -192,7 +192,7 @@ function App() {
     try {
       await api(`/projects/${projectId}/reset`, { method: "POST", headers: writeHeaders() });
       await refreshAll();
-      notify("项目演示空间已复位");
+      notify("项目模拟空间已复位");
     } catch (e) {
       setError(e instanceof Error ? e.message : "复位失败");
     } finally {
@@ -255,7 +255,7 @@ function App() {
           ))}
           {mockDemoEnabled && (
             <div className="nav-group">
-              <div className="nav-group-caption mock">Mock 演示（合成数据）</div>
+              <div className="nav-group-caption mock">Mock 模拟（合成数据）</div>
               {mockNavItems.map((item) => (
                 <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
@@ -322,21 +322,21 @@ function App() {
       </main>
       {toast && <div className="toast">✓ &nbsp;{toast}</div>}
       {busy && <div className="busy-indicator"><span />处理中</div>}
-      {!selectedProject && !isRealModule(page) && page !== "scenarios" && <div className="empty-overlay"><div className="empty-card"><span className="empty-symbol">◫</span><h2>先启动一个演示场景</h2><p>选择正常订单或缺料协作，生成带完整审计时间线的合成项目。</p><button className="button primary" onClick={() => setPage("scenarios")}>选择场景</button></div></div>}
+      {!selectedProject && !isRealModule(page) && page !== "scenarios" && <div className="empty-overlay"><div className="empty-card"><span className="empty-symbol">◫</span><h2>先启动一个模拟场景</h2><p>选择正常订单或缺料协作，生成带完整审计时间线的合成项目。</p><button className="button primary" onClick={() => setPage("scenarios")}>选择场景</button></div></div>}
     </div>
   );
 }
 
 function PageHeading({ eyebrow, title, subtitle, action, mode }: { eyebrow: string; title: string; subtitle: string; action?: ReactNode; mode?: "mock" | "real" }) {
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p>
-    {mode === "mock" && <div className="mode-banner mock"><strong>Mock 演示数据</strong><span>本页内容来自固定种子合成场景（synthetic_demo_only），不是真实 ERP/MES 业务结果。真实流程请使用「真实业务」页面。</span></div>}
+    {mode === "mock" && <div className="mode-banner mock"><strong>Mock 模拟数据</strong><span>本页内容来自固定种子合成场景（synthetic_demo_only），不是真实 ERP/MES 业务结果。真实流程请使用「真实业务」页面。</span></div>}
     {mode === "real" && <div className="mode-banner real"><strong>真实系统数据</strong><span>本页数据来自本地部署的 ERPNext 与 OpenMES 接口。</span></div>}
   </div>{action && <div>{action}</div>}</div>;
 }
 
 function ScenarioPage({ projects, busy, onRun, onSelect, onReset }: { projects: Project[]; busy: boolean; onRun: (name: string) => void; onSelect: (id: string) => void; onReset: () => void }) {
   return <div className="page-content">
-    <PageHeading eyebrow="演示控制台（Mock）" title="选择一个业务场景" subtitle="每次运行使用固定种子的合成数据。成本与 ETA 使用页面中可追溯的演示规则。" mode="mock" />
+    <PageHeading eyebrow="模拟控制台（Mock）" title="选择一个业务场景" subtitle="每次运行使用固定种子的合成数据。成本与 ETA 使用页面中可追溯的模拟规则。" mode="mock" />
     <div className="scenario-grid">
       <article className="scenario-card normal-scenario">
         <div className="scenario-topline"><span className="scenario-icon blue">↗</span><span className="scenario-chip">主业务链</span></div>
@@ -364,7 +364,7 @@ function ScenarioPage({ projects, busy, onRun, onSelect, onReset }: { projects: 
       </article>
     </div>
     <section className="section-block">
-      <div className="section-title"><div><div className="eyebrow">本地演示记录</div><h2>最近项目</h2></div><span className="subtle">{projects.length} 个项目</span></div>
+      <div className="section-title"><div><div className="eyebrow">本地模拟记录</div><h2>最近项目</h2></div><span className="subtle">{projects.length} 个项目</span></div>
       {projects.length === 0 ? <div className="empty-state">还没有运行记录。先启动一个场景。</div> : <div className="project-list">
         {projects.map((project) => <button className="project-row" key={project.project_id} onClick={() => onSelect(project.project_id)}>
           <span className="project-avatar">{project.scenario === "normal_order" ? "正" : project.scenario === "material_shortage" ? "缺" : project.scenario === "quality_hold" ? "质" : "加"}</span><span className="project-main"><strong>{project.product_id}</strong><small>{project.project_id} · {project.customer_id}</small></span>
@@ -372,7 +372,7 @@ function ScenarioPage({ projects, busy, onRun, onSelect, onReset }: { projects: 
         </button>)}
       </div>}
     </section>
-    {projects.length > 0 && <div className="reset-row"><span>复位会清理所选项目的事件、审批、回放和审计演示数据。</span><button className="button ghost" onClick={onReset}>复位当前项目</button></div>}
+    {projects.length > 0 && <div className="reset-row"><span>复位会清理所选项目的事件、审批、回放和审计模拟数据。</span><button className="button ghost" onClick={onReset}>复位当前项目</button></div>}
   </div>;
 }
 
@@ -382,7 +382,7 @@ function DashboardPage({ snapshot, events, onGoApprovals }: { snapshot: Snapshot
   const gates = snapshot.gates ?? {};
   const risk = snapshot.delivery_risk;
   return <div className="page-content">
-    <PageHeading mode="mock" eyebrow="全局协同驾驶舱（Mock 演示）" title={snapshot.product_name ?? snapshot.product_id} subtitle={`${snapshot.project_id} · ${snapshot.customer_id} · correlation ${snapshot.correlation_id}`} action={<span className="badge synthetic">合成演示数据</span>} />
+    <PageHeading mode="mock" eyebrow="全局协同驾驶舱（Mock 模拟）" title={snapshot.product_name ?? snapshot.product_id} subtitle={`${snapshot.project_id} · ${snapshot.customer_id} · correlation ${snapshot.correlation_id}`} action={<span className="badge synthetic">合成模拟数据</span>} />
     <div className="kpi-grid">
       <Kpi label="生命周期" value={snapshot.lifecycle_state ?? "进行中"} icon="◷" tone="blue" />
       <Kpi label="在途事件" value={events.length} icon="⌁" tone="purple" />
@@ -399,7 +399,7 @@ function DashboardPage({ snapshot, events, onGoApprovals }: { snapshot: Snapshot
       </section>
       <section className="panel gate-panel"><div className="panel-heading"><div><h2>发运双门禁</h2><p>两个独立事实必须同时满足</p></div></div><Gate label="权威质量放行" value={gates.quality_released} /><Gate label="资料包人工批准" value={gates.document_package_approved} /><div className={`gate-result ${gates.quality_released && gates.document_package_approved ? "pass" : "blocked"}`}>{gates.quality_released && gates.document_package_approved ? "可以提交发运审批" : "门禁未齐，不进入发运审批"}</div></section>
     </div>
-    <div className="demo-note"><span>ⓘ</span><div><strong>演示数据提示</strong><p>{snapshot.demo_notice}</p></div></div>
+    <div className="demo-note"><span>ⓘ</span><div><strong>模拟数据提示</strong><p>{snapshot.demo_notice}</p></div></div>
   </div>;
 }
 
@@ -408,14 +408,14 @@ function AgentsPage({ snapshot, events }: { snapshot: Snapshot | null; events: E
   const cases = (snapshot.cases ?? []) as Case[];
   const latestPlan = snapshot.quote ?? snapshot.supply_options?.[0];
   return <div className="page-content">
-    <PageHeading mode="mock" eyebrow="Agent 工作台（Mock 演示）" title="四个独立业务身份" subtitle="每个 Agent 只执行自己的白名单能力，跨 Agent 协作通过事件记录和动态协议角色呈现。" />
+    <PageHeading mode="mock" eyebrow="Agent 工作台（Mock 模拟）" title="四个独立业务身份" subtitle="每个 Agent 只执行自己的白名单能力，跨 Agent 协作通过事件记录和动态协议角色呈现。" />
     <div className="agent-grid">{Object.entries(agentNames).map(([type, name]) => {
       const item = cases.find((current) => current.agent_type === type);
       const lastEvent = [...events].reverse().find((event) => event.source_agent === type || event.target_agent === type);
       return <article className="agent-card" key={type}><div className={`agent-avatar agent-${type}`}>{type === "quotation" ? "报" : type === "procurement" ? "采" : type === "tracking" ? "跟" : "质"}</div><div className="agent-title"><h3>{name}</h3><span className="agent-id">{type}-agent</span></div><div className="status-pair"><span><small>操作状态</small><b>{item?.operational_state ?? "READY"}</b></span><span><small>业务状态</small><b>{item?.business_state ?? "等待任务"}</b></span></div><p className="agent-objective">{item?.objective ?? "收到相关事件后按需参与，不主动空转。"}</p><div className="agent-last"><span>最近事件</span><b>{lastEvent ? eventNames[lastEvent.event_type] ?? lastEvent.event_type : "暂无"}</b></div></article>;
     })}</div>
     <section className="panel work-detail"><div className="panel-heading"><div><h2>当前计划与证据</h2><p>模型建议、Mock 数据和权威事实保持区分</p></div></div>
-      {latestPlan ? <div className="detail-columns"><div><small>计划输出</small><pre>{JSON.stringify(latestPlan, null, 2)}</pre></div><div><small>数据源边界</small><p>当前环境为固定回放。ERP 与 MES 状态以 fixture 标明的 Mock 权威事件呈现；场景计算规则只用于演示。</p><div className="evidence-chips">{(snapshot.net_requirement?.evidence_ids ?? snapshot.quote?.evidence_ids ?? []).map((item: string) => <span key={item}>{item}</span>)}</div></div></div> : <div className="empty-state compact">尚无计划输出。</div>}
+      {latestPlan ? <div className="detail-columns"><div><small>计划输出</small><pre>{JSON.stringify(latestPlan, null, 2)}</pre></div><div><small>数据源边界</small><p>当前环境为固定回放。ERP 与 MES 状态以 fixture 标明的 Mock 权威事件呈现；场景计算规则只用于模拟。</p><div className="evidence-chips">{(snapshot.net_requirement?.evidence_ids ?? snapshot.quote?.evidence_ids ?? []).map((item: string) => <span key={item}>{item}</span>)}</div></div></div> : <div className="empty-state compact">尚无计划输出。</div>}
     </section>
   </div>;
 }
@@ -424,8 +424,8 @@ function PlansPage({ snapshot }: { snapshot: Snapshot | null }) {
   if (!snapshot) return <EmptyPage title="方案对比" />;
   const options = snapshot.supply_options ?? [];
   return <div className="page-content">
-    <PageHeading mode="mock" eyebrow="方案对比（Mock 演示）" title={options.length ? "缺料供应方案" : "报价与交期假设"} subtitle="显示成本、日期、风险和计算规则版本；选择供应商和执行草稿仍由人工审批。" />
-    {options.length ? <div className="panel table-panel"><div className="panel-heading"><div><h2>供应方案比较</h2><p>缺口 {snapshot.net_requirement?.net_requirement} · 物料需求日 {snapshot.material_demand?.required_date}</p></div><span className="badge synthetic">固定演示公式</span></div><div className="table-wrap"><table><thead><tr><th>方案 / 供应商</th><th>缺口数量</th><th>单价</th><th>相对已接受报价影响</th><th>确认到货</th><th>质量风险</th><th>满足物料日</th></tr></thead><tbody>{options.map((option: any) => <tr key={option.option_id}><td><strong>{option.supplier_name}</strong><small>{option.option_id}</small></td><td>{snapshot.net_requirement?.net_requirement}</td><td>¥{option.unit_price}</td><td className={Number(option.cost_assessment.delta_for_shortage) > 0 ? "price-up" : "price-down"}>{Number(option.cost_assessment.delta_for_shortage) > 0 ? "+" : ""}¥{option.cost_assessment.delta_for_shortage}</td><td>{option.confirmed_delivery_date}<small>ETA {option.eta.eta_date}</small></td><td><RiskTag value={option.quality_risk} /></td><td><span className={`boolean ${option.meets_material_required_date ? "yes" : "no"}`}>{option.meets_material_required_date ? "符合" : "晚于需求日"}</span></td></tr>)}</tbody></table></div><div className="formula-note"><b>规则 {options[0]?.eta?.rule_version}</b><span>净需求 = 正式需求 − 合格可用库存 − 已确认在途；成本差额 = 缺口数量 ×（方案单价 − 已接受报价基准价）；ETA 使用日历天。</span></div></div> : <><div className="metric-row"><Kpi label="建议单位成本" value={`¥${snapshot.quote?.unit_cost ?? "—"}`} icon="¥" tone="blue" /><Kpi label="演示建议单价" value={`¥${snapshot.quote?.suggested_unit_price ?? "—"}`} icon="↗" tone="purple" /><Kpi label="毛利率" value={`${Number(snapshot.quote?.actual_gross_margin ?? 0) * 100}%`} icon="%" tone="green" /><Kpi label="预计 ETA" value={snapshot.eta?.eta_date ?? "—"} icon="◷" tone="amber" /></div><div className="formula-note wide"><b>{snapshot.quote?.rule_version ?? "演示规则"}</b><span>{snapshot.quote?.calculation_note ?? "报价成本和 ETA 仅基于场景 fixture 中标明的合成数据。"}</span></div></>}
+    <PageHeading mode="mock" eyebrow="方案对比（Mock 模拟）" title={options.length ? "缺料供应方案" : "报价与交期假设"} subtitle="显示成本、日期、风险和计算规则版本；选择供应商和执行草稿仍由人工审批。" />
+    {options.length ? <div className="panel table-panel"><div className="panel-heading"><div><h2>供应方案比较</h2><p>缺口 {snapshot.net_requirement?.net_requirement} · 物料需求日 {snapshot.material_demand?.required_date}</p></div><span className="badge synthetic">固定模拟公式</span></div><div className="table-wrap"><table><thead><tr><th>方案 / 供应商</th><th>缺口数量</th><th>单价</th><th>相对已接受报价影响</th><th>确认到货</th><th>质量风险</th><th>满足物料日</th></tr></thead><tbody>{options.map((option: any) => <tr key={option.option_id}><td><strong>{option.supplier_name}</strong><small>{option.option_id}</small></td><td>{snapshot.net_requirement?.net_requirement}</td><td>¥{option.unit_price}</td><td className={Number(option.cost_assessment.delta_for_shortage) > 0 ? "price-up" : "price-down"}>{Number(option.cost_assessment.delta_for_shortage) > 0 ? "+" : ""}¥{option.cost_assessment.delta_for_shortage}</td><td>{option.confirmed_delivery_date}<small>ETA {option.eta.eta_date}</small></td><td><RiskTag value={option.quality_risk} /></td><td><span className={`boolean ${option.meets_material_required_date ? "yes" : "no"}`}>{option.meets_material_required_date ? "符合" : "晚于需求日"}</span></td></tr>)}</tbody></table></div><div className="formula-note"><b>规则 {options[0]?.eta?.rule_version}</b><span>净需求 = 正式需求 − 合格可用库存 − 已确认在途；成本差额 = 缺口数量 ×（方案单价 − 已接受报价基准价）；ETA 使用日历天。</span></div></div> : <><div className="metric-row"><Kpi label="建议单位成本" value={`¥${snapshot.quote?.unit_cost ?? "—"}`} icon="¥" tone="blue" /><Kpi label="模拟建议单价" value={`¥${snapshot.quote?.suggested_unit_price ?? "—"}`} icon="↗" tone="purple" /><Kpi label="毛利率" value={`${Number(snapshot.quote?.actual_gross_margin ?? 0) * 100}%`} icon="%" tone="green" /><Kpi label="预计 ETA" value={snapshot.eta?.eta_date ?? "—"} icon="◷" tone="amber" /></div><div className="formula-note wide"><b>{snapshot.quote?.rule_version ?? "模拟规则"}</b><span>{snapshot.quote?.calculation_note ?? "报价成本和 ETA 仅基于场景 fixture 中标明的合成数据。"}</span></div></>}
     <div className="policy-card"><span>⌘</span><div><strong>订单期成本评估独立于已接受报价</strong><p>缺料场景使用单独的 cost_assessment_id 记录新增成本影响。供应方案审批不会修改原报价状态。</p></div><Badge value={snapshot.cost_assessment?.quote_status ?? snapshot.quote_status ?? "待报价"} /></div>
   </div>;
 }
@@ -434,8 +434,8 @@ function ApprovalsPage({ approvals, snapshot, busy, onDecide }: { approvals: App
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [requestText, setRequestText] = useState<Record<string, string>>({});
   return <div className="page-content">
-    <PageHeading mode="mock" eyebrow="人工审批箱（Mock 演示）" title="需要人工决定的动作" subtitle="每张审批绑定对象版本、快照哈希与规则版本；执行前会再次检查版本。" action={<span className="badge amber-chip">{approvals.length} 项待处理</span>} />
-    {approvals.length === 0 ? <div className="empty-state large"><span>✓</span><h3>当前没有待审批项</h3><p>{snapshot ? "后续需要人工决定的方案会显示在这里。" : "先启动演示场景。"}</p></div> : <div className="approval-list">{approvals.map((item) => {
+    <PageHeading mode="mock" eyebrow="人工审批箱（Mock 模拟）" title="需要人工决定的动作" subtitle="每张审批绑定对象版本、快照哈希与规则版本；执行前会再次检查版本。" action={<span className="badge amber-chip">{approvals.length} 项待处理</span>} />
+    {approvals.length === 0 ? <div className="empty-state large"><span>✓</span><h3>当前没有待审批项</h3><p>{snapshot ? "后续需要人工决定的方案会显示在这里。" : "先启动模拟场景。"}</p></div> : <div className="approval-list">{approvals.map((item) => {
       const payload = item.action_payload_json ?? {};
       const options = payload.available_option_ids ?? [];
       const selectedOption = selected[item.approval_id] ?? "";
@@ -455,7 +455,7 @@ function ApprovalsPage({ approvals, snapshot, busy, onDecide }: { approvals: App
 function AuditPage({ events, audit, snapshot }: { events: Event[]; audit: any[]; snapshot: Snapshot | null }) {
   const traceId = snapshot?.trace_id;
   return <div className="page-content">
-    <PageHeading mode="mock" eyebrow="审计与追溯（Mock 演示）" title="完整的事件因果链" subtitle="按 correlation_id 查看业务事实，再按 trace_id 关联协作、工具、审批和回放。" action={<div className="trace-chip">trace_id <code>{traceId ?? "—"}</code></div>} />
+    <PageHeading mode="mock" eyebrow="审计与追溯（Mock 模拟）" title="完整的事件因果链" subtitle="按 correlation_id 查看业务事实，再按 trace_id 关联协作、工具、审批和回放。" action={<div className="trace-chip">trace_id <code>{traceId ?? "—"}</code></div>} />
     <div className="audit-stats"><Kpi label="业务事件" value={events.length} icon="⌁" tone="blue" /><Kpi label="审计记录" value={audit.length} icon="▤" tone="purple" /><Kpi label="审批快照" value={snapshot?.pending_approvals?.length ?? 0} icon="✓" tone="amber" /></div>
     <div className="audit-grid"><section className="panel"><div className="panel-heading"><div><h2>事件与证据</h2><p>事实只追加，不覆盖</p></div></div><EventTimeline events={events} expanded /></section><section className="panel"><div className="panel-heading"><div><h2>运行审计</h2><p>工具输入输出使用 SHA-256 摘要</p></div></div>{audit.length === 0 ? <div className="empty-state compact">暂无审计动作</div> : <div className="audit-list">{audit.map((item) => <div className="audit-row" key={item.audit_id}><div className="audit-check">✓</div><div><strong>{item.action}</strong><small>{item.actor} · {new Date(item.created_at).toLocaleString("zh-CN")}</small><code>in {item.input_hash?.slice(0, 18)}…</code><code>out {item.output_hash?.slice(0, 18)}…</code></div><Badge value={item.result} /></div>)}</div>}</section></div>
   </div>;
@@ -463,7 +463,7 @@ function AuditPage({ events, audit, snapshot }: { events: Event[]; audit: any[];
 
 function EventTimeline({ events, expanded = false }: { events: Event[]; expanded?: boolean }) {
   if (!events.length) return <div className="empty-state compact">等待首条事件</div>;
-  return <div className={`event-list ${expanded ? "expanded" : ""}`}>{events.map((event) => <div className="event-row" key={event.event_id}><div className="event-rail"><span className={`event-dot ${event.event_type.includes("RISK") || event.event_type.includes("SHORTAGE") ? "risk" : event.event_type.includes("APPROVED") || event.event_type === "QUALITY_RELEASED" ? "success" : ""}`} /><i /></div><div className="event-copy"><div className="event-title"><strong>{eventNames[event.event_type] ?? event.event_type}</strong><time>{new Date(event.occurred_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></div><div className="event-subline"><code>{event.event_id}</code><span>{event.source_agent ? agentNames[event.source_agent] : "Mock 系统 / 演示操作"}{event.target_agent ? ` → ${agentNames[event.target_agent]}` : ""}</span></div>{expanded && <><p>{JSON.stringify(event.payload)}</p><div className="evidence-chips">{event.evidence_ids?.map((item) => <span key={item}>{item}</span>)}</div></>}</div></div>)}</div>;
+  return <div className={`event-list ${expanded ? "expanded" : ""}`}>{events.map((event) => <div className="event-row" key={event.event_id}><div className="event-rail"><span className={`event-dot ${event.event_type.includes("RISK") || event.event_type.includes("SHORTAGE") ? "risk" : event.event_type.includes("APPROVED") || event.event_type === "QUALITY_RELEASED" ? "success" : ""}`} /><i /></div><div className="event-copy"><div className="event-title"><strong>{eventNames[event.event_type] ?? event.event_type}</strong><time>{new Date(event.occurred_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></div><div className="event-subline"><code>{event.event_id}</code><span>{event.source_agent ? agentNames[event.source_agent] : "Mock 系统 / 模拟操作"}{event.target_agent ? ` → ${agentNames[event.target_agent]}` : ""}</span></div>{expanded && <><p>{JSON.stringify(event.payload)}</p><div className="evidence-chips">{event.evidence_ids?.map((item) => <span key={item}>{item}</span>)}</div></>}</div></div>)}</div>;
 }
 
 function CaseCard({ item }: { item: Case }) {
@@ -493,7 +493,7 @@ function RiskTag({ value }: { value: string }) {
 }
 
 function EmptyPage({ title }: { title: string }) {
-  return <div className="page-content"><PageHeading mode="mock" eyebrow="工作空间（Mock 演示）" title={title} subtitle="选择一个本地演示项目后，这里会显示对应内容。" /><div className="empty-state large"><span>◫</span><h3>还没有项目</h3><p>进入场景选择，启动一条合成业务链。</p></div></div>;
+  return <div className="page-content"><PageHeading mode="mock" eyebrow="工作空间（Mock 模拟）" title={title} subtitle="选择一个本地模拟项目后，这里会显示对应内容。" /><div className="empty-state large"><span>◫</span><h3>还没有项目</h3><p>进入场景选择，启动一条合成业务链。</p></div></div>;
 }
 
 function actionName(type: string) {

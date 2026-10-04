@@ -1,4 +1,4 @@
-// 面板级错误边界（阶段十演示容错）：单个面板渲染崩溃只降级该面板，不拖垮整页。
+// 面板级错误边界（阶段十模拟容错）：单个面板渲染崩溃只降级该面板，不拖垮整页。
 // React 类组件是 ErrorBoundary 的唯一实现方式；重试按钮重置内部状态重新挂载子树。
 import { Component, type ErrorInfo, type ReactNode } from "react";
 

@@ -2,11 +2,11 @@
   "fixture_id": "quality-hold-demo-v1",
   "data_source": "synthetic_demo_only",
   "scenario": "quality_hold",
-  "notice": "质量冻结场景：生产过程中发现质量问题触发冻结，所有数据均为演示用合成数据。",
+  "notice": "质量冻结场景：生产过程中发现质量问题触发冻结，所有数据均为模拟用合成数据。",
   "project": {
     "customer_id": "DEMO-CUSTOMER-001",
     "product_id": "DEMO-BRACKET-001",
-    "product_name": "演示支架组件",
+    "product_name": "模拟支架组件",
     "order_quantity": 120,
     "currency": "CNY",
     "required_delivery_date": "2026-10-28"

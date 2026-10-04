@@ -79,7 +79,7 @@ class CapabilityCatalogTests(unittest.TestCase):
 
     def test_registered_but_not_declared_reported_and_excluded(self):
         registered = _registered_from_services()
-        registered["tracking"].add("tracking.detect_risk")  # Mock 演示技能
+        registered["tracking"].add("tracking.detect_risk")  # Mock 模拟技能
         catalog = build_capability_catalog(REAL_SKILL_TOOLS, registered)
         ids = {e["skill_id"] for e in catalog["entries"]}
         self.assertNotIn("tracking.detect_risk", ids)

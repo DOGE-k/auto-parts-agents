@@ -1,10 +1,10 @@
 """
-AIP 智能体协作演示模块。
+AIP 智能体协作模拟模块。
 
 展示四个智能体（报价、采购、跟单、质量文档）如何通过标准 AIP 协议
 （ACPs-spec-AIP-v02.02）互相发现、调用和协作。
 
-这是一个独立的演示模块，不依赖原有业务流程，
+这是一个独立的模拟模块，不依赖原有业务流程，
 专注于展示 AIP 协议级别的智能体互联能力。
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class AipCollaborationDemo:
     """
-    AIP 智能体协作演示编排器。
+    AIP 智能体协作模拟编排器。
 
     模拟一个汽车零部件订单的端到端协作流程，
     所有智能体间的调用都通过标准 AIP 协议完成。
@@ -75,7 +75,7 @@ class AipCollaborationDemo:
 
     async def run_normal_order_demo(self) -> dict[str, Any]:
         """
-        运行正常订单的 AIP 协作演示。
+        运行正常订单的 AIP 协作模拟。
 
         协作流程：
         1. 报价智能体计算成本 + 生成报价草稿
@@ -85,7 +85,7 @@ class AipCollaborationDemo:
         5. 跟单智能体检查发运门禁
         """
         print(f"\n{'='*70}")
-        print(f"🚀 AIP 智能体协作演示 - 正常订单场景")
+        print(f"🚀 AIP 智能体协作模拟 - 正常订单场景")
         print(f"   会话ID: {self.session_id}")
         print(f"   项目ID: {self.project_id}")
         print(f"{'='*70}\n")
@@ -264,7 +264,7 @@ class AipCollaborationDemo:
             print(f"   {i}. {status_icon} {log['leader']} → {log['partner']}: {log['skill']}")
 
         print()
-        print("🎉 AIP 智能体协作演示完成!")
+        print("🎉 AIP 智能体协作模拟完成!")
         print("=" * 70)
 
         return {
@@ -284,7 +284,7 @@ class AipCollaborationDemo:
 
     async def run_shortage_demo(self) -> dict[str, Any]:
         """
-        运行物料短缺场景的 AIP 协作演示。
+        运行物料短缺场景的 AIP 协作模拟。
 
         展示异常场景下智能体的动态协作：
         1. 跟单智能体检测到物料短缺风险
@@ -293,7 +293,7 @@ class AipCollaborationDemo:
         4. 形成多方案对比供人工选择
         """
         print(f"\n{'='*70}")
-        print(f"⚠️  AIP 智能体协作演示 - 物料短缺异常场景")
+        print(f"⚠️  AIP 智能体协作模拟 - 物料短缺异常场景")
         print(f"   会话ID: {self.session_id}")
         print(f"   项目ID: {self.project_id}")
         print(f"{'='*70}\n")
@@ -426,7 +426,7 @@ class AipCollaborationDemo:
             print(f"   {i}. {status_icon} {log['leader']} → {log['partner']}: {log['skill']}")
 
         print()
-        print("🎉 AIP 异常场景协作演示完成!")
+        print("🎉 AIP 异常场景协作模拟完成!")
         print("=" * 70)
 
         return {
@@ -484,7 +484,7 @@ class AipCollaborationDemo:
 
 
 async def run_demo(scenario: str = "normal_order") -> dict[str, Any]:
-    """便捷函数：运行指定场景的 AIP 协作演示。"""
+    """便捷函数：运行指定场景的 AIP 协作模拟。"""
     demo = AipCollaborationDemo()
     try:
         if scenario == "normal_order":

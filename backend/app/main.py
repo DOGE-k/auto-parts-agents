@@ -73,7 +73,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def isolate_mock_api(request, call_next):
-    """真实表面拒绝旧 Mock 场景 API，避免误把演示数据当业务数据。"""
+    """真实表面拒绝旧 Mock 场景 API，避免误把模拟数据当业务数据。"""
     from app.runtime.surface import mock_demo_enabled, public_surface
 
     if not mock_demo_enabled():
@@ -83,7 +83,7 @@ async def isolate_mock_api(request, call_next):
                 status_code=404,
                 content={
                     "code": "mock_surface_disabled",
-                    "message": "Mock 演示 API 已隔离；请设置 MOCK_DEMO_ENABLED=true 或使用真实业务入口",
+                    "message": "Mock 模拟 API 已隔离；请设置 MOCK_DEMO_ENABLED=true 或使用真实业务入口",
                 },
             )
     return await call_next(request)

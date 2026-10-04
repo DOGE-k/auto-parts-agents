@@ -2,7 +2,7 @@
 跟单智能体 AIP 服务。
 技能分两类：
 - *.real_*：调用真实业务链（real_order/order_linkage，数据来自真实 ERPNext/OpenMES）
-- 其余：Mock 场景演示技能（tool_registry 合成数据，仅用于 Mock 演示）
+- 其余：Mock 场景模拟技能（tool_registry 合成数据，仅用于 Mock 模拟）
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def create_tracking_aip_service(aic: str = "local-tracking-001") -> AipAgentServ
         handler=real_delivery_impact,
     )
 
-    # ===== Mock 场景演示技能 =====
+    # ===== Mock 场景模拟技能 =====
 
     # 交期预估
     async def calculate_eta(inputs: dict) -> dict:

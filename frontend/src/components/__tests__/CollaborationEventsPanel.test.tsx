@@ -38,7 +38,7 @@ const completedEvent = {
   event_type: "quality_issue_raised",
   dedup_key: "quality_issue_raised:11:5",
   status: "COMPLETED",
-  payload: { work_order_id: "11", issue_id: "5", title: "TEST 演示", source: "issue_registration" },
+  payload: { work_order_id: "11", issue_id: "5", title: "TEST 模拟", source: "issue_registration" },
   failure_count: 0,
   max_retries: 3,
   taken_over_by: "",
@@ -107,7 +107,7 @@ describe("CollaborationEventsPanel（P1 回归）", () => {
     await flush();
     expect(panel.container.textContent).toContain("EVT-TEST0000001");
     expect(panel.container.textContent).toContain("已完成");
-    expect(panel.container.textContent).toContain("TEST 演示");
+    expect(panel.container.textContent).toContain("TEST 模拟");
 
     // 先改 mock 再挂载：面板挂载时立即触发首次加载
     getCollaborationEventsMock.mockResolvedValue({ items: [], count: 0 });

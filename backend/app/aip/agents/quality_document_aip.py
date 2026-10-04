@@ -2,7 +2,7 @@
 质量文档智能体 AIP 服务。
 技能分两类：
 - *.real_*：调用真实业务链（real_order，数据来自真实 OpenMES）
-- 其余：Mock 场景演示技能（合成数据，仅用于 Mock 演示）
+- 其余：Mock 场景模拟技能（合成数据，仅用于 Mock 模拟）
 """
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def create_quality_document_aip_service(aic: str = "local-quality-doc-001") -> A
         handler=real_list_open_issues,
     )
 
-    # ===== Mock 场景演示技能 =====
+    # ===== Mock 场景模拟技能 =====
 
     # 资料清单生成
     async def build_checklist(inputs: dict) -> dict:

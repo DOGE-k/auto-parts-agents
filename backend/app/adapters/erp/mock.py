@@ -116,7 +116,7 @@ class MockERPAdapter:
         return results
 
     async def list_inventory_overview(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Mock 演示环境：无真实 Bin 数据，返回空列表（不伪造库存数字）。"""
+        """Mock 模拟环境：无真实 Bin 数据，返回空列表（不伪造库存数字）。"""
         return []
 
     async def search_suppliers(self, keyword: str, limit: int) -> list[dict[str, Any]]:
@@ -236,7 +236,7 @@ class MockERPAdapter:
                 "items": [
                     {
                         "item_code": "DEMO-BRACKET-001",
-                        "item_name": "演示支架组件",
+                        "item_name": "模拟支架组件",
                         "qty": "120",
                         "rate": "380",
                         "uom": "Nos",
@@ -331,7 +331,7 @@ class MockERPAdapter:
         return {
             "DEMO-CUSTOMER-001": {
                 "customer_id": "DEMO-CUSTOMER-001",
-                "customer_name": "演示汽车零部件有限公司",
+                "customer_name": "模拟汽车零部件有限公司",
                 "customer_group": "Automotive",
                 "territory": "China",
                 "currency": "CNY",
@@ -340,7 +340,7 @@ class MockERPAdapter:
             },
             "DEMO-CUSTOMER-002": {
                 "customer_id": "DEMO-CUSTOMER-002",
-                "customer_name": "比亚迪汽车演示客户",
+                "customer_name": "比亚迪汽车模拟客户",
                 "customer_group": "Automotive",
                 "territory": "China",
                 "currency": "CNY",
@@ -353,10 +353,10 @@ class MockERPAdapter:
         return {
             "DEMO-BRACKET-001": {
                 "item_id": "DEMO-BRACKET-001",
-                "item_name": "演示支架组件",
+                "item_name": "模拟支架组件",
                 "item_group": "Finished Goods",
                 "item_code": "DEMO-BRACKET-001",
-                "description": "汽车座椅调节支架总成（演示用）",
+                "description": "汽车座椅调节支架总成（模拟用）",
                 "uom": "Piece",
                 "is_stock_item": True,
                 "default_warehouse": "Finished Goods - M",
@@ -366,7 +366,7 @@ class MockERPAdapter:
                 "item_name": "铝合金型材 6061-T6",
                 "item_group": "Raw Material",
                 "item_code": "DEMO-AL-102",
-                "description": "6061-T6 铝合金挤压型材（演示用）",
+                "description": "6061-T6 铝合金挤压型材（模拟用）",
                 "uom": "Kg",
                 "is_stock_item": True,
                 "default_warehouse": "Raw Material - M",
@@ -376,7 +376,7 @@ class MockERPAdapter:
                 "item_name": "高强度螺栓 M8x25",
                 "item_group": "Raw Material",
                 "item_code": "DEMO-BOLT-008",
-                "description": "8.8级高强度螺栓（演示用）",
+                "description": "8.8级高强度螺栓（模拟用）",
                 "uom": "Piece",
                 "is_stock_item": True,
                 "default_warehouse": "Raw Material - M",
@@ -386,7 +386,7 @@ class MockERPAdapter:
                 "item_name": "20CrMnTi 齿轮钢",
                 "item_group": "Raw Material",
                 "item_code": "MAT-STEEL-20CrMnTi",
-                "description": "渗碳齿轮钢棒料（演示用）",
+                "description": "渗碳齿轮钢棒料（模拟用）",
                 "uom": "Kg",
                 "is_stock_item": True,
                 "default_warehouse": "Raw Material - M",

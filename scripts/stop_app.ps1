@@ -1,6 +1,6 @@
-﻿# 一键关闭演示环境：后端 9000 + 前端 5173 + OpenMES/ERPNext 容器 + 业务库
-# 用法：powershell -ExecutionPolicy Bypass -File scripts\stop_demo.ps1
-# 幂等：已停止的部分显示"跳过"；容器用 stop（不删除），下次 start_demo 秒级拉起。
+﻿# 一键关闭验收环境：后端 9000 + 前端 5173 + OpenMES/ERPNext 容器 + 业务库
+# 用法：powershell -ExecutionPolicy Bypass -File scripts\stop_app.ps1
+# 幂等：已停止的部分显示"跳过"；容器用 stop（不删除），下次 start_app 秒级拉起。
 
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
@@ -63,4 +63,4 @@ if ($businessDb) {
 }
 
 Write-Host ""
-Write-Host "已全部关闭。下次双击 启动演示.bat 一键恢复（容器为 stop 保留，秒级拉起）。" -ForegroundColor Cyan
+Write-Host "已全部关闭。下次双击 启动应用.bat 一键恢复（容器为 stop 保留，秒级拉起）。" -ForegroundColor Cyan

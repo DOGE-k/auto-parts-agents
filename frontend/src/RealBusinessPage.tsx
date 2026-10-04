@@ -609,7 +609,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   // 全厂跟单（用户建议 2026-10-02）：选择任意未完工工单直接跟单。
   // 复用 openWorkOrderTracking 的守卫链路（工单反查报价审批状态 → 三面板只读加载）。
   const unfinishedWorkOrders = workOrders
-    // 口径：生产完工（DONE）≠ 发运完成——完工单仍需质量关闭与发运门禁，只排除已取消/已关闭与 DEMO 演示单
+    // 口径：生产完工（DONE）≠ 发运完成——完工单仍需质量关闭与发运门禁，只排除已取消/已关闭与 DEMO 模拟单
     .filter((wo) => !["CANCELLED", "CLOSED"].includes(String(wo.status ?? "").toUpperCase())
       && !String(wo.work_order_no ?? "").startsWith("DEMO_"))
     .sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));

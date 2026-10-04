@@ -6,7 +6,7 @@
 
 ## 一、任务定义
 
-系统已实现"任意新订单全链路"（报价 → 审批 → ERP 草稿 → 采购分析 → **工单下达** → 跟单/质量/发运门禁，§3.43）。剩余两个写入类断点，补齐后"剧本外任意输入"覆盖全部故事线：
+系统已实现"任意新订单全链路"（报价 → 审批 → ERP 草稿 → 采购分析 → **工单下达** → 跟单/质量/发运门禁，§3.43）。剩余两个写入类断点，补齐后"预设流程外任意输入"覆盖全部业务流程：
 
 | # | 任务 | 现状 | 补齐后的效果 |
 |---|------|------|------------|
@@ -29,7 +29,7 @@
 3. **报工/完工** `POST /api/v1/batch-steps/{batchStepId}/complete`（routes/api.php:621）
    - 请求体（`CompleteBatchStepRequest.php:23-31`）：`produced_qty`（nullable）、**`actual_elapsed_minutes` / `actual_setup_minutes` / `actual_run_minutes`**（正是速率 ETA 计算需要的真实耗时字段；约束 setup+run ≤ elapsed，BatchService.php:177-179 强制校验）
    - 完成逻辑 `BatchService.php:97-212`：批次全部步骤完成后 `finishBatchIfComplete`（576-595 行）回写 `batches.produced_qty`
-   - **注意**：`completed_at` 服务端取 now()，无法回填历史时间点——演示时按"现在报工"设计话术
+   - **注意**：`completed_at` 服务端取 now()，无法回填历史时间点——验收时按"现在报工"设计话术
    - 建批次/开工/完工的响应里都带步骤 id，需要从建批次响应中取 `batchStepId`
 
 补充：批次/步骤查询 `GET /api/v1/work-orders/{id}/batches`（已封装：`OpenMESAdapter.get_work_order_batches`，`backend/app/adapters/mes/openmes_adapter.py:390`）。
@@ -39,7 +39,7 @@
 `POST /api/v1/issues`（routes/api.php:665）→ `IssueController::store`（IssueController.php:83-94，reported_by_id 自动取当前用户）。
 
 - 请求体（`CreateIssueRequest.php:23-29`）：`work_order_id`（required）、`batch_step_id`（nullable）、**`issue_type_id`（required）**、`title`（required，max:255）、`description`（nullable，max:5000）
-- **前置**：issue_type_id 必须真实存在。查列表端点 `GET /api/v1/issue-types`（routes/api.php:681 附近，只读）；演示前先确认库里有合适的 issue_type（如尺寸超差类），没有则需要先建（`POST /api/v1/issue-types` 标注 Admin only）——**接手者先 curl 看一眼现有 issue_types 再定 UI 形态**
+- **前置**：issue_type_id 必须真实存在。查列表端点 `GET /api/v1/issue-types`（routes/api.php:681 附近，只读）；验收前先确认库里有合适的 issue_type（如尺寸超差类），没有则需要先建（`POST /api/v1/issue-types` 标注 Admin only）——**接手者先 curl 看一眼现有 issue_types 再定 UI 形态**
 
 ## 三、铁律（违反即返工，摘自项目历史）
 
@@ -66,12 +66,12 @@
 1. 先 `curl -H "Authorization: Bearer <token>" http://localhost/api/v1/issue-types` 看现有类型，确定 UI 是下拉选择还是需要先建类型。
 2. 适配器透传 `POST /api/v1/issues`；服务层三步审批（前缀 `QISS-`），payload 含 work_order_id / issue_type_id / title / description；写入后回读（`list_open_issues` 或工单质量包）确认新 issue 可见；幂等设计见铁律 3。
 3. API + 前端（质量中心页签加"登记质量问题"入口，或 Step 8 质量面板）+ 测试，同上模式。
-4. **演示联动建议**：登记成功后立即引导进入既有 NCR 处置面板（复用 §3.40 的跨页签联动 goToQualityDispose 模式）。
+4. **验收联动建议**：登记成功后立即引导进入既有 NCR 处置面板（复用 §3.40 的跨页签联动 goToQualityDispose 模式）。
 
 ### 收尾
 
 - 真实验证：对 §3.43 创建的工单 id=10（WO-SO-2026-00024，BD-2402 · 800 件）做一次真实验收（报工后 ETA 变 RATE_BASED；建 issue 后质量待办出现新条目），记录编号进文档。
-- 更新 `demo_runbook.md`：故事线 B（速率 ETA）补"现场报工"路径；故事线 D 补"现场登记质量问题"路径。
+- 更新 `业务流程与验收.md`：业务流程 B（速率 ETA）补"现场报工"路径；业务流程 D 补"现场登记质量问题"路径。
 - 小待办顺带处理（可选）：工单 product_name 为空的 product_type external_code 映射（§3.43 第三节末尾）。
 
 ## 五、环境速查（2026-09-30 实测状态）
@@ -79,7 +79,7 @@
 - 分支 `codex/real-integration-layer`，最新提交 `4352e61`；测试基线后端 139 / 前端 14 全绿。
 - 后端 9000 运行中（业务库 PostgreSQL `autoparts-db` 容器）；前端 5173 dev server；OpenMES 80（admin 登录拿 Bearer，15 分钟 TTL，**密码问用户，勿写入任何文件**）；ERPNext 8080。
 - 写入令牌 `.env` 的 `REAL_WRITE_API_TOKEN`（请求头 `X-Real-Write-Token`），页面"会话设置"里填。
-- 演示入口 `powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`。
+- 启动入口 `powershell -ExecutionPolicy Bypass -File scripts\start_app.ps1`。
 - 通用链路验证数据：报价 `QUO-3DD73A37B674` → ERP 草稿 `SAL-ORD-2026-00024` → 工单 id=10（`WO-SO-2026-00024`，审批 `WOD-AA9E1833517A`）。
 - Git Bash 坑：python 脚本内联中文 JSON 用文件 + `--data-binary @file`；反斜杠路径用正斜杠。
 
@@ -88,4 +88,4 @@
 1. 任意工单（含新下达的）页面报工后：完成率/produced_qty 变化真实可溯、ETA 口径 RATE_BASED（有速率数据时）；重复报工幂等。
 2. 任意工单页面登记质量问题后：质量待办出现新条目（真实 OpenMES 记录），可直接走处置三步闭环。
 3. 全程审批留痕（审批号可复述）、回读验证、无未审批写入。
-4. 测试基线不下降；文档（current_status_and_fix_plan.md 新 § 节 + demo_runbook.md）与提交同步。
+4. 测试基线不下降；文档（current_status_and_fix_plan.md 新 § 节 + 业务流程与验收.md）与提交同步。

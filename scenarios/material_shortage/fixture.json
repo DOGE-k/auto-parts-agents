@@ -5,7 +5,7 @@
   "project": {
     "customer_id": "DEMO-CUSTOMER-002",
     "product_id": "DEMO-HOUSING-002",
-    "product_name": "演示壳体组件",
+    "product_name": "模拟壳体组件",
     "order_quantity": 500,
     "required_delivery_date": "2026-10-20",
     "currency": "CNY"
@@ -31,7 +31,7 @@
     {
       "option_id": "SUPPLY-STANDARD",
       "supplier_id": "DEMO-SUPPLIER-A",
-      "supplier_name": "演示供应商 A",
+      "supplier_name": "模拟供应商 A",
       "unit_price": "11.80",
       "lead_time_days": 12,
       "quality_risk": "low",
@@ -40,7 +40,7 @@
     {
       "option_id": "SUPPLY-EXPEDITE",
       "supplier_id": "DEMO-SUPPLIER-B",
-      "supplier_name": "演示供应商 B",
+      "supplier_name": "模拟供应商 B",
       "unit_price": "14.60",
       "lead_time_days": 5,
       "quality_risk": "medium",
@@ -52,5 +52,5 @@
     "baseline_material_unit_price": "12.50",
     "quote_id": "DEMO-QUOTE-002"
   },
-  "notice": "所有需求、库存、供应商、价格、风险和日期均为演示用合成数据，不代表真实 ERP/MES 记录。"
+  "notice": "所有需求、库存、供应商、价格、风险和日期均为模拟用合成数据，不代表真实 ERP/MES 记录。"
 }

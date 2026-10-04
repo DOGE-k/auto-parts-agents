@@ -4,7 +4,7 @@
 > 项目路径：`E:\competition\汽车零部件工厂智能体开发`  
 > 当前分支：`codex/real-integration-layer`  
 > 文档日期：2026-10-02
-> 状态：已执行。实现提交：`fd84fa8`；演示剧本补充：`7b98b96`。本文保留原验收要求和边界，完成结果以 `current_status_and_fix_plan.md` §3.52 及其后续复核记录为准。
+> 状态：已执行。实现提交：`fd84fa8`；业务流程与验收补充：`7b98b96`。本文保留原验收要求和边界，完成结果以 `current_status_and_fix_plan.md` §3.52 及其后续复核记录为准。
 
 ## 一、任务目标
 
@@ -21,14 +21,14 @@
 ## 二、接手前必须确认的事实
 
 1. 只使用 `E:\competition\汽车零部件工厂智能体开发`，不要切换到 C: 目录，也不要删除 C: 目录。
-2. 当前最新提交为 `7b98b96`，对应 §3.52 演示剧本补充。实现提交为 `fd84fa8`；前序相关提交依次为：
+2. 当前最新提交为 `7b98b96`，对应 §3.52 业务流程与验收补充。实现提交为 `fd84fa8`；前序相关提交依次为：
    - `0bddd4c`：§3.47 OpenMES 认证自愈；
    - `3079a14`：§3.48 任务型协同问答；
    - `bec22c5`：§3.49 页面级走查与契约修复；
    - `8f9b3e5`：§3.50 质量异常事件；
    - `425804e`：§3.51 缺料与延期事件。
    - `fd84fa8`：§3.52 去处置导航、三项缺口收口和 SQLite 回退迁移；
-   - `7b98b96`：§3.52 演示剧本补充。
+   - `7b98b96`：§3.52 业务流程与验收补充。
 3. 当前历史验证显示 `/api/mes/work-orders` 可以返回 12 条工单，但工单数量属于运行时数据，不能写死到业务规则或页面话术中。
 4. 执行前 PostgreSQL 业务库已有 `collaboration_events`，默认 `backend/data/demo.db` 曾停在 `b5d9e6a41c77`。本阶段已确认继续支持 SQLite 回退，并核实现有回退库已迁移到 `c7e2f9a84d15`；新库初始化和后续升级仍必须按目标环境走 Alembic 复核，不能用 `create_all` 代替。
 5. 工作树中存在未跟踪临时文件：
@@ -104,7 +104,7 @@
 
 ## 四、任务 B：文档状态同步
 
-**执行结果：已完成。** `AI_HANDOFF_PLAN.md`、`current_status_and_fix_plan.md` 和 `demo_runbook.md` 已追加 §3.52 状态、验收结果与遗留边界。API、HTTP 状态码、数据 authority、页面截图和写入边界的具体证据以 `current_status_and_fix_plan.md` §3.52 及其后的复核小节为准。
+**执行结果：已完成。** `AI_HANDOFF_PLAN.md`、`current_status_and_fix_plan.md` 和 `业务流程与验收.md` 已追加 §3.52 状态、验收结果与遗留边界。API、HTTP 状态码、数据 authority、页面截图和写入边界的具体证据以 `current_status_and_fix_plan.md` §3.52 及其后的复核小节为准。
 
 ### 4.1 `AI_HANDOFF_PLAN.md`
 
@@ -129,7 +129,7 @@
 - SQLite/PostgreSQL 选择及迁移结果；
 - 尚未解决的问题。
 
-### 4.3 `demo_runbook.md`
+### 4.3 `业务流程与验收.md`
 
 只在页面实际验证通过后补充事件操作路径。不要把历史截图或历史事件编号写成当前固定数据。
 
@@ -202,7 +202,7 @@ Invoke-RestMethod http://127.0.0.1:9000/api/real-orders/collaboration/events
 3. 前端事件组件回归测试覆盖质量、缺料、延期和错误路径；
 4. `backend/tests`、前端 Vitest、源代码类型检查、`npm run build` 的实际结果均已记录；
 5. SQLite 回退或 PostgreSQL 强依赖的选择已实现并写入文档；
-6. `AI_HANDOFF_PLAN.md`、`current_status_and_fix_plan.md` 和需要时的 `demo_runbook.md` 已同步；
+6. `AI_HANDOFF_PLAN.md`、`current_status_and_fix_plan.md` 和需要时的 `业务流程与验收.md` 已同步；
 7. Git 状态中没有把临时文件误加入提交；
 8. §3.48 连续“数量变更 → 重新选方案”回归通过，或已明确记录遗留；
 9. 事件“人工接管 → 再次触发”幂等回归通过，或已明确记录遗留；

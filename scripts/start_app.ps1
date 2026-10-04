@@ -1,5 +1,5 @@
-﻿# 一键启动演示环境：后端 9000 + 前端 5173 + 环境预检
-# 用法：powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1
+﻿# 一键启动验收环境：后端 9000 + 前端 5173 + 环境预检
+# 用法：powershell -ExecutionPolicy Bypass -File scripts\start_app.ps1
 # 幂等：端口已被占用时跳过启动；预检失败会明确列出，不静默继续。
 
 $ErrorActionPreference = "Stop"
@@ -115,7 +115,7 @@ function Start-Background([string]$Name, [int]$Port, [scriptblock]$Start) {
     Write-Host "[启动] $Name → 端口 $Port" -ForegroundColor Green
 }
 
-Write-Host "=== 汽车零部件工厂智能体 · 演示环境启动 ===" -ForegroundColor Cyan
+Write-Host "=== 汽车零部件工厂智能体 · 验收环境启动 ===" -ForegroundColor Cyan
 
 Start-Background "后端 API" 9000 {
     $out = Join-Path $backend "uvicorn-9000.log"
@@ -200,13 +200,13 @@ if ($envContent -match "REAL_WRITE_API_TOKEN=\S") {
 if ($envContent -match "APP_ADAPTER_MODE=real") {
     Write-Host "[通过] 适配器模式 real（连不上真实系统会明确报错，不回退 Mock）" -ForegroundColor Green
 } else {
-    Write-Host "[警告] APP_ADAPTER_MODE 不是 real：连不上 ERP/MES 时会静默回退 Mock，页面显示假数据。演示请设为 real" -ForegroundColor Yellow
+    Write-Host "[警告] APP_ADAPTER_MODE 不是 real：连不上 ERP/MES 时会静默回退 Mock，页面显示假数据。验收请设为 real" -ForegroundColor Yellow
 }
 
-Write-Host "`n=== 演示入口 ===" -ForegroundColor Cyan
+Write-Host "`n=== 启动入口 ===" -ForegroundColor Cyan
 Write-Host "  页面：  http://127.0.0.1:5173/  （真实业务页为默认）"
 if ($failed.Count -gt 0) {
-    Write-Host "`n预检未全部通过：$($failed -join '、')。请先解决再演示。" -ForegroundColor Red
+    Write-Host "`n预检未全部通过：$($failed -join '、')。请先解决再验收。" -ForegroundColor Red
     exit 1
 }
-Write-Host "`n环境就绪，可以开始演示。" -ForegroundColor Green
+Write-Host "`n环境就绪，可以开始验收。" -ForegroundColor Green

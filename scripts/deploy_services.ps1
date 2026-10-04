@@ -71,5 +71,5 @@ if ($freshInstall) {
     Write-Hint "OpenMES  等容器健康后，管理员账号按 services/OpenMes/.env 的 ADMIN_USERNAME/ADMIN_PASSWORD 自动创建；登录页 http://127.0.0.1/"
     Write-Hint "ERPNext  建站（一次性，站点名必须叫 localhost）："
     Write-Host '        docker compose --project-name erpnext exec backend bench new-site localhost --mariadb-user-host-login-scope=% --db-root-password <你的DB_PASSWORD> --admin-password <你设的ERPNext管理员密码> --install-app erpnext' -ForegroundColor Yellow
-    Write-Hint "之后回到 README.md 第 4 节：配置应用 .env（get_openmes_token.py 一键取 token）→ 种子数据 → start_demo.ps1。"
+    Write-Hint "之后回到 README.md 第 4 节：配置应用 .env（get_openmes_token.py 一键取 token）→ 种子数据 → start_app.ps1。"
 }

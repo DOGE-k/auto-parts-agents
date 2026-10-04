@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -71,7 +71,7 @@ MOCK_MES = get_mock_mes()
 def _load_fixture(name: str) -> dict[str, Any]:
     path = FIXTURES.get(name)
     if path is None:
-        raise HTTPException(status_code=404, detail=f"未知演示场景：{name}")
+        raise HTTPException(status_code=404, detail=f"未知模拟场景：{name}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -406,7 +406,7 @@ def _run_normal_order(
         project.project_id,
         AgentType.QUOTATION,
         "RFQ_RECEIVED",
-        "根据演示 RFQ、BOM 和固定成本规则形成报价草稿。",
+        "根据模拟 RFQ、BOM 和固定成本规则形成报价草稿。",
     )
     _set_case(quote_case, OperationalState.VALIDATING, "CALCULATING")
     _set_case(quote_case, OperationalState.EXECUTING)
@@ -591,7 +591,7 @@ def _run_shortage(
         procurement,
         "procurement.compare_supply_plans",
         comparison,
-        assumptions=["供应商、单价、质量风险和到货日为合成演示数据。"],
+        assumptions=["供应商、单价、质量风险和到货日为合成模拟数据。"],
         evidence_ids=["ev-mock-erp-demand", "ev-mock-erp-inventory", "ev-mock-supplier-quotes"],
         requires_approval=True,
     )
@@ -1172,7 +1172,7 @@ def _run_expedite(
         quotation_case,
         "quotation.calculate_cost",
         quote,
-        assumptions=["加急报价含加急溢价，基于合成数据演示。"],
+        assumptions=["加急报价含加急溢价，基于合成数据模拟。"],
         evidence_ids=["ev-mock-erp-item-price", "ev-mock-mes-capacity"],
         requires_approval=False,
     )
@@ -1384,7 +1384,7 @@ def run_scenario(
     forced_project_id: str | None = None,
 ) -> dict[str, Any]:
     if scenario not in FIXTURES:
-        raise HTTPException(status_code=404, detail=f"未知演示场景：{scenario}")
+        raise HTTPException(status_code=404, detail=f"未知模拟场景：{scenario}")
     if not forced_project_id:
         cached = session.get(IdempotencyRow, idempotency_key)
         if cached:
@@ -1485,7 +1485,7 @@ def _approve_quote(session: Session, project: ProjectRow, approval: ApprovalRow,
         "sales_order_release",
         f"SO-{project.project_id}",
         details,
-        assumptions=["此操作在演示 MockERP 中发布销售订单事实。"],
+        assumptions=["此操作在模拟 MockERP 中发布销售订单事实。"],
         evidence_ids=["ev-mock-erp-order"],
         action_payload={"next_action": "start_normal_parallel_work"},
     )
@@ -1612,7 +1612,7 @@ def _start_normal_parallel_work(
         quality,
         "quality.build_package_draft",
         package_draft,
-        assumptions=["文件清单与资料均为 Mock 演示证据。"],
+        assumptions=["文件清单与资料均为 Mock 模拟证据。"],
         evidence_ids=["ev-mock-mes-quality", "ev-mock-document-package"],
         requires_approval=True,
     )

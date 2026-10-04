@@ -1660,7 +1660,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   line-height: 1.5;
 }
 
-/* 面板级错误边界降级卡片（阶段十演示容错） */
+/* 面板级错误边界降级卡片（阶段十模拟容错） */
 .error-boundary-panel { border-color: #e3b3b3; }
 .error-boundary-body {
   display: flex;

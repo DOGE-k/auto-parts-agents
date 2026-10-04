@@ -173,7 +173,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 ### 明确不做（本阶段边界）
 
-- 不做订单提交（docstatus=1）、发运执行——竞品演示止于草稿级；
+- 不做订单提交（docstatus=1）、发运执行——竞品验收止于草稿级；
 - 不做销售订单方向的起草闭环（8 步流程已覆盖，问答侧写入先只开采购方向）；
 - 真实用户/角色体系（approved_by 仍为页面输入的身份声明，治理项另立）。
 
@@ -267,7 +267,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 1 | 四个 AIP 智能体新增**真实技能**（real_order 只读函数薄封装）：`quotation.analyze_real`/`quotation.get_real`、`procurement.analyze_real`/`procurement.get_real_plan`、`tracking.track_real`/`tracking.lookup_order_link`/`tracking.check_real_ship_gate`、`quality.get_real_package`（原 Mock 演示技能保留并注释区分，隔离另行处理） | ✅ 已完成 |
+| 1 | 四个 AIP 智能体新增**真实技能**（real_order 只读函数薄封装）：`quotation.analyze_real`/`quotation.get_real`、`procurement.analyze_real`/`procurement.get_real_plan`、`tracking.track_real`/`tracking.lookup_order_link`/`tracking.check_real_ship_gate`、`quality.get_real_package`（原 Mock 验收技能保留并注释区分，隔离另行处理） | ✅ 已完成 |
 | 2 | 协调智能体 `BusinessCoordinator`：DeepSeek 工具循环、能力目录（含 aip_agent 路由键）、AIP RPC 调用、调用链留痕、协调运行持久化 | ✅ 已完成 |
 | 3 | API `POST /api/real-orders/assistant/ask`；DEEPSEEK_API_KEY 未配置 → 503 明确报错（不伪造回答）——实测 503 行为正确 | ✅ 已完成 |
 | 4 | 前端"智能协同问答"面板（真实业务页顶部）：输入框 + 回答 + 调用链可视化 + agent-runs 支持 coordinator 类型 + 结构化错误显示修复 | ✅ 已完成 |
@@ -286,7 +286,7 @@ SAL-ORD-2026-00023 / TEST_WO_PAGE_00023（id=9）0% 进度：发运门禁"禁止
 
 - 不接 Wutong 外部注册发现（WUTONG_* 环境变量已备，列为后续任务）；
 - 不开放写操作通道（人工审批门禁仍只在 8 步流程）；
-- 不删除 Mock 演示技能（旧 Mock 后端隔离是独立任务）；
+- 不删除 Mock 验收技能（旧 Mock 后端隔离是独立任务）；
 - ACS 能力描述文件已由 `generate_acs.py` 按真实能力目录同步，机器可读 ACS 与 AIP 注册表一致（见 current_status_and_fix_plan.md §3.21）。
 
 ## 阶段九：质量待办面板（2026-09-30 立项，待开发）
@@ -326,9 +326,9 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 - 不做推送/消息通知；
 - 不在本阶段执行真实 disposition 写入（仍等业务决策，见执行计划第 2 项）。
 
-## 阶段十：工厂级工程质感（2026-09-30 立项，比赛定位）
+## 阶段十：工厂级工程质感（2026-09-30 立项，项目交付定位）
 
-> 定位：仅为比赛——目标是让系统在评委审视下站得住"工厂级"标准，不做真实试点部署（HTTPS/真实账号/监控告警等生产部署项跳过）。
+> 定位：当前项目定位——目标是让系统在审阅者审视下站得住"工厂级"标准，不做真实试点部署（HTTPS/真实账号/监控告警等生产部署项跳过）。
 
 ### 任务清单
 
@@ -345,7 +345,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 ### 验收标准
 
 1. 处置到一半刷新页面，既有审批与进度在面板中恢复，不产生重复审批（数据层幂等 + 状态层恢复）；
-2. 会话过期前有提醒、过期后提示明确，演示不中断；
+2. 会话过期前有提醒、过期后提示明确，验收不中断；
 3. 全量后端测试不下降、前端 build 通过、两份文档同步更新。
 
 ## 后续候选任务（优先级从高到低）
@@ -378,7 +378,7 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 |---|---|---|
 | 1 | 前端请求级身份会话与 NCR 人工操作面板 | ✅ 已完成：短期 Bearer/写入令牌仅存 `sessionStorage`；NCR 处置与关闭严格按审批、写回、回读分步操作；没有伪造 SSO，也没有自动选择处置 |
 | 1.5 | OpenMES 短时会话登录页 | ✅ 已完成（见 current_status_and_fix_plan.md §3.32）：真实 `/api/auth/login` 契约（Sanctum 15 分钟 TTL）、登录令牌回读身份、ERPNext 随机角色 docname 噪音过滤；成功路径待部署方提供业务账号后做端到端验收；ERPNext 密码登录/OIDC 仍待部署契约 |
-| 2 | NCR 真实写入最小范围验收 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.35）：用户批准 rework，审批 `QDISP-1BC2B3498AAE` 写回并回读验证通过、closure_ready=true；顺带修复回读数量格式比对 bug；close 链路就绪未执行（演示保留待办） |
+| 2 | NCR 真实写入最小范围验收 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.35）：用户批准 rework，审批 `QDISP-1BC2B3498AAE` 写回并回读验证通过、closure_ready=true；顺带修复回读数量格式比对 bug；close 链路就绪未执行（验收保留待办） |
 | 3 | Wutong Registry 注册与跨实例 AIP 调用 | 🟡 只读 Registry health/recent 已完成；注册、更新、提交和跨实例调用仍等待部署方鉴权/租户契约，当前禁止外部注册写入 |
 | 4 | 订单级质量放行 | 保持 `NOT_SUPPORTED`，OpenMES 没有对应真实 API 时不新增伪造端点 |
 | 5 | 检验/报工数据补录 | ✅ 已完成（2026-09-30，见 current_status_and_fix_plan.md §3.34）：`backend/seed_inspection_eta.py` 幂等补录 TEST_ 检验 3 条 + 批次实际耗时 150 分钟；track/9 已 RATE_BASED（720 件/小时）、quality/package/9 检验维度有数据、id=2 阻断线不受影响、125 passed |
@@ -391,10 +391,10 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 | 优先级 | 任务 | 状态与边界 |
 |---|---|---|
 | 1 | 真实报工（RPT- 三步审批：建批次→开工→完工带实际耗时） | ✅ 已完成（2026-10-01，见 §3.44）：官方报工链路真实验证通过——部分报工 ETA 转 RATE_BASED（300 件/h）、全额报工 COMPLETED、幂等、无快照工单写前如实拒绝；含工单下达补 product_type 映射（§3.43 小待办一并完成） |
-| 2 | 质量问题登记（QISS- 三步审批：POST /api/v1/issues） | ✅ 已完成（2026-10-01，见 §3.44）：issue id=3 真实创建回读验证，质量包/全厂待办可见，幂等；保留 OPEN 供现场处置演示 |
-| 3 | 演示剧本更新（故事线 B 补现场报工 / D 补现场登记质量问题） | ✅ 已完成（2026-10-01）：两故事线各补现场操作路径 + 记录编号速查 |
-| 4 | 页面级冒烟（两个新区块） | ⬜ 待下次登录演示时顺带复核（密码仅用户掌握；API 级已覆盖同一调用路径） |
-| 5 | 可部署性整改（别人 clone 后能部署） | ✅ 已完成（2026-10-01，见 §3.45）：根 README 从零部署指南 + deploy_services 双 project 脚本（规避 include 同名服务合并坑）+ .env.example 重写 + start_demo python 探测与 real 模式预检 + get_openmes_token.py 入库；全新机器端到端重放为外部待办 |
+| 2 | 质量问题登记（QISS- 三步审批：POST /api/v1/issues） | ✅ 已完成（2026-10-01，见 §3.44）：issue id=3 真实创建回读验证，质量包/全厂待办可见，幂等；保留 OPEN 供现场处置验收 |
+| 3 | 业务流程与验收更新（业务流程 B 补现场报工 / D 补现场登记质量问题） | ✅ 已完成（2026-10-01）：两业务流程各补现场操作路径 + 记录编号速查 |
+| 4 | 页面级冒烟（两个新区块） | ⬜ 待下次登录验收时顺带复核（密码仅用户掌握；API 级已覆盖同一调用路径） |
+| 5 | 可部署性整改（别人 clone 后能部署） | ✅ 已完成（2026-10-01，见 §3.45）：根 README 从零部署指南 + deploy_services 双 project 脚本（规避 include 同名服务合并坑）+ .env.example 重写 + start_app python 探测与 real 模式预检 + get_openmes_token.py 入库；全新机器端到端重放为外部待办 |
 
 测试基线：后端 **154 passed** / 前端 14 passed + build（§3.44 完成后）。
 

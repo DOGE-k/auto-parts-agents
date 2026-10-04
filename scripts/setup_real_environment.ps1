@@ -3,7 +3,7 @@
     在一台新的 Windows 电脑上准备本项目的真实 ERPNext + OpenMES 环境。
 
 .DESCRIPTION
-    这是“同学电脑真实复现”的引导脚本，不包含任何凭据，也不会把上游
+    这是本地真实环境的引导脚本，不包含任何凭据，也不会把上游
     ERPNext/OpenMES 源码提交到本仓库。它只负责检查工具、获取缺失的上游
     仓库、生成本机模板、调用已有 compose 部署脚本、等待健康状态、完成
     本地业务库迁移，并在人工完成凭据/建站后按明确顺序执行种子脚本。
@@ -26,7 +26,7 @@
 
 .PARAMETER RunRealDemoSeed
     执行 backend/seed_real_demo.py，在本机真实 OpenMES 上按 TEST_ 工单号查重并
-    导入可复现的演示工单和质量问题。产品类型、产线和问题类型缺失时会停止，
+    导入可复现的测试工单和质量问题。产品类型、产线和问题类型缺失时会停止，
     不猜测创建方式。
 
 .PARAMETER NoPrompt
@@ -229,11 +229,11 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "$seed 执行失败。" }
         }
         if ($RunRealDemoSeed) {
-            Write-Host "[种子] seed_real_demo.py（动态查重的 TEST_ 演示工单/质量问题）" -ForegroundColor Cyan
+            Write-Host "[种子] seed_real_demo.py（动态查重的 TEST_ 工单/质量问题）" -ForegroundColor Cyan
             & $pythonExe (Join-Path $backend "seed_real_demo.py")
             if ($LASTEXITCODE -ne 0) { throw "seed_real_demo.py 执行失败。" }
         } else {
-            Write-Warn "未执行 seed_real_demo.py。需要导入可复现 TEST_ 演示工单和质量问题时，请加 -RunRealDemoSeed。"
+            Write-Warn "未执行 seed_real_demo.py。需要导入可复现 TEST_ 工单和质量问题时，请加 -RunRealDemoSeed。"
         }
         if ($RunLegacySeeds) {
             Write-Warn "即将执行旧/高风险种子：seed_openmes_v2.py、seed_openmes_v3.py。它们会 POST 工单或质量问题，重复运行可能重复记录。"
@@ -260,14 +260,14 @@ try {
             & $pythonExe (Join-Path $backend "seed_inspection_eta.py")
             if ($LASTEXITCODE -ne 0) { throw "seed_inspection_eta.py 执行失败。" }
         } else {
-            Write-Warn "已跳过 seed_inspection_eta.py。它依赖当前库固定 TEST_ 批次，不能当作同学电脑的通用导入步骤；核对前置条件后可加 -RunEtaSeed。"
+            Write-Warn "已跳过 seed_inspection_eta.py。它依赖当前库固定 TEST_ 批次，不能作为通用导入步骤；核对前置条件后可加 -RunEtaSeed。"
         }
         Write-Ok "已完成本轮种子步骤；请在页面逐项验收真实数据与审批门禁。"
     } else {
-        Write-Warn "未执行种子。需要导入演示数据时，重新运行并加 -RunSeeds；旧/高风险种子还需按需显式加 -RunLegacySeeds 或 -RunEtaSeed。"
+        Write-Warn "未执行种子。需要导入测试数据时，重新运行并加 -RunSeeds；旧/高风险种子还需按需显式加 -RunLegacySeeds 或 -RunEtaSeed。"
     }
 
-    Write-Host "`n[完成] 真实服务与应用准备流程结束。应用入口仍由 scripts/start_demo.ps1 启动：http://127.0.0.1:5173/" -ForegroundColor Green
+    Write-Host "`n[完成] 真实服务与应用准备流程结束。应用入口由 scripts/start_app.ps1 启动：http://127.0.0.1:5173/" -ForegroundColor Green
     Write-Host "[安全] 不要把 .env、services/*/.env、Token、API Secret、Cookie 或证书提交到 GitHub。" -ForegroundColor Yellow
     exit 0
 } catch {

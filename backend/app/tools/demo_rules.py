@@ -33,7 +33,7 @@ def calculate_demo_quote_cost(inputs: dict[str, Any]) -> dict[str, Any]:
     """Calculate synthetic unit/total cost and quote price with a target margin."""
     quantity = int(inputs["order_quantity"])
     if quantity <= 0:
-        raise ValueError("演示订单数量必须大于 0")
+        raise ValueError("模拟订单数量必须大于 0")
 
     material_cost = sum(
         Decimal(line["qty_per_product"]) * Decimal(line["unit_price"])
@@ -70,7 +70,7 @@ def calculate_demo_quote_cost(inputs: dict[str, Any]) -> dict[str, Any]:
         "total_cost": str(total_cost),
         "total_price": str(total_price),
         "requires_low_margin_exception": gross_margin < minimum_margin,
-        "calculation_note": "演示规则：单位成本=(BOM材料+加工+外协+检验+包装+物流)×(1+风险预留率)；建议价=单位成本÷(1-目标毛利率)。",
+        "calculation_note": "模拟规则：单位成本=(BOM材料+加工+外协+检验+包装+物流)×(1+风险预留率)；建议价=单位成本÷(1-目标毛利率)。",
     }
     result["tool_call_id"] = f"tool-{_hash(inputs)[:16]}"
     result["tool_version"] = RULE_VERSION
@@ -103,7 +103,7 @@ def calculate_demo_net_requirement(inputs: dict[str, Any]) -> dict[str, Any]:
         "confirmed_inbound": str(confirmed_inbound),
         "net_requirement": str(net),
         "excluded_inventory_statuses": sorted(excluded_statuses),
-        "calculation_note": "演示规则：净需求=max(0,正式需求-合格可用库存-已确认在途)；冻结、待检、不合格、无批次库存排除。",
+        "calculation_note": "模拟规则：净需求=max(0,正式需求-合格可用库存-已确认在途)；冻结、待检、不合格、无批次库存排除。",
     }
     result["tool_call_id"] = f"tool-{_hash(inputs)[:16]}"
     result["tool_version"] = RULE_VERSION
@@ -130,7 +130,7 @@ def calculate_demo_eta(inputs: dict[str, Any]) -> dict[str, Any]:
         "capacity_completion_date": capacity_date.isoformat(),
         "quality_wait_days": quality_days,
         "buffer_days": buffer_days,
-        "calculation_note": "演示规则：ETA=材料可用日与产能完成日的较晚者+质量等待日历天+缓冲日历天。",
+        "calculation_note": "模拟规则：ETA=材料可用日与产能完成日的较晚者+质量等待日历天+缓冲日历天。",
     }
     result["tool_call_id"] = f"tool-{_hash(inputs)[:16]}"
     result["tool_version"] = RULE_VERSION

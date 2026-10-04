@@ -2,11 +2,11 @@
   "fixture_id": "expedite-demo-v1",
   "data_source": "synthetic_demo_only",
   "scenario": "expedite",
-  "notice": "加急场景：客户要求提前交付，所有数据均为演示用合成数据。",
+  "notice": "加急场景：客户要求提前交付，所有数据均为模拟用合成数据。",
   "project": {
     "customer_id": "DEMO-CUSTOMER-002",
     "product_id": "DEMO-BRACKET-001",
-    "product_name": "演示支架组件",
+    "product_name": "模拟支架组件",
     "order_quantity": 200,
     "currency": "CNY",
     "required_delivery_date": "2026-10-18"
@@ -74,7 +74,7 @@
     "expedite_supplier_options": [
       {
         "supplier_id": "SUP-ALUMINUM-001",
-        "supplier_name": "演示铝业集团",
+        "supplier_name": "模拟铝业集团",
         "expedite_available": true,
         "expedite_additional_cost": 800,
         "expedite_delivery_date": "2026-10-05"

@@ -90,7 +90,7 @@ def main() -> None:
         if target and order_no != target:
             continue
         if is_demo(order_no):
-            tag = "（演示记录，不参与关联验证）"
+            tag = "（模拟记录，不参与关联验证）"
             print(f"[跳过] {order_no} {tag}")
             continue
 

@@ -3,7 +3,7 @@
 将报价智能体的工具能力通过标准 AIP 协议暴露。
 技能分两类：
 - *.real_*：调用真实业务链（real_order，数据来自真实 ERPNext/OpenMES）
-- 其余：Mock 场景演示技能（tool_registry 合成数据，仅用于 Mock 演示）
+- 其余：Mock 场景模拟技能（tool_registry 合成数据，仅用于 Mock 模拟）
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def create_quotation_aip_service(aic: str = "local-quotation-001") -> AipAgentSe
         handler=real_assess_cost,
     )
 
-    # ===== Mock 场景演示技能（合成数据，不用于真实业务结果） =====
+    # ===== Mock 场景模拟技能（合成数据，不用于真实业务结果） =====
 
     # 注册技能：成本计算
     async def calculate_cost(inputs: dict) -> dict:
