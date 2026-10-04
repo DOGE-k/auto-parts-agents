@@ -205,7 +205,6 @@ if ($envContent -match "APP_ADAPTER_MODE=real") {
 
 Write-Host "`n=== 演示入口 ===" -ForegroundColor Cyan
 Write-Host "  页面：  http://127.0.0.1:5173/  （真实业务页为默认）"
-Write-Host "  剧本：  docs/demo_script.md（四条故事线 + 逐句台词）"
 if ($failed.Count -gt 0) {
     Write-Host "`n预检未全部通过：$($failed -join '、')。请先解决再演示。" -ForegroundColor Red
     exit 1

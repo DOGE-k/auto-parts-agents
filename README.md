@@ -12,7 +12,7 @@
    └── 业务库    PostgreSQL 15432（可选，默认 SQLite）
 ```
 
-> 当前开发状态、真实接口验证记录与遗留问题见 `docs/current_status_and_fix_plan.md`；演示操作剧本见 `docs/demo_script.md`。
+> 当前开发状态、真实接口验证记录与遗留问题见 `docs/current_status_and_fix_plan.md`；完整演示流程见 `docs/demo_script.md`。
 
 > 如果是在另一台 Windows 电脑上复现真实 ERPNext + OpenMES 环境，请先阅读
 > [`docs/真实环境复现部署.md`](docs/真实环境复现部署.md)，再运行
@@ -163,7 +163,7 @@ cd frontend && npm install && npm run dev -- --port 5173 --strictPort
 2. `curl http://127.0.0.1:9000/api/integrations/status` → erpnext/openmes 均 `configured:true`、`mode:"real"`
 3. 打开 <http://127.0.0.1:5173/> → 顶部显示"ERPNext + OpenMES 真实连接"
 4. "会话设置"用 OpenMES admin 登录 + 填写入令牌 → 走一遍报价 → 审批 → ERP 草稿（回读 docstatus=0）
-5. 完整演示路径见 `docs/demo_script.md`（问答 / 速率 ETA / 缺料方案 / NCR 处置 / 现场报工 / 现场登记质量问题）
+5. 完整业务流程见 `docs/demo_script.md`（问答 / 速率 ETA / 缺料方案 / NCR 处置 / 现场报工 / 现场登记质量问题）
 
 ## 8. 测试与 CI
 
