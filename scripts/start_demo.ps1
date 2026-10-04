@@ -29,6 +29,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# 前端依赖预检：否则 npm 进程会立即退出，下面只能等满 30 秒才报端口超时。
+$npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npmCommand) {
+    Write-Host "[失败] 未找到 npm。请先安装 Node.js 20+，再重新运行本脚本。" -ForegroundColor Red
+    exit 1
+}
+$viteCommand = Join-Path $frontend "node_modules\.bin\vite.cmd"
+if (-not (Test-Path $viteCommand)) {
+    Write-Host "[失败] 前端依赖未安装：$viteCommand" -ForegroundColor Red
+    Write-Host "       请先执行：cd `"$frontend`"; npm install" -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "[环境] npm: $($npmCommand.Source)"
+
 # 真实系统容器预检：ERPNext(8080)/OpenMES(80) 未响应时自动调 deploy_services.ps1 拉起。
 # 这样本脚本就是唯一入口——电脑重启后也只需这一条命令。
 $serviceProbes = @(
@@ -113,9 +127,13 @@ Start-Background "后端 API" 9000 {
 }
 
 Start-Background "前端页面" 5173 {
-    Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "npm run dev -- --host 127.0.0.1 --port 5173" `
-        -WorkingDirectory $frontend -WindowStyle Hidden
+    $out = Join-Path $frontend "vite-5173.log"
+    $err = Join-Path $frontend "vite-5173.err.log"
+    Remove-Item $out, $err -Force -ErrorAction SilentlyContinue
+    Start-Process -FilePath $npmCommand.Source `
+        -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173" `
+        -WorkingDirectory $frontend -WindowStyle Hidden `
+        -RedirectStandardOutput $out -RedirectStandardError $err
 }
 
 # 等待端口就绪（最多 30 秒）
@@ -127,6 +145,13 @@ foreach ($probe in @(@{ Name = "后端"; Port = 9000 }, @{ Name = "前端"; Port
     }
     if (-not $ready) {
         Write-Host "[失败] $($probe.Name) 30 秒内未监听端口 $($probe.Port)，请查看日志" -ForegroundColor Red
+        if ($probe.Name -eq "前端") {
+            Write-Host "       前端标准输出：$frontend\vite-5173.log" -ForegroundColor Yellow
+            Write-Host "       前端错误输出：$frontend\vite-5173.err.log" -ForegroundColor Yellow
+            if (Test-Path (Join-Path $frontend "vite-5173.err.log")) {
+                Get-Content (Join-Path $frontend "vite-5173.err.log") -Tail 30
+            }
+        }
         exit 1
     }
     Write-Host "[就绪] $($probe.Name) 端口 $($probe.Port)" -ForegroundColor Green

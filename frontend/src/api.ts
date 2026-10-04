@@ -1,6 +1,6 @@
 import { SseParser } from "./lib/sse";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9001/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9000/api";
 const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
 const REAL_SESSION_ISSUED_KEY = "real_business_session_issued_at";
 const REAL_WRITE_TOKEN_KEY = "real_business_write_token";

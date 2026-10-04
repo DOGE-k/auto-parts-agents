@@ -27,3 +27,4 @@ backend/pid.txt
 backend/qid.txt
 backend/uvicorn-9000*.log
 frontend/vite-dev.log
+frontend/vite-5173*.log
