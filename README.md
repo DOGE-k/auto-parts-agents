@@ -128,6 +128,8 @@ python seed_inspection_eta.py   # 可选：TEST_ 检验记录与批次耗时补�
 powershell -ExecutionPolicy Bypass -File scripts\setup_real_environment.ps1 -RunSeeds -RunRealDemoSeed
 ```
 
+运行前请在 OpenMES 的 **Admin → Production → Lines → New Line** 创建演示产线：编码必须是 `DEMO_LINE_01`，名称可填 `Demo Line 01`，并勾选 Active。脚本不会猜测或自动创建这类主数据。
+
 检验/ETA 的旧补录脚本依赖当前库的固定批次和数据库表结构，默认不会执行；详见 [`docs/真实环境复现部署.md`](docs/真实环境复现部署.md)。
 
 ## 6. 启动应用
@@ -145,6 +147,8 @@ powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1
 ```
 
 **这一条命令就是全部启动入口**：Python 解释器自动探测（`.conda-env` → venv → 系统 python，缺依赖会提示 `pip install -e backend`）→ 检测到 ERPNext/OpenMES 容器未响应时**自动调用 deploy_services 脚本拉起**（含就绪等待）→ 后端 9000 + 前端 5173 启动 → 对真实系统逐项预检（连通性、身份解析、写入令牌、DeepSeek、适配器模式），**预检不通过会明确列出，不会静默继续**。幂等：重复运行安全，已启动的部分自动跳过。
+
+脚本也会预检 npm 和前端 Vite 依赖。若提示前端依赖未安装，在 `frontend` 目录执行 `npm install`；若 5173 未监听，查看 `frontend/vite-5173.err.log`。前端默认连接后端 9000 端口。
 
 手动启动（等价，一般不需要）：
 

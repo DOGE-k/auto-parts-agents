@@ -142,7 +142,8 @@ def ensure_work_order(base_url: str, bearer: dict[str, str], row: dict[str, Any]
     body = {
         "order_no": row["order_no"],
         "product_name": row["product_name"],
-        "quantity": row["quantity"],
+        # OpenMES 的工单接口使用 planned_qty；quantity 是其他物料接口的字段。
+        "planned_qty": row["quantity"],
         "line_id": line.get("id"),
         "product_type_id": product.get("id"),
         "priority": row["priority"],
@@ -164,7 +165,12 @@ def ensure_issue(base_url: str, bearer: dict[str, str], work_order: dict[str, An
     if any(marker in str(row.get("description", "")) for row in data_rows(payload)):
         print(f"质量问题已存在，跳过：{marker}")
         return
-    body = {"work_order_id": work_order.get("id"), "issue_type_id": issue_type.get("id"), "description": f"{marker} {description}"}
+    body = {
+        "work_order_id": work_order.get("id"),
+        "issue_type_id": issue_type.get("id"),
+        "title": f"测试质量问题 {marker}",
+        "description": f"{marker} {description}",
+    }
     code, payload = json_request(base_url, "/api/v1/issues", method="POST", body=body, headers=bearer)
     if code not in (200, 201):
         fail_response(f"创建质量问题 {marker}", code, payload)
