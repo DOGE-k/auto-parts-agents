@@ -264,7 +264,7 @@ try {
         }
         Write-Ok "已完成本轮种子步骤；请在页面逐项验收真实数据与审批门禁。"
     } else {
-        Write-Warn "未执行种子。需要导入演示数据时，重新运行并加 -RunSeeds；非幂等种子还需显式加 -AllowNonIdempotentSeeds。"
+        Write-Warn "未执行种子。需要导入演示数据时，重新运行并加 -RunSeeds；旧/高风险种子还需按需显式加 -RunLegacySeeds 或 -RunEtaSeed。"
     }
 
     Write-Host "`n[完成] 真实服务与应用准备流程结束。应用入口仍由 scripts/start_demo.ps1 启动：http://127.0.0.1:5173/" -ForegroundColor Green

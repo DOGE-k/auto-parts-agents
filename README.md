@@ -164,6 +164,11 @@ npm run build
 
 | 现象 | 原因与处理 |
 |---|---|
+| 首次拉取 ERPNext 镜像很久 | `frappe/erpnext:v16.36.0` 首次下载和解压可能需要较长时间；只要进度或日志仍在变化就等待，不要反复按 `Ctrl+C`。 |
+| 拉取结束后出现 `unexpected EOF` | 下载连接中断。运行 `docker pull frappe/erpnext:v16.36.0` 重试，完成后重新运行 `scripts\setup_real_environment.ps1`。 |
+| Docker Desktop 提示 `containerd`、`SIGBUS`、`bus error` 或 `core dumped` | Docker 引擎在处理镜像层时崩溃。退出并重新打开 Docker Desktop，确认 `docker version` 同时有 `Client` 和 `Server` 后再重试；不要直接点击“恢复出厂设置”，以免删除本机容器、镜像和卷。 |
+| 脚本提示缺少 `ADMIN_PASSWORD` | 编辑 `services\OpenMes\.env`，填写 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`；保存后回到等待中的脚本窗口按 Enter。若脚本已回到 `PS ...>`，重新运行入口命令。 |
+| 脚本提示缺少 `DB_PASSWORD` | 编辑 `services\frappe_docker\.env`，填写 `DB_PASSWORD`；保存后回到等待中的脚本窗口按 Enter。若脚本已回到 `PS ...>`，重新运行入口命令。 |
 | 页面报"连不上 ERP/MES"或接口 502 | 确认容器健康：`docker ps` 看 `openmes-*` / `erpnext-*`；`APP_ADAPTER_MODE=real` 下连接失败**必然明确报错**（设计如此，不回退假数据） |
 | OpenMES 接口 401 | `OPENMES_TOKEN` 失效——重跑 `python backend/get_openmes_token.py` 换新 token 后重启后端 |
 | ERPNext 接口 500、数据库日志出现 `Access denied for user '_xxxx'@'IP'` | 旧版本建站把站点库用户授权绑死在容器 IP 上，容器重启换 IP 后认证失败。修复（保留密码）：进 `erpnext-db-1` 执行 `RENAME USER '_xxxx'@'<旧IP>' TO '_xxxx'@'%'; FLUSH PRIVILEGES;`（按 README 3.3 节带 `--mariadb-user-host-login-search=%` 新建的站点不会有此问题） |
