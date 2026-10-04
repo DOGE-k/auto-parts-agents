@@ -198,7 +198,7 @@ try {
     $siteCheck = & docker compose --project-name erpnext -f (Join-Path $frappeDir "compose.yaml") -f (Join-Path $frappeDir "overrides\compose.mariadb.yaml") -f (Join-Path $frappeDir "overrides\compose.redis.yaml") -f (Join-Path $frappeDir "overrides\compose.noproxy.yaml") --env-file (Join-Path $frappeDir ".env") exec -T backend bench --site localhost list-apps 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "ERPNext 的 localhost 站点尚未确认。请执行以下一次性建站命令（密码只从本机 .env 读取，不要粘贴给别人）："
-        Write-Host 'docker compose --project-name erpnext exec backend bench new-site localhost --mariadb-user-host-login-search=% --db-root-password <services/frappe_docker/.env 中 DB_PASSWORD> --admin-password <你设置的 ERPNext 管理员密码> --install-app erpnext' -ForegroundColor Yellow
+        Write-Host 'docker compose --project-name erpnext exec backend bench new-site localhost --mariadb-user-host-login-scope=% --db-root-password <services/frappe_docker/.env 中 DB_PASSWORD> --admin-password <你设置的 ERPNext 管理员密码> --install-app erpnext' -ForegroundColor Yellow
         if ($NoPrompt -or -not (Confirm-OrStop "已完成建站并安装 erpnext 吗？")) { throw "请先完成 ERPNext localhost 建站，再重新运行脚本。" }
         $siteCheck = & docker compose --project-name erpnext -f (Join-Path $frappeDir "compose.yaml") -f (Join-Path $frappeDir "overrides\compose.mariadb.yaml") -f (Join-Path $frappeDir "overrides\compose.redis.yaml") -f (Join-Path $frappeDir "overrides\compose.noproxy.yaml") --env-file (Join-Path $frappeDir ".env") exec -T backend bench --site localhost list-apps 2>&1
         if ($LASTEXITCODE -ne 0) { throw "仍无法确认 ERPNext localhost 站点，请检查容器日志。" }
