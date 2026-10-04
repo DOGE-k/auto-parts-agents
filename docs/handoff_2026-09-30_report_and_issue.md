@@ -71,7 +71,7 @@
 ### 收尾
 
 - 真实验证：对 §3.43 创建的工单 id=10（WO-SO-2026-00024，BD-2402 · 800 件）做一次真实验收（报工后 ETA 变 RATE_BASED；建 issue 后质量待办出现新条目），记录编号进文档。
-- 更新 `demo_script.md`：故事线 B（速率 ETA）补"现场报工"路径；故事线 D 补"现场登记质量问题"路径。
+- 更新 `demo_runbook.md`：故事线 B（速率 ETA）补"现场报工"路径；故事线 D 补"现场登记质量问题"路径。
 - 小待办顺带处理（可选）：工单 product_name 为空的 product_type external_code 映射（§3.43 第三节末尾）。
 
 ## 五、环境速查（2026-09-30 实测状态）
@@ -88,4 +88,4 @@
 1. 任意工单（含新下达的）页面报工后：完成率/produced_qty 变化真实可溯、ETA 口径 RATE_BASED（有速率数据时）；重复报工幂等。
 2. 任意工单页面登记质量问题后：质量待办出现新条目（真实 OpenMES 记录），可直接走处置三步闭环。
 3. 全程审批留痕（审批号可复述）、回读验证、无未审批写入。
-4. 测试基线不下降；文档（current_status_and_fix_plan.md 新 § 节 + demo_script.md）与提交同步。
+4. 测试基线不下降；文档（current_status_and_fix_plan.md 新 § 节 + demo_runbook.md）与提交同步。

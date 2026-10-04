@@ -14,7 +14,7 @@
 5. `docs/handoff_2026-10-02_work_order_intent_fix.md`：工单号自然语言识别修复交接（已于 §3.58 完成）。
 6. `docs/handoff_2026-10-02_session_identity_chat_ux.md`：当前待修复的审批身份语义、连续问答、OpenMES 30 分钟会话、回答层级和销售/采购页面空状态。
 7. `docs/handoff_2026-09-30_report_and_issue.md`：真实报工、质量问题登记的 API 契约和历史实现交接，已完成部分只用于核对。
-8. `docs/demo_script.md`：当前演示路径和已验证记录编号。
+8. `docs/demo_runbook.md`：当前演示路径和已验证记录编号。
 9. `README.md`：环境、部署、启动、故障排查。
 
 `docs/next_development_plan.md` 保留为阶段历史资料。本文件中的后续路线优先于其中未勾选的旧任务；如果两份文件冲突，以当前代码和最新真实验证为准。
@@ -168,7 +168,7 @@ ERPNext / OpenMES 适配器
 4. 运行后端测试、前端测试和构建；涉及真实系统时做只读检查或经过批准的审批写入。
 5. 写入后回读并检查幂等；记录真实编号、状态、来源和限制。
 6. 更新 `docs/current_status_and_fix_plan.md`，追加阶段小节，不覆盖历史证据。
-7. 同步更新 `docs/demo_script.md` 或本文件中的验收标准。
+7. 同步更新 `docs/demo_runbook.md` 或本文件中的验收标准。
 8. 检查未跟踪文件、凭据和日志，再提交代码。
 
 阶段完成的最低证据：

@@ -1159,7 +1159,7 @@ ERP 物料需求
 
 1. `scripts/start_demo.ps1` 一键启动 + 环境预检：幂等（端口占用跳过）、等待就绪、真实连通性检查（后端/表面/ERPNext/OpenMES/身份/DeepSeek/写入令牌），预检失败如实退出。实测全部通过（UTF-8 BOM 修正 PowerShell 5.1 解析、OpenMES check 端点改 POST）。
 2. 加急场景（例子四）页面级验收补齐：提问"客户要求把 SAL-ORD-2026-00023 提前交货……" → 三维度结论（`can_ship=true`：报价已审批 + 质量门禁通过 + 完成率 90%）+ 方案 A/B 成本风险对比（真实价格记录，方案 `PROC-5585148630C1`）+ 边界如实说明（"最多提前多少被物料交期锁死 15 天，剩余 200 件完工数据不足不编造"）。截图 `gui-test-screenshots/2026-09-30_expedite_scenario_page_acceptance.png`。
-3. `docs/demo_script.md` 演示剧本：六条故事线（动态协同/速率 ETA/缺料双审批/质量待办+处置写回/加急/诚实性）+ 关键记录编号速查 + 注意事项。
+3. `docs/demo_runbook.md` 演示流程：六条故事线（动态协同/速率 ETA/缺料双审批/质量待办+处置写回/加急/诚实性）+ 关键记录编号速查 + 注意事项。
 
 **验证**：`pytest tests -q` **126 passed**（新增 1 例）、`compileall`、`npm run build` 通过。本阶段真实写入：OpenMES issue 1 处置字段（经审批）；ERPNext 无写入。
 
@@ -1225,7 +1225,7 @@ ERP 物料需求
 - 分支 `codex/real-integration-layer`，全部工作已提交（最新 `d581a30`），工作区仅 4 个约定不提交的本地文件（见下）。
 - 测试基线：后端 `pytest tests -q` **128 passed**；前端 `vitest` **6 passed** + `npm run build` 通过；`compileall` 通过。
 - 运行时（全部健康）：后端 9000（业务库已切 PostgreSQL `autoparts-db` 容器，端口 15432）、前端 5173、OpenMES（caddy/backend/reverb/postgres）与 ERPNext 容器组运行中。
-- 演示入口：`powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`（幂等 + 环境预检），剧本 `docs/demo_script.md`（六条故事线）。
+- 演示入口：`powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`（幂等 + 环境预检），演示流程 `docs/demo_runbook.md`（六条故事线）。
 
 #### 二、正在做的事（阶段十"工厂级工程质感"，比赛定位）
 
@@ -1309,7 +1309,7 @@ ERP 物料需求
 - `RealBusinessPage.tsx`（773 → 814 行）：新增 `activeTab` 状态与 `TAB_ITEMS`（协同问答 / 订单流程 / 质量中心 / 运行记录，默认订单流程）；顶部页签栏（`role=tablist`，质量中心页签有待办数徽标）；四个面板改为按页签条件渲染；**全局错误横幅**从流程区内提出到页签栏下方（任何页签的操作失败都可见）。
 - 跨页签联动：质量待办"去处置"自动切回"订单流程"页签再滚动高亮目标 NCR 卡片（focus effect 依赖加 `activeTab`，保证切换渲染后再滚动）；`QualityTodoPanel` 说明文案同步。
 - `styles.css`：新增 `.real-tabs / .real-tab / .real-tab-count` 样式，沿用现有 teal 主色与圆角/阴影变量，与 stepper/nav 视觉一致。
-- `docs/demo_script.md` 同步操作位置描述（故事线 A 改为"协同问答"页签，故事线 D 改为"质量中心"页签 + 去处置切页签）。
+- `docs/demo_runbook.md` 同步操作位置描述（故事线 A 改为"协同问答"页签，故事线 D 改为"质量中心"页签 + 去处置切页签）。
 
 **过程记录**：初次用脚本整体搬移 JSX 时，因 error banner 的通用行（`      )}`）与步骤块闭合行完全相同，`行 not in 误删列表` 判断误删了多个步骤块的闭合行，tsc 报错暴露；放弃补丁，`git checkout` 恢复后改用小块手工 Edit 重做（教训：对 JSX 的脚本级搬移要先核对块的闭合行唯一性）。
 
@@ -1349,7 +1349,7 @@ ERP 物料需求
 
 #### 四、遗留与下一步
 
-1. 演示剧本可在故事线 A 补一句"等待时调用链会逐步点亮"（演示观感卖点）。
+1. 演示流程可在故事线 A 补一句"等待时调用链会逐步点亮"（演示观感卖点）。
 2. CI 首跑验证仍待 push。
 3. 深度优化候选（未排期）：回答 token 级流式（DeepSeek stream=True，当前为"步骤流+完整回答"，已覆盖主要等待感）；App.tsx（469 行）按页签模式拆分。
 
@@ -1487,7 +1487,7 @@ ERP 物料需求
 
 **写入记录**（均为人工审批门禁内真实写入，审批依据=用户 2026-10-01 批准按交接文档开工并验收）：ERPNext 销售订单草稿 SAL-ORD-2026-00025/00026（docstatus=0）；OpenMES 工单 id=11/12、批次 4 与 LOT-0B24E68049E0、issue id=3。全部回读验证通过、无未审批写入、无 Mock 兜底。
 
-**修改文件**：`backend/app/adapters/mes/openmes.py`（batch×3/issue-types/create_issue/get_issue）、`backend/app/adapters/mes/openmes_adapter.py`（透传 + list_product_types）、`backend/app/services/real_order.py`（RPT/QISS 三步 + 下达 product_type 映射）、`backend/app/main.py`（7 个端点：报工 3 + 登记 3 + issue-types 只读）、`backend/tests/test_real_order_realdata.py`（+15 例）、`frontend/src/api.ts`、`frontend/src/components/flow/TrackingFlow.tsx`（报工/登记两区块，自包含状态）、`docs/demo_script.md`（故事线 B/D + 记录速查）。
+**修改文件**：`backend/app/adapters/mes/openmes.py`（batch×3/issue-types/create_issue/get_issue）、`backend/app/adapters/mes/openmes_adapter.py`（透传 + list_product_types）、`backend/app/services/real_order.py`（RPT/QISS 三步 + 下达 product_type 映射）、`backend/app/main.py`（7 个端点：报工 3 + 登记 3 + issue-types 只读）、`backend/tests/test_real_order_realdata.py`（+15 例）、`frontend/src/api.ts`、`frontend/src/components/flow/TrackingFlow.tsx`（报工/登记两区块，自包含状态）、`docs/demo_runbook.md`（故事线 B/D + 记录速查）。
 
 **遗留与下一步**：① 页面级冒烟（待用户登录演示时复核两个新区块）；② BD-2402 等物料的 OpenMES 工艺模板属主数据工程，补模板后新订单即可报工；③ CI 首跑验证仍待 push。
 
@@ -1887,7 +1887,7 @@ ERP 物料需求
 
 #### 五、文档同步与边界
 
-- AI_HANDOFF_PLAN §6 事件协作清单补第 4 类事件；§6.1 第 3 条完成；demo_script.md 故事线 D3 补临期事件说明。
+- AI_HANDOFF_PLAN §6 事件协作清单补第 4 类事件；§6.1 第 3 条完成；demo_runbook.md 故事线 D3 补临期事件说明。
 - 边界：被动检查（无人查看跟单不预警）是用户选择，如需全覆盖需新增定时扫描基础设施（未做）；阈值 3 天/50% 是用户确认值，非系统默认值。
 
 ### 3.55 统一能力目录运行时构建（P0-5 收口，2026-10-02 下午）
