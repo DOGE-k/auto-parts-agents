@@ -2614,6 +2614,43 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   font-size: 11px; color: var(--ink-2);
 }
 .proposal-confirm-row .button { font-size: 11px; padding: 5px 10px; white-space: nowrap; }
+.quality-issue-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.quality-issue-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.quality-issue-form select,
+.quality-issue-form input,
+.quality-issue-form textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+}
+.quality-issue-form textarea {
+  min-height: 72px;
+  line-height: 1.5;
+  resize: vertical;
+}
 .proposal-executing { border-top: 1px solid var(--line-soft); padding-top: 8px; color: var(--muted); font-size: 11px; }
 .proposal-exec-result { border-top: 1px solid var(--line-soft); padding-top: 8px; font-size: 11px; }
 .proposal-exec-result.ok { color: var(--teal-dark); font-weight: 600; }

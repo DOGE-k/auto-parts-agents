@@ -5,6 +5,7 @@ import hmac
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from dotenv import load_dotenv
 
@@ -12,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
@@ -42,6 +43,15 @@ from app.services.llm_quotation import (
 )
 from app.integrations.errors import IntegrationError
 from app.integrations.settings import IntegrationSettings
+from app.services.project_auth import (
+    PROJECT_SESSION_COOKIE,
+    ProjectAuthError,
+    ensure_bootstrap_project_user,
+    login_project_user,
+    logout_project_token,
+    project_session_ttl_seconds,
+    resolve_project_token,
+)
 from app.runtime.scenarios import decide_approval, get_snapshot, reset_project, run_scenario
 from app.aip import init_aip_agents
 
@@ -49,6 +59,7 @@ from app.aip import init_aip_agents
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_database()
+    ensure_bootstrap_project_user()
     init_aip_agents(_app)
     # 初始化真实订单审批系统
     from app.services.real_order import init_approval_system
@@ -65,7 +76,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Real-Write-Token"],
 )
@@ -222,19 +233,34 @@ def _mes_status_error(exc: IntegrationError) -> HTTPException:
 
 
 def require_real_write_access(
-    x_real_write_token: str | None = Header(default=None, alias="X-Real-Write-Token"),
+    x_real_write_token: Annotated[str | None, Header(alias="X-Real-Write-Token")] = None,
+    project_session: Annotated[str | None, Cookie(alias=PROJECT_SESSION_COOKIE)] = None,
 ) -> bool:
-    """Protect external ERP/MES writes with an explicitly configured local token."""
+    """Require a logged-in project user before any ERP/MES write.
+
+    ``X-Real-Write-Token`` remains an optional compatibility check for the
+    advanced integration panel. It can no longer grant write access by
+    itself, and a normal page user does not need to enter it.
+    """
+    if resolve_project_token(project_session) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "project_login_required",
+                "message": "ERP/MES 写入需要项目账号登录，请先到“系统连接”登录",
+            },
+        )
+
     expected = os.getenv("REAL_WRITE_API_TOKEN", "").strip()
-    if not expected:
-        raise HTTPException(status_code=503, detail="真实系统写入未启用：未配置 REAL_WRITE_API_TOKEN")
-    if not x_real_write_token or not hmac.compare_digest(x_real_write_token, expected):
+    provided = (x_real_write_token or "").strip()
+    if expected and provided and not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="真实系统写入令牌无效")
     return True
 
 
 async def require_real_identity(
     authorization: str | None = Header(default=None),
+    project_session: Annotated[str | None, Cookie(alias=PROJECT_SESSION_COOKIE)] = None,
 ):
     """Resolve the authenticated upstream user for real business actions.
 
@@ -242,6 +268,17 @@ async def require_real_identity(
     is checked against this server-resolved identity by each write endpoint.
     """
     from app.services.identity import resolve_real_identity
+
+    # 项目 Cookie 是页面人工身份的首选来源。它解析失败时不回退到上游
+    # 服务账号，避免过期会话被误显示为已登录用户。
+    if project_session:
+        project_identity = resolve_project_token(project_session)
+        if project_identity is None:
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "project_session_expired", "message": "项目登录会话已失效，请重新登录"},
+            )
+        return project_identity
 
     bearer = ""
     if authorization:
@@ -268,23 +305,24 @@ async def require_real_identity(
 
 async def require_real_human_identity(
     authorization: str | None = Header(default=None),
+    project_session: Annotated[str | None, Cookie(alias=PROJECT_SESSION_COOKIE)] = None,
 ):
-    """审批/写入门禁：必须是浏览器登录的审批账号（OpenMES）会话。
-
-    与 require_real_identity 的区别：无 Authorization 头时**不回落**到
-    ERPNext 服务端集成账号——集成账号是程序的数据连接身份，不能替人审批
-    （2026-10-02 用户实测发现未登录也能走完报价审批与 ERP 草稿，根源即此）。
-    只读查询仍无需登录。
-    """
-    if not authorization or not authorization.strip():
+    """审批/写入门禁：必须是本项目登录会话，不接受上游服务账号。"""
+    bearer = ""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.casefold() == "bearer":
+            bearer = value.strip()
+    identity = resolve_project_token(project_session or bearer)
+    if identity is None:
         raise HTTPException(
             status_code=401,
             detail={
-                "code": "approver_login_required",
-                "message": "审批/写入需要审批账号登录：请到「系统连接」用 OpenMES 账号登录后再操作（未登录时本操作不会以服务端集成账号名义执行）",
+                "code": "project_login_required",
+                "message": "审批和写入需要项目账号登录，请先到“系统连接”登录",
             },
         )
-    return await require_real_identity(authorization=authorization)
+    return identity
 
 
 def _actor_for_request(provided: str | None, identity, capability: str) -> str:
@@ -1464,6 +1502,7 @@ async def real_order_approve_procurement_plan(
 @app.post("/api/real-orders/erp/draft/po-from-plan", tags=["real-orders"])
 async def real_order_create_po_from_plan(
     body: RealOrderPoDraftFromPlanRequest,
+    _write_access: bool = Depends(require_real_write_access),
     identity=Depends(require_real_human_identity),
 ) -> dict:
     """根据已审批采购方案创建 ERP 采购订单草稿（创建+回读确认）。"""
@@ -1499,39 +1538,75 @@ async def real_order_identity(identity=Depends(require_real_identity)) -> dict:
     return identity.as_dict()
 
 
-class RealOrderLoginRequest(BaseModel):
+class ProjectLoginRequest(BaseModel):
     username: str
     password: str
 
 
+@app.post("/api/auth/login", tags=["auth"])
+def project_auth_login(body: ProjectLoginRequest, response: Response) -> dict:
+    """登录本项目账号并签发 HttpOnly 项目会话 Cookie。"""
+    try:
+        token, identity = login_project_user(body.username, body.password)
+    except ProjectAuthError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    response.set_cookie(
+        key=PROJECT_SESSION_COOKIE,
+        value=token,
+        max_age=project_session_ttl_seconds(),
+        httponly=True,
+        secure=os.getenv("PROJECT_AUTH_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"},
+        samesite="lax",
+        path="/",
+    )
+    return {
+        "identity": identity.as_dict(),
+        "session_scope": "project_user",
+        "expires_in": project_session_ttl_seconds(),
+        "authority": "Project",
+        "data_source": "project_auth",
+    }
+
+
+@app.get("/api/auth/me", tags=["auth"])
+def project_auth_me(identity=Depends(require_real_human_identity)) -> dict:
+    """返回当前项目用户；未登录时返回 401。"""
+    return {
+        "identity": identity.as_dict(),
+        "expires_in": project_session_ttl_seconds(),
+        "authority": "Project",
+        "data_source": "project_auth",
+    }
+
+
+@app.post("/api/auth/logout", tags=["auth"])
+def project_auth_logout(
+    response: Response,
+    project_session: Annotated[str | None, Cookie(alias=PROJECT_SESSION_COOKIE)] = None,
+) -> dict[str, str]:
+    """撤销当前项目会话并清除浏览器 Cookie。"""
+    logout_project_token(project_session)
+    response.delete_cookie(key=PROJECT_SESSION_COOKIE, path="/")
+    return {"status": "logged_out"}
+
+
+class RealOrderLoginRequest(ProjectLoginRequest):
+    """旧类型名仅为内部兼容；登录接口已迁移到项目账号。"""
+
+
 @app.post("/api/real-orders/auth/login", tags=["real-orders"])
 async def real_order_auth_login(body: RealOrderLoginRequest) -> dict:
-    """用真实 OpenMES 登录契约换取短时会话令牌并回读身份。
-
-    凭据只转发给已配置的 OpenMES 认证端点，不落日志、不持久化。
-    刻意不代理 logout/refresh：OpenMES 的 logout/refresh 会吊销或轮换
-    该上游用户的全部 token，可能波及服务端集成令牌；本地登出仅清除
-    浏览器会话。
-    """
-    from app.integrations.errors import IntegrationError, IntegrationNotConfigured
-    from app.services.session_auth import login_openmes_session
-
-    try:
-        return await login_openmes_session(username=body.username, password=body.password)
-    except IntegrationNotConfigured as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except IntegrationError as exc:
-        if exc.status_code in {401, 403, 422}:
-            raise HTTPException(
-                status_code=401,
-                detail={"code": "invalid_credentials", "message": str(exc)},
-            ) from exc
-        raise _integration_status_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "invalid_login_input", "message": str(exc)}) from exc
+    """兼容旧前端入口，转发到项目账号登录。"""
+    # This endpoint cannot set the new cookie without a Response parameter;
+    # new clients must use /api/auth/login. Keep it as a clear migration error
+    # rather than silently logging into OpenMES as an approval identity.
+    raise HTTPException(
+        status_code=410,
+        detail={"code": "legacy_login_removed", "message": "旧 OpenMES 登录入口已停用，请使用 /api/auth/login"},
+    )
 
 
 @app.get("/api/real-orders/quality/todo", tags=["real-orders"])
@@ -1617,6 +1692,7 @@ async def real_order_list_approvals() -> list[dict]:
 @app.post("/api/real-orders/erp/draft/from-quotation", tags=["real-orders"])
 async def real_order_create_so_from_quotation(
     body: RealOrderErpDraftFromQuotationRequest,
+    _write_access: bool = Depends(require_real_write_access),
     identity=Depends(require_real_human_identity),
 ) -> dict:
     """根据已审批报价创建 ERP 销售订单草稿（创建+回读确认）。"""

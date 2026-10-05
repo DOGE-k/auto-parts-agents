@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9000/api
 const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
 const REAL_SESSION_ISSUED_KEY = "real_business_session_issued_at";
 const REAL_WRITE_TOKEN_KEY = "real_business_write_token";
+const PROJECT_SESSION_EXPIRES_KEY = "project_session_expires_at";
 
 /**
  * Keep short lived runtime credentials in sessionStorage only. They are never
@@ -32,6 +33,18 @@ export function getSessionIssuedAt(): number {
   return Number(window.sessionStorage.getItem(REAL_SESSION_ISSUED_KEY) || 0);
 }
 
+export function setProjectSessionExpiresIn(expiresInSeconds: number): void {
+  if (typeof window === "undefined") return;
+  const seconds = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds : 0;
+  if (seconds) window.sessionStorage.setItem(PROJECT_SESSION_EXPIRES_KEY, String(Date.now() + seconds * 1000));
+  else window.sessionStorage.removeItem(PROJECT_SESSION_EXPIRES_KEY);
+}
+
+export function clearProjectSessionExpiry(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(PROJECT_SESSION_EXPIRES_KEY);
+}
+
 // OpenMES 原生页面地址（工单补填 customer_order_no 关联等操作在此进行；可用 VITE_OPENMES_URL 覆盖）
 export const OPENMES_UI_URL = (import.meta.env.VITE_OPENMES_URL as string | undefined) ?? "http://127.0.0.1/";
 
@@ -43,6 +56,10 @@ export const OPENMES_SESSION_TTL_MS = 15 * 60 * 1000;
  * 调用方按"剩余时间未知，请重新登录"口径处理），0 表示已过期。
  */
 export function getSessionRemainingMs(): number | null {
+  if (typeof window !== "undefined") {
+    const expiresAt = Number(window.sessionStorage.getItem(PROJECT_SESSION_EXPIRES_KEY) || 0);
+    if (expiresAt) return Math.max(0, expiresAt - Date.now());
+  }
   const issued = getSessionIssuedAt();
   if (!issued) return null;
   return Math.max(0, OPENMES_SESSION_TTL_MS - (Date.now() - issued));
@@ -125,6 +142,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (sessionToken && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${sessionToken}`);
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers,
   });
   const text = await response.text();
@@ -565,10 +583,11 @@ export async function getQualityWorkflowStates(): Promise<QualityWorkflowStates>
 }
 
 export type RealLoginResult = {
-  provider: string;
-  token_type: string;
-  access_token: string;
-  force_password_change: boolean;
+  provider?: string;
+  token_type?: string;
+  access_token?: string;
+  force_password_change?: boolean;
+  expires_in?: number;
   session_scope?: string;
   expires_hint?: string;
   identity: RealIdentity;
@@ -577,10 +596,14 @@ export type RealLoginResult = {
 };
 
 export async function loginRealSession(username: string, password: string): Promise<RealLoginResult> {
-  return api<RealLoginResult>("/real-orders/auth/login", {
+  return api<RealLoginResult>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+}
+
+export async function logoutProjectSession(): Promise<void> {
+  await api<{ status: string }>("/auth/logout", { method: "POST", body: JSON.stringify({}) });
 }
 
 export type ProposalOptions = {
@@ -1010,6 +1033,7 @@ export async function askAssistantStream(
   const response = await fetch(`${API_BASE}/real-orders/assistant/ask/stream`, {
     method: "POST",
     headers,
+    credentials: "include",
     body: JSON.stringify({ question, context, session_id: options.sessionId || undefined }),
     signal: options.signal,
   });

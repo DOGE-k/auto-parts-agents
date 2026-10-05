@@ -53,7 +53,7 @@ function mountPanel(): { container: HTMLElement; root: Root; cleanup: () => void
   act(() => {
     root.render(
       <BusinessOverviewPanel
-        hasOpenmesSession={false}
+        hasProjectSession={false}
         qualityTodoCount={null}
         onNavigateAssistant={() => undefined}
         onNavigate={() => undefined}
@@ -116,7 +116,7 @@ describe("BusinessOverviewPanel 业务总览", () => {
     act(() => {
       root.render(
         <BusinessOverviewPanel
-          hasOpenmesSession={false}
+          hasProjectSession={false}
           qualityTodoCount={null}
           onNavigateAssistant={onNavigateAssistant}
           onNavigate={() => undefined}

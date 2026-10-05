@@ -2164,3 +2164,34 @@ ERP 物料需求
 
 - ACS 其余三个文件仅时间戳字段重生成差异（2 行），无内容漂移。
 - 全厂跟单与流程面板同屏语境已用文案区分，视觉层级优化后置。
+
+### 3.62 统一项目身份与 ERP/MES 写入门禁（2026-10-05）
+
+依据用户确认的设计文档 `docs/统一项目身份与ERP-MES写入权限设计.md`，完成从“OpenMES 页面审批账号”到“项目账号 + 后端服务身份”的迁移基础版本。用户此前明确要求完成后上传 GitHub 并合并到 `main`；本节记录提交前的最终验收状态。
+
+#### 一、实现内容
+
+- 新增 `project_users`、`project_sessions` 两张业务表及 Alembic 迁移 `e4f1a9c2d7b0_project_auth`。项目密码使用 PBKDF2 哈希，会话数据库只保存 SHA-256 摘要；初始化账号不会被后续环境变量覆盖，并处理并发启动时的唯一键竞争。
+- 新增 `POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout`。登录返回项目用户身份并设置 HttpOnly、SameSite Cookie；旧 `/api/real-orders/auth/login` 返回 410，避免继续把 OpenMES 用户当作项目审批人。
+- 主要报价、采购、工单下达、报工、质量登记/处置/关闭和 ERP/MES 草稿写入路由统一检查项目会话；业务角色由项目会话角色映射和 `_actor_for_request` 检查。未登录直接返回 401，角色不足返回 403，前端提交的 `approved_by/requested_by` 不再决定真实审批人。
+- `REAL_WRITE_API_TOKEN` 改为可选的部署级兼容校验。普通业务写入只要求有效项目会话，ERPNext/OpenMES 凭据继续只由后端适配器读取；部署脚本和说明已同步这一口径。
+- 前端系统连接页改为“项目登录”，请求使用 Cookie credentials；质量待办和顶栏身份只在项目会话有效时显示人工身份，高级联调令牌保留为维护入口。
+
+#### 二、验证证据
+
+| 项 | 结果 |
+|---|---|
+| Alembic | SQLite 与当前 PostgreSQL 业务库均从 `c7e2f9a84d15` 升级到 `e4f1a9c2d7b0` |
+| 后端测试 | **259 passed**（`.conda-env\\python.exe -m pytest -q backend/tests`） |
+| 前端测试 | **45 passed**（10 个测试文件） |
+| 前端类型/构建 | `tsc --noEmit` 与 `npm run build` 通过 |
+| Python 编译与差异检查 | `compileall`、`git diff --check` 通过 |
+| Cookie 冒烟 | 未登录 `/api/auth/me`=401；项目登录=200 且 `authority=Project`；回读身份=200；退出后回读=401 |
+
+冒烟使用临时项目账号并在验证后删除，未向 Git 提交密码、Cookie、Token 或数据库凭据。此次验证只测试项目认证与门禁，不宣称已完成新的 ERPNext/OpenMES 业务写入；真实写入仍需在目标部署账号和数据上按既有审批→写回→回读流程验收。
+
+#### 三、遗留与下一步
+
+- 目标部署环境必须在根目录 `.env` 配置 `PROJECT_AUTH_PASSWORD` 并执行 `alembic upgrade head`；已有数据库不会由 `init_database()` 自动补迁移。
+- 审计响应已经携带 `authenticated_identity`，但项目用户与上游服务身份的分列持久化字段仍需结合部署方审计要求继续细化。
+- 下一步优先做目标环境页面级登录后报工/质量登记复核，再评估质量报告、PPAP/IMDS 和工艺模板等 P2 能力；新增能力必须先核对真实 OpenMES/ERPNext API，不以 Mock 代替。

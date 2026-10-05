@@ -69,7 +69,7 @@ function App() {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [runtimeSurface, setRuntimeSurface] = useState<RuntimeSurface | null>(null);
-  // 当前审批人（由 RealBusinessPage 解析后上报，供顶栏与侧栏展示）
+  // 当前项目用户（由 RealBusinessPage 解析后上报，供顶栏与侧栏展示）
   const [realIdentity, setRealIdentity] = useState<RealIdentity | null>(null);
   // 真实连接状态（评审意见③：来自页面实际探测，顶栏/侧栏与系统连接页同一状态源）
   const [connStatus, setConnStatus] = useState<{ erpnext: string; openmes: string } | null>(null);
@@ -220,7 +220,7 @@ function App() {
   };
 
   // 统一连接文案（评审意见③）：区分"已连接"（真实探测通过）与"探测中/异常"，
-  // 审批账号登录状态单独由"当前审批人"表达，不混在连接文案里。
+  // 项目登录状态单独由"当前项目用户"表达，不混在连接文案里。
   const connectionText = !isRealModule(page)
     ? "Mock + OpenMES 只读"
     : connStatus === null
@@ -272,7 +272,7 @@ function App() {
             {connectionText}
           </div>
           <p className="sidebar-approver">
-            当前审批人：<b>{realIdentity ? `${realIdentity.actor_id}（OpenMES）` : "未登录"}</b>
+            当前项目用户：<b>{realIdentity ? `${realIdentity.actor_id}` : "未登录"}</b>
             <br />
             {isRealModule(page)
               ? <>真实 ERP/MES 数据<br />Agent 辅助 · 草稿写入需审批</>
@@ -290,7 +290,7 @@ function App() {
               <i />
               {connectionText}
             </div>
-            <span className="topbar-approver">当前审批人：<b>{realIdentity ? `${realIdentity.actor_id}（OpenMES）` : "未登录"}</b></span>
+            <span className="topbar-approver">当前项目用户：<b>{realIdentity ? realIdentity.actor_id : "未登录"}</b></span>
             {mockDemoEnabled && projects.length > 0 && !isRealModule(page) && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.project_id} value={item.project_id}>{item.project_id} · {item.scenario === "normal_order" ? "正常订单" : item.scenario === "material_shortage" ? "缺料协作" : item.scenario === "quality_hold" ? "质量冻结" : "订单加急"}</option>)}
             </select>}

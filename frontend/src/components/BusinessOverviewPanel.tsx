@@ -6,7 +6,7 @@ import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
 
 type Props = {
-  hasOpenmesSession: boolean;
+  hasProjectSession: boolean;
   qualityTodoCount: number | null;
   onNavigateAssistant: (question: string) => void;
   onNavigate: (module: "sales" | "procurement" | "production" | "quality" | "audit") => void;
@@ -23,7 +23,7 @@ type RunRow = {
   started_at?: string;
 };
 
-export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCount, onNavigateAssistant, onNavigate, onOpenEvent }: Props) {
+export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCount, onNavigateAssistant, onNavigate, onOpenEvent }: Props) {
   const [quotationPending, setQuotationPending] = useState<number | null>(null);
   const [planPending, setPlanPending] = useState<number | null>(null);
   const [events, setEvents] = useState<CollaborationEvent[] | null>(null);
@@ -87,7 +87,7 @@ export default function BusinessOverviewPanel({ hasOpenmesSession, qualityTodoCo
         </button>
         <button className="kpi-card clickable" onClick={() => onNavigate("quality")}>
           <span className="kpi-icon red">⚠</span><span className="kpi-label">质量待办</span>
-          <strong>{hasOpenmesSession ? (qualityTodoCount ?? "—") : "未登录"}</strong>
+          <strong>{hasProjectSession ? (qualityTodoCount ?? "—") : "未登录"}</strong>
         </button>
         <button className="kpi-card clickable" onClick={() => onNavigate("quality")}>
           <span className="kpi-icon purple">⌁</span><span className="kpi-label">缺料/风险事件</span>

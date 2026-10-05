@@ -399,3 +399,9 @@ NCR 处置/关闭的操作链（审批 → 写回 → 回读）与页面操作�
 测试基线：后端 **154 passed** / 前端 14 passed + build（§3.44 完成后）。
 
 每次进入下一项前，先在 `current_status_and_fix_plan.md` 追加真实接口、状态码、authority、是否写入与回读结果，再运行后端隔离测试、前端构建和 `compileall`。
+
+## 2026-10-05 交接更新：统一项目身份基础版本已完成
+
+用户已确认开始实施统一项目登录。项目用户/会话表、HttpOnly Cookie 登录、角色门禁和主要 ERP/MES 写入路由已完成，详见 `current_status_and_fix_plan.md` §3.62 与 `docs/统一项目身份与ERP-MES写入权限设计.md`。普通业务写入只要求项目会话；`REAL_WRITE_API_TOKEN` 仅保留为可选高级联调兼容校验。提交前验证为后端 259 passed、前端 45 passed、类型检查/构建/compileall 通过，SQLite 与 PostgreSQL 迁移均已升级到 `e4f1a9c2d7b0`。
+
+下一步是目标部署环境配置 `PROJECT_AUTH_PASSWORD` 后做页面级登录、报工和质量登记复核，再进入质量报告、PPAP/IMDS、工艺模板等 P2 评估；外部注册写入、OIDC 和订单级质量放行仍保持原有外部依赖边界。

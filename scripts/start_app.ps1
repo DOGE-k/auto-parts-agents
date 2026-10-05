@@ -192,10 +192,15 @@ if ($envContent -match "DEEPSEEK_API_KEY=\S") {
 } else {
     Write-Host "[警告] DEEPSEEK_API_KEY 为空：智能协同问答会如实返回 503" -ForegroundColor Yellow
 }
-if ($envContent -match "REAL_WRITE_API_TOKEN=\S") {
-    Write-Host "[通过] 真实写入门禁令牌已配置（NCR 处置/关闭可写回）" -ForegroundColor Green
+if ($envContent -match "PROJECT_AUTH_PASSWORD=\S") {
+    Write-Host "[通过] 项目账号密码已配置（登录后可执行审批和受控写入）" -ForegroundColor Green
 } else {
-    Write-Host "[警告] REAL_WRITE_API_TOKEN 未配置：写回接口会返回 503" -ForegroundColor Yellow
+    Write-Host "[警告] PROJECT_AUTH_PASSWORD 未配置：项目登录会返回 503，写入门禁不会开放" -ForegroundColor Yellow
+}
+if ($envContent -match "REAL_WRITE_API_TOKEN=\S") {
+    Write-Host "[通过] 高级联调写入令牌已配置（可选兼容校验）" -ForegroundColor Green
+} else {
+    Write-Host "[提示] REAL_WRITE_API_TOKEN 未配置：普通项目登录写入仍可用，高级联调令牌校验关闭" -ForegroundColor DarkGray
 }
 if ($envContent -match "APP_ADAPTER_MODE=real") {
     Write-Host "[通过] 适配器模式 real（连不上真实系统会明确报错，不回退 Mock）" -ForegroundColor Green

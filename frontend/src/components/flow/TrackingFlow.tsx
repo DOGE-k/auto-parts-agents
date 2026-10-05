@@ -561,25 +561,34 @@ export function TrackingQualityGatePanels({
             {!issueFlow && (
               <>
                 <small>现场发现质量问题？在审批门禁内登记为真实 OpenMES NCR（登记后立即出现在上方 NCR 列表，可直接走处置/关闭闭环）。</small>
-                <div className="proposal-confirm-row">
-                  <select value={issueTypeId} onChange={(e) => setIssueTypeId(e.target.value)}>
-                    <option value="">选择问题类型（OpenMES 真实类型）</option>
-                    {issueTypes.map((t) => (
-                      <option key={t.id} value={t.id}>{t.id} · {t.name}（{t.severity ?? "—"}）</option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="问题标题"
-                    value={issueTitle}
-                    onChange={(e) => setIssueTitle(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    placeholder="描述（可选）"
-                    value={issueDesc}
-                    onChange={(e) => setIssueDesc(e.target.value)}
-                  />
+                <div className="quality-issue-form">
+                  <label>
+                    <span>问题类型</span>
+                    <select value={issueTypeId} onChange={(e) => setIssueTypeId(e.target.value)}>
+                      <option value="">选择问题类型（OpenMES 真实类型）</option>
+                      {issueTypes.map((t) => (
+                        <option key={t.id} value={t.id}>{t.id} · {t.name}（{t.severity ?? "—"}）</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>问题标题</span>
+                    <input
+                      type="text"
+                      placeholder="问题标题"
+                      value={issueTitle}
+                      onChange={(e) => setIssueTitle(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>问题描述（可选）</span>
+                    <textarea
+                      rows={3}
+                      placeholder="描述（可选）"
+                      value={issueDesc}
+                      onChange={(e) => setIssueDesc(e.target.value)}
+                    />
+                  </label>
                 </div>
                 <button className="button primary" onClick={() => void openIssueRegistration()}>
                   登记质量问题（需人工审批）→

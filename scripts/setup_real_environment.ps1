@@ -181,7 +181,7 @@ try {
     $erpReady = Wait-Http "ERPNext" "http://127.0.0.1:8080/api/method/ping" $TimeoutSeconds
     if (-not ($openmesReady -and $erpReady)) { throw "外部服务尚未全部健康；不要继续执行种子。" }
 
-    Write-Step "初始化本项目 SQLite/Alembic 业务库"
+    Write-Step "初始化本项目业务库（SQLite 或 PostgreSQL）"
     $backend = Join-Path $root "backend"
     $pythonExe = "python"
     if (Test-Path (Join-Path $root ".conda-env\python.exe")) { $pythonExe = Join-Path $root ".conda-env\python.exe" }
@@ -189,9 +189,25 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "ACPS SDK 依赖安装失败。" }
     & $pythonExe -m pip install -e $backend
     if ($LASTEXITCODE -ne 0) { throw "后端依赖安装失败。" }
+    # Alembic 不会自动读取根目录 .env；显式传入 DATABASE_URL，确保迁移
+    # 与后端启动时使用同一数据库（包括已切换的 PostgreSQL）。
+    $migrationValues = Read-EnvFile $rootEnv
+    $oldDatabaseUrl = $env:DATABASE_URL
+    $hadDatabaseUrl = -not [string]::IsNullOrWhiteSpace($oldDatabaseUrl)
+    if ($migrationValues.ContainsKey("DATABASE_URL") -and -not [string]::IsNullOrWhiteSpace([string]$migrationValues["DATABASE_URL"])) {
+        $env:DATABASE_URL = [string]$migrationValues["DATABASE_URL"]
+    }
+    $migrationExit = 0
     Push-Location $backend
-    try { & $pythonExe -m alembic upgrade head } finally { Pop-Location }
-    if ($LASTEXITCODE -ne 0) { throw "Alembic 迁移失败。" }
+    try {
+        & $pythonExe -m alembic upgrade head
+        $migrationExit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+        if ($hadDatabaseUrl) { $env:DATABASE_URL = $oldDatabaseUrl }
+        else { Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue }
+    }
+    if ($migrationExit -ne 0) { throw "Alembic 迁移失败。" }
     Write-Ok "本地业务库已执行 alembic upgrade head（不会覆盖已有库）"
 
     Write-Step "检查 ERPNext localhost 建站与应用凭据"
@@ -206,7 +222,7 @@ try {
     Write-Ok "ERPNext localhost 站点已可用"
 
     $projectValues = Read-EnvFile $rootEnv
-    $missingProject = @("ERPNEXT_API_KEY", "ERPNEXT_API_SECRET", "REAL_WRITE_API_TOKEN") | Where-Object { -not (Require-EnvValue $projectValues $_ ".env") }
+    $missingProject = @("PROJECT_AUTH_PASSWORD", "ERPNEXT_API_KEY", "ERPNEXT_API_SECRET") | Where-Object { -not (Require-EnvValue $projectValues $_ ".env") }
     if ($missingProject.Count -gt 0) {
         Write-Warn "根目录 .env 尚缺少真实应用凭据：$($missingProject -join ', ')。请用各自系统的专用账号填写，脚本不会替你生成或复制。"
         if ($NoPrompt) { throw "真实应用凭据尚未配置。" }
@@ -215,6 +231,12 @@ try {
     $projectValues = Read-EnvFile $rootEnv
     if (-not (Require-EnvValue $projectValues "ERPNEXT_API_KEY" ".env") -or -not (Require-EnvValue $projectValues "ERPNEXT_API_SECRET" ".env")) {
         throw "ERPNext API Key/Secret 仍为空；不能执行真实种子。"
+    }
+    if (-not (Require-EnvValue $projectValues "PROJECT_AUTH_PASSWORD" ".env")) {
+        throw "PROJECT_AUTH_PASSWORD 仍为空；不能启用项目账号登录。"
+    }
+    if (-not (Require-EnvValue $projectValues "REAL_WRITE_API_TOKEN" ".env")) {
+        Write-Warn "REAL_WRITE_API_TOKEN 未配置；普通项目登录写入仍可用，高级联调令牌兼容检查将关闭。"
     }
 
     if ($RunSeeds) {

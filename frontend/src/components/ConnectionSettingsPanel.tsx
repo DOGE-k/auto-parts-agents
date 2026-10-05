@@ -1,5 +1,5 @@
 // 系统连接面板（信息架构改版 §六：会话设置从真实业务标题区迁移为独立模块）。
-// 普通用户只看数据连接与审批账号；Bearer/写入令牌等调试信息收进「高级联调设置」。
+// 普通用户只看数据连接与项目登录；Bearer/写入令牌等调试信息收进「高级联调设置」。
 // 状态与登录逻辑由 RealBusinessPage 持有（审批操作依赖同一 identity），本面板只做展示。
 import { useEffect, useState } from "react";
 import { formatSessionRemaining, getSessionRemainingMs } from "../api";
@@ -12,7 +12,7 @@ type Props = {
   /** 真实探测的连接状态（与顶栏/侧栏同一状态源；评审意见③统一文案） */
   connErp: ConnState;
   connMes: ConnState;
-  hasOpenmesSession: boolean;
+  hasProjectSession: boolean;
   sessionExpiringSoon: boolean;
   sessionToken: string;
   writeToken: string;
@@ -32,7 +32,7 @@ type Props = {
 export default function ConnectionSettingsPanel(props: Props) {
   const {
     identity,
-    hasOpenmesSession,
+    hasProjectSession,
     sessionExpiringSoon,
     onLogin,
     loginBusy,
@@ -44,10 +44,10 @@ export default function ConnectionSettingsPanel(props: Props) {
   useEffect(() => {
     const recompute = () => setRemainingTick((t) => t + 1);
     recompute();
-    if (!hasOpenmesSession) return;
+    if (!hasProjectSession) return;
     const timer = window.setInterval(recompute, 1000);
     return () => window.clearInterval(timer);
-  }, [hasOpenmesSession]);
+  }, [hasProjectSession]);
 
   return (
     <div className="connection-panel">
@@ -75,10 +75,10 @@ export default function ConnectionSettingsPanel(props: Props) {
             </b>
           </div>
           <div className="connection-row">
-            <span className="source-tag erp">审批账号</span>
-            <span>只读查询无需登录；审批/报工/处置等写入门禁需要 OpenMES 登录会话</span>
-            <b className={props.hasOpenmesSession ? "text-green" : ""}>
-              {props.hasOpenmesSession ? "已登录" : "未登录（需要审批账号）"}
+            <span className="source-tag erp">项目身份</span>
+            <span>只读查询无需登录；审批、报工、处置等写入需要项目账号登录</span>
+            <b className={props.hasProjectSession ? "text-green" : ""}>
+              {props.hasProjectSession ? "已登录" : "未登录（需要项目账号）"}
             </b>
           </div>
         </div>
@@ -87,14 +87,14 @@ export default function ConnectionSettingsPanel(props: Props) {
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <h2>审批账号</h2>
-            <p>普通操作只需要这里登录；审批、报工、NCR 处置等写入门禁使用该会话。</p>
+            <h2>项目登录</h2>
+            <p>登录一次即可操作 ERPNext 与 OpenMES；审批、报工、NCR 处置等写入都使用该项目会话。</p>
           </div>
         </div>
-        {hasOpenmesSession && identity ? (
+        {hasProjectSession && identity ? (
           <div className="connection-account">
             <div className="connection-account-row">
-              <span>当前审批账号</span><b>{identity.actor_id}（OpenMES）</b>
+              <span>当前项目用户</span><b>{identity.actor_id}</b>
             </div>
             <div className="connection-account-row">
               <span>显示名</span><b>{identity.display_name}</b>
@@ -122,19 +122,19 @@ export default function ConnectionSettingsPanel(props: Props) {
                 ERPNext 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）。
               </p>
             )}
-            <strong>OpenMES 账号登录</strong>
+            <strong>项目账号登录</strong>
             <div className="real-session-login-row">
               <input
                 value={props.loginUsername}
                 onChange={(e) => props.onLoginUsernameChange(e.target.value)}
-                placeholder="OpenMES 用户名"
+                placeholder="项目用户名"
                 autoComplete="username"
               />
               <input
                 type="password"
                 value={props.loginPassword}
                 onChange={(e) => props.onLoginPasswordChange(e.target.value)}
-                placeholder="OpenMES 密码"
+                placeholder="项目密码"
                 autoComplete="current-password"
               />
               <button className="button primary" disabled={loginBusy || !props.loginUsername.trim() || !props.loginPassword} onClick={onLogin}>
@@ -142,9 +142,9 @@ export default function ConnectionSettingsPanel(props: Props) {
               </button>
             </div>
             <p className="real-session-hint">
-              登录走真实 OpenMES 认证接口，返回默认 15 分钟 TTL 的短时会话；登出只清除本浏览器会话，不吊销上游令牌。
+              登录由本项目创建和管理；ERPNext 与 OpenMES 账号只作为后端服务连接，不需要在这里分别登录。
             </p>
-            {loginError && <p className="real-session-error">登录失败：{loginError}（请确认 OpenMES 的用户名和密码）</p>}
+            {loginError && <p className="real-session-error">登录失败：{loginError}（请确认项目用户名和密码）</p>}
           </div>
         )}
       </section>
@@ -153,12 +153,12 @@ export default function ConnectionSettingsPanel(props: Props) {
         <div className="panel-heading">
           <div>
             <h2>高级联调设置</h2>
-            <p>与审批账号二选一，仅部署/开发联调用；普通操作无需展开，更无需填写。</p>
+            <p>用于部署或开发联调；普通业务操作无需展开，也不需要填写。</p>
           </div>
         </div>
         <details className="advanced-settings">
           <summary>展开高级联调设置（Bearer 会话 / 本地写入令牌）</summary>
-          <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。这是账号密码登录之外的手工联调入口（二选一），不是审批账号的附加必填项；写入令牌属于服务端 REAL_WRITE_API_TOKEN 门禁，由后端配置持有。</p>
+          <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。这是部署或开发联调入口，不是项目登录的附加必填项。</p>
           <label>
             Bearer 会话（可选）
             <input

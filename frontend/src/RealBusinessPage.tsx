@@ -34,6 +34,9 @@ import {
   getRealSessionToken,
   getRealWriteToken,
   loginRealSession,
+  logoutProjectSession,
+  setProjectSessionExpiresIn,
+  clearProjectSessionExpiry,
   requestWorkOrderDispatch,
   setRealSessionToken,
   setRealWriteToken,
@@ -69,9 +72,9 @@ export type RealModuleKey =
   | "production"    // 生产跟单（流程步骤 7-8 + MES 完工数据）
   | "quality"       // 质量中心（质量待办 + 协同事件）
   | "audit"         // 审批与审计（Agent 运行记录）
-  | "connection";   // 系统连接（数据连接 + 审批账号 + 高级联调）
+  | "connection";   // 系统连接（数据连接 + 项目登录 + 高级联调）
 
-// 各模块页头文案（信息架构改版 §4.2/§4.3：顶部保留业务语境，审批身份压缩为一行摘要）
+// 各模块页头文案（信息架构改版 §4.2/§4.3：顶部保留业务语境，项目身份压缩为一行摘要）
 const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subtitle: string }> = {
   assistant: { eyebrow: "AI 协同", title: "AI 协同问答", subtitle: "用一句话提问，协调者自动调度报价/采购/跟单/质量四个智能体查询真实 ERP/MES；写操作停在人工审批。" },
   overview: { eyebrow: "工作台", title: "业务总览", subtitle: "待审批、质量待办、风险事件与最近业务链；处理动作进入对应业务模块。" },
@@ -80,7 +83,7 @@ const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subti
   production: { eyebrow: "业务协同", title: "生产跟单", subtitle: "工单下达/选择 → 跟单进度 + 质量记录 + 发运门禁；MES 完工数据为只读视图。" },
   quality: { eyebrow: "业务协同", title: "质量中心", subtitle: "跨工单质量待办与协同事件；处置走 NCR 审批门禁，接管≠已处置。" },
   audit: { eyebrow: "记录与管理", title: "审批与审计", subtitle: "每次智能体调用的输入、结果与耗时全程留痕，可追溯。" },
-  connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与审批账号会话；调试令牌收在高级联调设置里。" },
+  connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与项目登录会话；调试令牌收在高级联调设置里。" },
 };
 
 // 订单全流程 8 步（与后端审批链一致；各业务模块只展示自己的阶段）
@@ -147,7 +150,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const [salesPickQuotationId, setSalesPickQuotationId] = useState("");
   const [planOptions, setPlanOptions] = useState<ProcurementPlan[] | null>(null);
   const [procurementPickPlanId, setProcurementPickPlanId] = useState("");
-  // 阶段九：跨工单质量待办（仅 OpenMES 登录会话可见）
+  // 阶段九：跨工单质量待办（仅项目登录会话可见）
   const [qualityTodo, setQualityTodo] = useState<QualityTodoItem[] | null>(null);
   const [qualityTodoLoading, setQualityTodoLoading] = useState(false);
   const [qualityTodoError, setQualityTodoError] = useState("");
@@ -167,7 +170,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     onConnectionStatus?.({ erpnext: connErp, openmes: connMes });
   }, [connErp, connMes, onConnectionStatus]);
 
-  // 审批人来自 ERPNext/OpenMES 当前登录用户；页面不再让操作者自报角色。
+  // 当前项目用户来自项目登录会话；页面不再让操作者自报角色。
+  // 未登录时只读身份解析仍可返回上游服务连接账号，但不会作为审批人；
   // 仅初始解析一次：登录/保存/清除会话路径各自显式刷新身份；
   // 依赖 identity 会因每次返回新对象引用而无限循环请求 identity/me。
   useEffect(() => {
@@ -513,22 +517,22 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   }, [workOrderId, quotation, workOrders, restoreNcrWorkflowStates]);
 
   // ========== 阶段九：跨工单质量待办 ==========
-  const hasOpenmesSession = identity?.provider === "openmes";
+  const hasProjectSession = identity?.provider === "project";
 
-  // 阶段十：OpenMES 会话 15 分钟 TTL（交接文档 §6：保留上游 TTL 不改，但临期必须
-  // 显示实时倒计时）。过期前 90 秒进入临期提醒；无签发时间的历史会话按保守口径立即提醒。
+  // 阶段十：项目登录会话按后端返回的 TTL 倒计时。过期前 90 秒进入临期提醒；
+  // 兼容旧 Bearer 会话时仍保留 15 分钟的历史口径。
   const [sessionNowMs, setSessionNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (!hasOpenmesSession) return;
+    if (!hasProjectSession) return;
     setSessionNowMs(Date.now());
     const timer = window.setInterval(() => setSessionNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [hasOpenmesSession]);
-  const sessionRemainingMs = hasOpenmesSession ? getSessionRemainingMs() : null;
-  const sessionExpiringSoon = hasOpenmesSession && (sessionRemainingMs === null || sessionRemainingMs <= 90 * 1000);
+  }, [hasProjectSession]);
+  const sessionRemainingMs = hasProjectSession ? getSessionRemainingMs() : null;
+  const sessionExpiringSoon = hasProjectSession && sessionRemainingMs !== null && sessionRemainingMs <= 90 * 1000;
 
   const loadQualityTodo = useCallback(async () => {
-    if (identity?.provider !== "openmes") return;
+    if (identity?.provider !== "project") return;
     setQualityTodoLoading(true);
     setQualityTodoError("");
     try {
@@ -543,8 +547,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
 
   // 登录会话建立后自动加载一次质量待办
   useEffect(() => {
-    if (hasOpenmesSession) void loadQualityTodo();
-  }, [hasOpenmesSession, loadQualityTodo]);
+    if (hasProjectSession) void loadQualityTodo();
+  }, [hasProjectSession, loadQualityTodo]);
 
   // 打开某工单的跟单视图（评审意见①：问答/事件/待办跳转都携带对象编号并自动定位，
   // 不是只切到空模块）。反查报价审批状态（不猜）→ 三面板只读加载 → 生产跟单·跟单视图。
@@ -800,24 +804,21 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
 
 
 
-  // OpenMES 登录/令牌处理（信息架构改版后由「系统连接」模块的 ConnectionSettingsPanel 调用）
-  const handleOpenmesLogin = () => {
+  // 项目账号登录/退出（系统连接模块调用）
+  const handleProjectLogin = () => {
     setLoginBusy(true);
     setLoginError("");
     loginRealSession(loginUsername.trim(), loginPassword)
       .then((result) => {
-        setRealSessionToken(result.access_token);
-        setSessionToken(result.access_token);
+        setProjectSessionExpiresIn(result.expires_in ?? 0);
         setLoginPassword("");
         if (result.identity) setIdentity(result.identity);
         else void getRealIdentity().then(setIdentity).catch(() => undefined);
         notify(
-          result.force_password_change
-            ? "登录成功，但上游要求先修改密码，该会话仅能改密"
-            : `已登录为 ${result.identity?.actor_id ?? result.access_token.slice(0, 6) + "…"}（OpenMES 短时会话）`,
+          `已登录为 ${result.identity?.actor_id ?? "项目用户"}`,
         );
       })
-      .catch((e) => setLoginError(e instanceof Error ? e.message : "OpenMES 登录失败"))
+      .catch((e) => setLoginError(e instanceof Error ? e.message : "项目账号登录失败"))
       .finally(() => setLoginBusy(false));
   };
 
@@ -829,18 +830,22 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   };
 
   const handleClearTokens = () => {
+    const hadProjectSession = hasProjectSession;
     setSessionToken("");
     setWriteToken("");
     setRealSessionToken("");
     setRealWriteToken("");
-    void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+    clearProjectSessionExpiry();
+    const clearIdentity = () => void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+    if (hadProjectSession) void logoutProjectSession().catch(() => undefined).finally(clearIdentity);
+    else clearIdentity();
   };
 
-  // 身份上报给 App：顶栏/侧栏显示当前审批人（信息架构改版 §4.2）。
+  // 身份上报给 App：顶栏/侧栏显示当前项目用户（信息架构改版 §4.2）。
   // 交接文档 §1：ERPNext 服务端集成账号是数据连接身份，不是浏览器审批用户——
-  // 只有 OpenMES 登录会话的身份才能作为"当前审批人"上报，否则顶栏一律显示未登录。
+  // 只有项目登录会话的身份才能作为"当前项目用户"上报，否则顶栏一律显示未登录。
   useEffect(() => {
-    onIdentityChange?.(identity?.provider === "openmes" ? identity : null);
+    onIdentityChange?.(identity?.provider === "project" ? identity : null);
   }, [identity, onIdentityChange]);
 
   const resetFlow = () => {
@@ -894,16 +899,16 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           <h1>{MODULE_META[activeModule].title}</h1>
           <p>{MODULE_META[activeModule].subtitle}</p>
           <div className="real-identity-compact">
-            <span className="source-tag erp">审批身份</span>
+            <span className="source-tag erp">项目身份</span>
             {identity === null && connErp === "error" ? (
               // 身份解析已失败（如 OpenMES 会话过期——后端安全设计：失效会话不回退
               // 集成账号，直接报错），不能显示成"正在解析"误导用户
-              <span className="ds-label">审批账号会话已失效，请到「系统连接」重新登录</span>
+              <span className="ds-label">项目登录会话已失效，请到「系统连接」重新登录</span>
             ) : identity === null ? (
               <span className="ds-label">正在解析当前登录用户…</span>
-            ) : hasOpenmesSession ? (
+            ) : hasProjectSession ? (
               <>
-                <span className="ds-label">{identity.actor_id}（OpenMES）</span>
+                <span className="ds-label">{identity.actor_id}（项目用户）</span>
                 <details className="identity-roles">
                   <summary>身份详情</summary>
                   <p>{identity.actor_id} · 角色：{identity.roles.join("、") || "未返回"}</p>
@@ -911,10 +916,10 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
               </>
             ) : (
               <>
-                <span className="ds-label">审批账号未登录</span>
+                <span className="ds-label">项目账号未登录</span>
                 <details className="identity-roles">
                   <summary>身份详情</summary>
-                  <p>只读查询无需登录；审批、报工、NCR 处置等写入门禁需要 OpenMES 审批账号会话（去「系统连接」登录）。</p>
+                  <p>只读查询无需登录；审批、报工、NCR 处置等写入需要项目账号登录（到「系统连接」登录）。</p>
                   {identity && (
                     <p>ERPNext 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）</p>
                   )}
@@ -922,9 +927,9 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
               </>
             )}
           </div>
-          {hasOpenmesSession && sessionExpiringSoon && (
+          {hasProjectSession && sessionExpiringSoon && (
             <div className="session-expiry-warning">
-              OpenMES 会话即将过期（{formatSessionRemaining(sessionRemainingMs)}）——请到「系统连接」重新登录，以继续审批与处置操作。
+              项目登录会话即将过期（{formatSessionRemaining(sessionRemainingMs)}）——请到「系统连接」重新登录，以继续审批与处置操作。
               <button className="button ghost" onClick={() => onNavigate("connection")}>去系统连接</button>
             </div>
           )}
@@ -964,7 +969,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       {activeModule === "overview" && (
         <ErrorBoundary name="业务总览">
           <BusinessOverviewPanel
-            hasOpenmesSession={hasOpenmesSession}
+            hasProjectSession={hasProjectSession}
             qualityTodoCount={qualityTodo?.length ?? null}
             onNavigateAssistant={(question) => onAskQuestion?.(question)}
             onNavigate={onNavigate}
@@ -977,7 +982,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       {activeModule === "quality" && (
         <ErrorBoundary name="质量中心">
           <QualityTodoPanel
-            hasOpenmesSession={hasOpenmesSession}
+            hasProjectSession={hasProjectSession}
             qualityTodo={qualityTodo}
             qualityTodoLoading={qualityTodoLoading}
             qualityTodoError={qualityTodoError}
@@ -1324,14 +1329,14 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         </ErrorBoundary>
       )}
 
-      {/* 系统连接（信息架构改版 §六：数据连接 + 审批账号 + 高级联调设置） */}
+      {/* 系统连接（信息架构改版 §六：数据连接 + 项目登录 + 高级联调设置） */}
       {activeModule === "connection" && (
         <ErrorBoundary name="系统连接">
           <ConnectionSettingsPanel
             identity={identity}
             connErp={connErp}
             connMes={connMes}
-            hasOpenmesSession={hasOpenmesSession}
+            hasProjectSession={hasProjectSession}
             sessionExpiringSoon={sessionExpiringSoon}
             sessionToken={sessionToken}
             writeToken={writeToken}
@@ -1341,7 +1346,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             loginError={loginError}
             onLoginUsernameChange={setLoginUsername}
             onLoginPasswordChange={setLoginPassword}
-            onLogin={handleOpenmesLogin}
+            onLogin={handleProjectLogin}
             onSessionTokenChange={setSessionToken}
             onWriteTokenChange={setWriteToken}
             onSaveTokens={handleSaveTokens}

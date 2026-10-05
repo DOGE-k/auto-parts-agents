@@ -8,8 +8,10 @@ from fastapi import HTTPException
 
 from app.integrations.errors import IntegrationError, IntegrationNotConfigured
 from app.integrations.settings import IntegrationSettings
-from app.main import RealOrderLoginRequest, real_order_auth_login
+from app.main import ProjectLoginRequest, project_auth_login
 from app.services.session_auth import login_openmes_session
+from app.services.identity import RealIdentity
+from app.services.project_auth import ProjectAuthError
 
 
 def settings(**overrides) -> IntegrationSettings:
@@ -108,38 +110,45 @@ class SessionAuthServiceTests(unittest.IsolatedAsyncioTestCase):
             await login_openmes_session(settings(openmes_base_url=""), username="u", password="p")
 
 
-class SessionAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
-    async def test_wrong_credentials_map_to_401_invalid_credentials(self):
-        async def fail_login(*args, **kwargs):
-            raise IntegrationError(
-                "The provided credentials are incorrect.",
-                code="remote_http_error",
-                status_code=422,
-            )
+class ProjectAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_project_login_sets_http_only_cookie(self):
+        identity = RealIdentity(
+            subject="admin",
+            display_name="项目管理员",
+            roles=("sales_manager",),
+            authority="Project",
+            provider="project",
+        )
+        from fastapi import Response
 
-        with patch("app.services.session_auth.login_openmes_session", fail_login):
+        with patch("app.main.login_project_user", return_value=("session-token", identity)):
+            response = Response()
+            result = project_auth_login(ProjectLoginRequest(username="u", password="p"), response)
+        self.assertEqual(result["identity"]["provider"], "project")
+        self.assertIn("project_session=session-token", response.headers["set-cookie"])
+        self.assertIn("HttpOnly", response.headers["set-cookie"])
+
+    async def test_project_login_invalid_credentials_maps_to_401(self):
+        from fastapi import Response
+
+        with patch(
+            "app.main.login_project_user",
+            side_effect=ProjectAuthError("invalid_credentials", "项目用户名或密码错误", 401),
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                await real_order_auth_login(RealOrderLoginRequest(username="u", password="p"))
+                project_auth_login(ProjectLoginRequest(username="u", password="p"), Response())
         self.assertEqual(ctx.exception.status_code, 401)
         self.assertEqual(ctx.exception.detail["code"], "invalid_credentials")
 
-    async def test_unconfigured_openmes_maps_to_503(self):
-        async def not_configured(*args, **kwargs):
-            raise IntegrationNotConfigured("OpenMES", ["OPENMES_BASE_URL"])
+    async def test_project_login_blank_credentials_maps_to_422(self):
+        from fastapi import Response
 
-        with patch("app.services.session_auth.login_openmes_session", not_configured):
+        with patch(
+            "app.main.login_project_user",
+            side_effect=ProjectAuthError("invalid_login_input", "用户名和密码不能为空", 422),
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                await real_order_auth_login(RealOrderLoginRequest(username="u", password="p"))
-        self.assertEqual(ctx.exception.status_code, 503)
-        self.assertEqual(ctx.exception.detail["code"], "not_configured")
-
-    async def test_blank_credentials_map_to_422(self):
-        async def reject_blank(*args, **kwargs):
-            raise ValueError("用户名和密码不能为空")
-
-        with patch("app.services.session_auth.login_openmes_session", reject_blank):
-            with self.assertRaises(HTTPException) as ctx:
-                await real_order_auth_login(RealOrderLoginRequest(username=" ", password="p"))
+                project_auth_login(ProjectLoginRequest(username=" ", password="p"), Response())
         self.assertEqual(ctx.exception.status_code, 422)
         self.assertEqual(ctx.exception.detail["code"], "invalid_login_input")
 

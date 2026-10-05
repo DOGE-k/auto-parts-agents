@@ -1,14 +1,8 @@
-"""审批/写入的人工身份门禁测试（2026-10-02 用户实测回归）。
-
-用户发现：未登录也能走完报价审批并创建 ERP 草稿——根源是写路由依赖的
-require_real_identity 在无 Authorization 头时回落到 ERPNext 服务端集成账号
-（Administrator），审批以集成账号名义留痕。修复：24 个审批/写入 POST 路由
-改用 require_real_human_identity——无浏览器登录会话直接 401，不回落；
-只读 GET（identity/me、质量待办、工作流状态）保留宽松回落。
-"""
+"""项目账号统一身份门禁测试。"""
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -21,7 +15,7 @@ class HumanIdentityGateTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as ctx:
             await require_real_human_identity(authorization=None)
         self.assertEqual(ctx.exception.status_code, 401)
-        self.assertEqual(ctx.exception.detail["code"], "approver_login_required")
+        self.assertEqual(ctx.exception.detail["code"], "project_login_required")
 
     async def test_blank_header_rejected(self):
         with self.assertRaises(HTTPException) as ctx:
@@ -32,17 +26,22 @@ class HumanIdentityGateTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await require_real_human_identity(authorization="Basic abc")
 
-    async def test_valid_header_delegates_to_existing_resolver(self):
-        async def fake_resolve(request_bearer_token: str):
-            self.assertEqual(request_bearer_token, "admin-session-token")
-            return {"actor_id": "admin", "provider": "openmes"}
+    async def test_project_bearer_session_is_accepted(self):
+        fake_identity = SimpleNamespace(actor_id="admin")
+        with patch("app.main.resolve_project_token", return_value=fake_identity) as resolve:
+            identity = await require_real_human_identity(authorization="Bearer project-session-token")
+        resolve.assert_called_once_with("project-session-token")
+        self.assertEqual(identity.actor_id, "admin")
 
-        with patch("app.services.identity.resolve_real_identity", fake_resolve):
-            identity = await require_real_human_identity(authorization="Bearer admin-session-token")
-        self.assertEqual(identity["actor_id"], "admin")
+    async def test_openmes_bearer_is_not_an_approval_identity(self):
+        with patch("app.main.resolve_project_token", return_value=None):
+            with self.assertRaises(HTTPException) as ctx:
+                await require_real_human_identity(authorization="Bearer openmes-token")
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.detail["code"], "project_login_required")
 
     def test_lenient_dependency_still_used_by_read_routes(self):
-        """identity/me 等只读 GET 保留宽松回落（未登录显示数据连接账号，不算失败）。"""
+        """只读身份路由仍可回读上游服务连接状态。"""
         from app.main import app as fastapi_app
 
         strict = {"require_real_human_identity"}
@@ -66,6 +65,52 @@ class HumanIdentityGateTests(unittest.IsolatedAsyncioTestCase):
                     checks[path],
                     f"路由 {path} 的身份依赖与预期不符（实际 {'严格' if uses_strict else '宽松'}）",
                 )
+
+    def test_major_erp_mes_write_routes_require_project_identity(self):
+        """ERP/MES 业务写入不能回退到服务端集成账号。"""
+        from app.main import app as fastapi_app
+
+        expected = {
+            "/api/real-orders/quality/issues/{issue_id}/resolution-request",
+            "/api/real-orders/quality/resolution-approvals/{approval_id}/approve",
+            "/api/real-orders/work-orders/dispatch-request",
+            "/api/real-orders/work-orders/dispatch-approvals/{approval_id}/approve",
+            "/api/real-orders/work-orders/dispatch",
+            "/api/real-orders/production-reports/request",
+            "/api/real-orders/production-reports/approvals/{approval_id}/approve",
+            "/api/real-orders/production-reports/execute",
+            "/api/real-orders/quality-issues/registration-request",
+            "/api/real-orders/quality-issues/approvals/{approval_id}/approve",
+            "/api/real-orders/quality-issues/execute",
+            "/api/real-orders/quality/issues/{issue_id}/resolve",
+            "/api/real-orders/quality/issues/{issue_id}/disposition-request",
+            "/api/real-orders/quality/disposition-approvals/{approval_id}/approve",
+            "/api/real-orders/quality/issues/{issue_id}/disposition",
+            "/api/real-orders/quality/issues/{issue_id}/close-request",
+            "/api/real-orders/quality/close-approvals/{approval_id}/approve",
+            "/api/real-orders/quality/issues/{issue_id}/close",
+            "/api/real-orders/procurement/plans/{plan_id}/approve",
+            "/api/real-orders/erp/draft/po-from-plan",
+            "/api/real-orders/quotations/{quotation_id}/approve",
+            "/api/real-orders/erp/draft/from-quotation",
+        }
+        routes = {
+            getattr(route, "path", ""): route
+            for route in fastapi_app.routes
+            if "POST" in (getattr(route, "methods", None) or set())
+        }
+        self.assertEqual(expected - routes.keys(), set())
+        for path in expected:
+            route = routes[path]
+            dep_names = {
+                getattr(getattr(dep, "call", None), "__name__", "")
+                for dep in getattr(route, "dependant", None).dependencies or []
+            }
+            self.assertIn(
+                "require_real_human_identity",
+                dep_names,
+                f"路由 {path} 未使用项目登录身份门禁",
+            )
 
 
 if __name__ == "__main__":

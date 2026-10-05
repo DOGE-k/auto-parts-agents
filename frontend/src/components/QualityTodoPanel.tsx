@@ -2,7 +2,7 @@
 import type { QualityTodoItem } from "../api";
 
 type Props = {
-  hasOpenmesSession: boolean;
+  hasProjectSession: boolean;
   qualityTodo: QualityTodoItem[] | null;
   qualityTodoLoading: boolean;
   qualityTodoError: string;
@@ -12,7 +12,7 @@ type Props = {
 };
 
 export default function QualityTodoPanel({
-  hasOpenmesSession,
+  hasProjectSession,
   qualityTodo,
   qualityTodoLoading,
   qualityTodoError,
@@ -27,27 +27,27 @@ export default function QualityTodoPanel({
           <h2>质量待办</h2>
           <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"切换到订单流程页签中该工单的 NCR 审批处置面板。</p>
         </div>
-        {hasOpenmesSession && (
+        {hasProjectSession && (
           <button className="button ghost" onClick={onRefresh} disabled={qualityTodoLoading}>
             {qualityTodoLoading ? "加载中…" : "↻ 刷新待办"}
           </button>
         )}
       </div>
-      {!hasOpenmesSession && (
+      {!hasProjectSession && (
         <p className="quality-todo-hint">
-          登录后查看质量待办——请到左侧「系统连接」用 OpenMES 账号建立短期会话（仅当前浏览器会话生效）。
+          登录后查看质量待办——请到左侧「系统连接」登录项目账号。
         </p>
       )}
-      {hasOpenmesSession && qualityTodoError && (
+      {hasProjectSession && qualityTodoError && (
         <div className="quality-todo-error">
           <strong>加载失败</strong> {qualityTodoError}
           <button className="button ghost" onClick={onRefresh}>重试</button>
         </div>
       )}
-      {hasOpenmesSession && !qualityTodoError && qualityTodo && qualityTodo.length === 0 && (
+      {hasProjectSession && !qualityTodoError && qualityTodo && qualityTodo.length === 0 && (
         <p className="quality-todo-hint">当前没有未关闭质量问题。</p>
       )}
-      {hasOpenmesSession && qualityTodo && qualityTodo.length > 0 && (
+      {hasProjectSession && qualityTodo && qualityTodo.length > 0 && (
         <table className="quality-todo-table">
           <thead>
             <tr>

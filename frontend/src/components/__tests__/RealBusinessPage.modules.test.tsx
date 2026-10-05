@@ -98,7 +98,7 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     expect(text).not.toContain("Agent 运行记录");
   });
 
-  it("页头审批身份区分审批账号与数据连接账号（交接文档 §1）", async () => {
+  it("页头项目身份区分项目用户与数据连接账号（交接文档 §1）", async () => {
     const page = mountPage("sales");
     cleanups.push(page.cleanup);
     await act(async () => {
@@ -107,7 +107,7 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     });
     const text = textOf(page.container);
     // ERPNext 服务端集成账号不能显示为审批身份；必须明确标注"未登录"
-    expect(text).toContain("审批账号未登录");
+    expect(text).toContain("项目账号未登录");
     expect(text).toContain("ERPNext 数据连接账号：Administrator");
     expect(text).toContain("服务端集成账号");
     expect(text).not.toContain("当前审批人：Administrator");
@@ -160,7 +160,7 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     const connText = textOf(connection.container);
     expect(connText).toContain("系统连接");
     expect(connText).toContain("数据连接");
-    expect(connText).toContain("审批账号");
+    expect(connText).toContain("项目登录");
     // 高级联调设置默认折叠，Bearer/写入令牌不在展开文案里直接铺开（验收 11）
     expect(connText).toContain("高级联调设置");
   });
