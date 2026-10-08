@@ -67,9 +67,13 @@ export function getSessionRemainingMs(): number | null {
 
 export function formatSessionRemaining(remainingMs: number | null): string {
   if (remainingMs === null) return "剩余时间未知（历史会话），请重新登录";
-  const minutes = Math.floor(remainingMs / 60000);
-  const seconds = Math.floor((remainingMs % 60000) / 1000);
-  return `剩余 ${minutes} 分 ${seconds} 秒`;
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `剩余 ${hours} 小时 ${minutes} 分 ${seconds} 秒`
+    : `剩余 ${minutes} 分 ${seconds} 秒`;
 }
 
 export function getRealWriteToken(): string {

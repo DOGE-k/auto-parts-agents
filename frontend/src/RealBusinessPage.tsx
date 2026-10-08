@@ -830,15 +830,22 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   };
 
   const handleClearTokens = () => {
-    const hadProjectSession = hasProjectSession;
     setSessionToken("");
     setWriteToken("");
     setRealSessionToken("");
     setRealWriteToken("");
-    clearProjectSessionExpiry();
-    const clearIdentity = () => void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
-    if (hadProjectSession) void logoutProjectSession().catch(() => undefined).finally(clearIdentity);
-    else clearIdentity();
+    void getRealIdentity().then(setIdentity).catch((e) => setError(e instanceof Error ? e.message : "真实身份解析失败"));
+    notify("联调配置已清除");
+  };
+
+  const handleProjectLogout = () => {
+    void logoutProjectSession()
+      .then(() => {
+        clearProjectSessionExpiry();
+        setIdentity(null);
+        return getRealIdentity().then(setIdentity);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "退出登录失败"));
   };
 
   // 身份上报给 App：顶栏/侧栏显示当前项目用户（信息架构改版 §4.2）。
@@ -908,7 +915,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
               <span className="ds-label">正在解析当前登录用户…</span>
             ) : hasProjectSession ? (
               <>
-                <span className="ds-label">{identity.actor_id}（项目用户）</span>
+                <span className="ds-label">{identity.actor_id}</span>
                 <details className="identity-roles">
                   <summary>身份详情</summary>
                   <p>{identity.actor_id} · 角色：{identity.roles.join("、") || "未返回"}</p>
@@ -1347,6 +1354,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             onLoginUsernameChange={setLoginUsername}
             onLoginPasswordChange={setLoginPassword}
             onLogin={handleProjectLogin}
+            onLogout={handleProjectLogout}
             onSessionTokenChange={setSessionToken}
             onWriteTokenChange={setWriteToken}
             onSaveTokens={handleSaveTokens}

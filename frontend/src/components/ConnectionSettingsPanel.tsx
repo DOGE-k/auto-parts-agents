@@ -23,6 +23,7 @@ type Props = {
   onLoginUsernameChange: (value: string) => void;
   onLoginPasswordChange: (value: string) => void;
   onLogin: () => void;
+  onLogout: () => void;
   onSessionTokenChange: (value: string) => void;
   onWriteTokenChange: (value: string) => void;
   onSaveTokens: () => void;
@@ -112,7 +113,7 @@ export default function ConnectionSettingsPanel(props: Props) {
               </b>
             </div>
             <div className="real-session-actions">
-              <button className="button ghost" onClick={props.onClearTokens}>退出登录（清除本浏览器会话）</button>
+              <button className="button ghost" onClick={props.onLogout}>退出登录</button>
             </div>
           </div>
         ) : (
@@ -158,7 +159,7 @@ export default function ConnectionSettingsPanel(props: Props) {
         </div>
         <details className="advanced-settings">
           <summary>展开高级联调设置（Bearer 会话 / 本地写入令牌）</summary>
-          <p>仅在当前浏览器会话内保存短期 Bearer 会话和本地写入门禁令牌，不写入项目配置或审计记录。这是部署或开发联调入口，不是项目登录的附加必填项。</p>
+          <p>仅在当前浏览器会话内保存联调凭据，不写入项目配置或审计记录。本地写入令牌是可选的联调校验值，普通项目登录请留空；旧令牌不匹配时可能导致写入被拒绝。清除联调配置不会退出项目登录。</p>
           <label>
             Bearer 会话（可选）
             <input
@@ -181,7 +182,7 @@ export default function ConnectionSettingsPanel(props: Props) {
           </label>
           <div className="real-session-actions">
             <button className="button primary" onClick={props.onSaveTokens}>保存并重新解析身份</button>
-            <button className="button ghost" onClick={props.onClearTokens}>清除会话</button>
+            <button className="button ghost" onClick={props.onClearTokens}>清除联调配置</button>
           </div>
         </details>
       </section>
