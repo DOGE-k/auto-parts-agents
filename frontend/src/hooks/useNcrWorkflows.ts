@@ -1,4 +1,5 @@
 // NCR 处置/关闭工作流状态机（阶段八+十：真实审批-写回-回读-幂等；10.5 从 RealBusinessPage 抽出为 hook）
+import { displaySystemText } from "../lib/system-labels";
 import { useState, useCallback } from "react";
 import {
   getQualityWorkflowStates,
@@ -112,8 +113,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       });
       notify(`NCR ${issueId} 处置审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "创建处置审批失败" } });
-      onError(e instanceof Error ? e.message : "创建处置审批失败");
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: displaySystemText(e instanceof Error ? e.message : "创建处置审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "创建处置审批失败"));
     }
   }, [ncrWorkflows, updateNcrWorkflow, workOrderId, onError, notify]);
 
@@ -127,8 +128,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       updateNcrWorkflow(issueId, { dispositionApproved: true, dispositionResult: { status: "已批准", ...result }, busy: "" });
       notify(`NCR ${issueId} 处置审批已批准`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "处置审批失败" } });
-      onError(e instanceof Error ? e.message : "处置审批失败");
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: displaySystemText(e instanceof Error ? e.message : "处置审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "处置审批失败"));
     }
   }, [ncrWorkflows, updateNcrWorkflow, onError, notify]);
 
@@ -153,17 +154,17 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       if (!result.success) throw new Error(result.error ?? "NCR 处置写回未验证");
       notify(`NCR ${issueId} 处置已写回并完成回读验证`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: e instanceof Error ? e.message : "NCR 处置写回失败" } });
-      onError(e instanceof Error ? e.message : "NCR 处置写回失败");
+      updateNcrWorkflow(issueId, { busy: "", dispositionResult: { error: displaySystemText(e instanceof Error ? e.message : "NCR 处置写回失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "NCR 处置写回失败"));
     }
   }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId, onError, notify]);
 
   // 解决质量问题（2026-10-02 补前端缺口）：处置写回 ≠ 问题解决——关闭前置条件
-  // "问题已解决"要求 OpenMES 的 issue 状态翻成 RESOLVED，走"解决审批 → resolve 写回"。
+  // "问题已解决"要求 MES 系统 的 issue 状态翻成 RESOLVED，走"解决审批 → resolve 写回"。
   const requestNcrResolution = useCallback(async (issueId: string, resolutionNotes: string) => {
     if (!issueId) return;
     if (!resolutionNotes.trim()) {
-      onError("请填写解决说明：解决写回 OpenMES 必须留痕（让步接收也要写明依据）。");
+      onError("请填写解决说明：解决写回 MES 系统 必须留痕（让步接收也要写明依据）。");
       return;
     }
     updateNcrWorkflow(issueId, { busy: "requesting_resolution" });
@@ -178,8 +179,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       });
       notify(`NCR ${issueId} 解决审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "创建解决审批失败" } });
-      onError(e instanceof Error ? e.message : "创建解决审批失败");
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: displaySystemText(e instanceof Error ? e.message : "创建解决审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "创建解决审批失败"));
     }
   }, [updateNcrWorkflow, onError, notify]);
 
@@ -193,8 +194,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       updateNcrWorkflow(issueId, { resolutionApproved: true, resolutionResult: { status: "已批准" }, busy: "" });
       notify(`NCR ${issueId} 解决审批已批准`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "解决审批失败" } });
-      onError(e instanceof Error ? e.message : "解决审批失败");
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: displaySystemText(e instanceof Error ? e.message : "解决审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "解决审批失败"));
     }
   }, [ncrWorkflows, updateNcrWorkflow, onError, notify]);
 
@@ -203,7 +204,7 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
     const approvalId = workflow?.resolutionApprovalId;
     if (!approvalId || !workflow.resolutionApproved || !workOrderId) return;
     if (!resolutionNotes.trim()) {
-      onError("缺少解决说明，拒绝写入 OpenMES。");
+      onError("缺少解决说明，拒绝写入 MES 系统。");
       return;
     }
     updateNcrWorkflow(issueId, { busy: "writing_resolution" });
@@ -227,8 +228,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       if (!result.success) throw new Error(result.error ?? "NCR 解决写回未验证");
       notify(`NCR ${issueId} 已解决并完成回读验证`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: e instanceof Error ? e.message : "NCR 解决写回失败" } });
-      onError(e instanceof Error ? e.message : "NCR 解决写回失败");
+      updateNcrWorkflow(issueId, { busy: "", resolutionResult: { error: displaySystemText(e instanceof Error ? e.message : "NCR 解决写回失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "NCR 解决写回失败"));
     }
   }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId, onError, notify]);
 
@@ -242,7 +243,7 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       notify(result.closure_ready ? `NCR ${issueId} 已满足关闭前置条件` : `NCR ${issueId} 仍有关闭前置条件未满足`);
     } catch (e) {
       updateNcrWorkflow(issueId, { busy: "", closureCheck: undefined });
-      onError(e instanceof Error ? e.message : "关闭前置校验失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "关闭前置校验失败"));
     }
   }, [updateNcrWorkflow, workOrderId, onError, notify]);
 
@@ -255,8 +256,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       updateNcrWorkflow(issueId, { closeApprovalId: result.approval?.approval_id, closeApproved: false, closeResult: { status: "待审批" }, busy: "" });
       notify(`NCR ${issueId} 关闭审批已建立${result.approval?.approval_id ? `（${result.approval.approval_id}）` : ""}`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "创建关闭审批失败" } });
-      onError(e instanceof Error ? e.message : "创建关闭审批失败");
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: displaySystemText(e instanceof Error ? e.message : "创建关闭审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "创建关闭审批失败"));
     }
   }, [updateNcrWorkflow, workOrderId, onError, notify]);
 
@@ -270,8 +271,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       updateNcrWorkflow(issueId, { closeApproved: true, closeResult: { status: "已批准" }, busy: "" });
       notify(`NCR ${issueId} 关闭审批已批准`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "关闭审批失败" } });
-      onError(e instanceof Error ? e.message : "关闭审批失败");
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: displaySystemText(e instanceof Error ? e.message : "关闭审批失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "关闭审批失败"));
     }
   }, [ncrWorkflows, updateNcrWorkflow, onError, notify]);
 
@@ -291,8 +292,8 @@ export function useNcrWorkflows({ workOrderId, refreshQualityAndGate, onError, n
       if (!result.success) throw new Error(result.error ?? "NCR 关闭写回未验证");
       notify(`NCR ${issueId} 已关闭并完成回读验证`);
     } catch (e) {
-      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: e instanceof Error ? e.message : "NCR 关闭写回失败" } });
-      onError(e instanceof Error ? e.message : "NCR 关闭写回失败");
+      updateNcrWorkflow(issueId, { busy: "", closeResult: { error: displaySystemText(e instanceof Error ? e.message : "NCR 关闭写回失败") } });
+      onError(displaySystemText(e instanceof Error ? e.message : "NCR 关闭写回失败"));
     }
   }, [ncrWorkflows, refreshQualityAndGate, updateNcrWorkflow, workOrderId, onError, notify]);
 

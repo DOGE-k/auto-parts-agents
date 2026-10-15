@@ -3,12 +3,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.persistence.models import Base
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+# 所有数据库入口共用应用的配置顺序，包括直接运行 Alembic。
+# 显式环境变量优先；根配置优先于 backend 配置，不输出连接字符串。
+load_dotenv(BACKEND_DIR.parent / ".env", override=False)
+load_dotenv(BACKEND_DIR / ".env", override=False)
 DEFAULT_DB_FILE = BACKEND_DIR / "data" / "demo.db"
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_DB_FILE.as_posix()}")
 

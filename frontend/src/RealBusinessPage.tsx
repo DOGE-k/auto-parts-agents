@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import QualityTodoPanel from "./components/QualityTodoPanel";
+import PpapPanel from "./components/PpapPanel";
 import CollaborationEventsPanel from "./components/CollaborationEventsPanel";
 import AgentRunsPanel from "./components/AgentRunsPanel";
 import AssistantPanel from "./components/AssistantPanel";
@@ -8,6 +9,7 @@ import ConnectionSettingsPanel from "./components/ConnectionSettingsPanel";
 import MesCompletionsPanel from "./components/MesCompletionsPanel";
 import PendingApprovalsPanel from "./components/PendingApprovalsPanel";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { displaySystemText } from "./lib/system-labels";
 import { useNcrWorkflows } from "./hooks/useNcrWorkflows";
 import {
   QuotationInputStep,
@@ -81,7 +83,7 @@ const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subti
   sales: { eyebrow: "业务协同", title: "销售与订单", subtitle: "报价分析 → 报价审批 → ERP 销售订单草稿；后续采购与生产在对应模块继续。" },
   procurement: { eyebrow: "业务协同", title: "采购与缺料", subtitle: "采购分析 → 供应商方案审批 → PO 草稿；缺料事件会自动协同相关方。" },
   production: { eyebrow: "业务协同", title: "生产跟单", subtitle: "工单下达/选择 → 跟单进度 + 质量记录 + 发运门禁；MES 完工数据为只读视图。" },
-  quality: { eyebrow: "业务协同", title: "质量中心", subtitle: "跨工单质量待办与协同事件；处置走 NCR 审批门禁，接管≠已处置。" },
+  quality: { eyebrow: "业务协同", title: "质量中心", subtitle: "PPAP 编制与审核、跨工单质量问题处理；资料包审批与 NCR 处置分别留痕。" },
   audit: { eyebrow: "记录与管理", title: "审批与审计", subtitle: "每次智能体调用的输入、结果与耗时全程留痕，可追溯。" },
   connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与项目登录会话；调试令牌收在高级联调设置里。" },
 };
@@ -143,6 +145,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const [loginError, setLoginError] = useState("");
   // 生产跟单模块的二级视图（信息架构改版：MES 完工数据并入生产跟单）
   const [productionView, setProductionView] = useState<"tracking" | "completions">("tracking");
+  const [qualityView, setQualityView] = useState<"issues" | "ppap">("issues");
   // 全厂跟单（2026-10-02 用户建议）：跨订单选择任意未完工工单直接跟单，不绑定当前流程
   const [globalWorkOrderId, setGlobalWorkOrderId] = useState("");
   // 继续已有订单（2026-10-02 用户建议）：销售/采购空态时可选历史报价或采购方案载入流程
@@ -209,7 +212,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         // 与当前 ERP 销售订单号精确关联后才能进入跟单/质量门禁。
       } catch (e) {
         setConnMes("error");
-        setError(e instanceof Error ? e.message : "加载 OpenMES 工单失败");
+        setError(e instanceof Error ? e.message : "加载 MES 工单失败");
       }
     };
     void loadData();
@@ -334,7 +337,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         // BOM 缺失：缺料评估不可用（后端如实返回 EVALUATION_BLOCKED）。
         // 停留在当前步展示阻断信息，绝不当作"库存充足无需采购"继续走流程。
         setStep(4);
-        notify("缺料评估不可用：该物料未配置 BOM，请先在 ERPNext 补录");
+        notify("缺料评估不可用：该物料未配置 BOM，请先在 ERP 系统补录");
       } else {
         // 库存充足无需采购：跳过方案审批与 PO 草稿步骤，直接进入跟单质量
         setStep(7);
@@ -490,7 +493,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     if (!workOrderId) return;
     const selected = workOrders.find((wo) => wo.work_order_id === workOrderId);
     if (!quotation?.erp_draft_id || !selected || selected.customer_order_no?.trim() !== quotation.erp_draft_id.trim()) {
-      setError("当前 MES 工单未与本次 ERP 销售订单正式关联，不能加载跟单与质量结果。请先在 OpenMES 建立 customer_order_no 精确关联。");
+      setError("当前 MES 工单未与本次 ERP 销售订单正式关联，不能加载跟单与质量结果。请先在 MES 系统建立 customer_order_no 精确关联。");
       return;
     }
     setLoading(true);
@@ -899,7 +902,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const displayStep = Math.min(step, objectProvenMaxStep);
 
   return (
-    <div className="page-content">
+    <div className={`page-content ${activeModule === "quality" && qualityView === "ppap" ? "ppap-focused" : ""}`}>
       <div className="page-heading">
         <div>
           <div className="eyebrow">真实系统业务链 · {MODULE_META[activeModule].eyebrow}</div>
@@ -928,7 +931,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                   <summary>身份详情</summary>
                   <p>只读查询无需登录；审批、报工、NCR 处置等写入需要项目账号登录（到「系统连接」登录）。</p>
                   {identity && (
-                    <p>ERPNext 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）</p>
+                    <p>ERP 系统数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）</p>
                   )}
                 </details>
               </>
@@ -950,7 +953,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       {/* 全局错误横幅：任何页签的操作失败都在此显示 */}
       {error && (
         <div className="error-banner">
-          <span>操作失败</span> {error}
+          <span>操作失败</span> {displaySystemText(error)}
           <button onClick={() => setError("")}>×</button>
         </div>
       )}
@@ -988,6 +991,11 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
       {/* 质量中心：跨工单质量待办 + 协同事件（复用原组件与处置链路） */}
       {activeModule === "quality" && (
         <ErrorBoundary name="质量中心">
+          <nav className="ppap-tabs" aria-label="质量中心业务入口">
+            <button className={`button ${qualityView === "issues" ? "" : "secondary"}`} aria-pressed={qualityView === "issues"} onClick={() => setQualityView("issues")}>质量问题处理</button>
+            <button className={`button ${qualityView === "ppap" ? "" : "secondary"}`} aria-pressed={qualityView === "ppap"} onClick={() => setQualityView("ppap")}>PPAP 编制</button>
+          </nav>
+          {qualityView === "ppap" ? <PpapPanel hasProjectSession={hasProjectSession} actorId={identity?.actor_id} roles={identity?.roles} onLogin={() => onNavigate("connection")} /> : <>
           <QualityTodoPanel
             hasProjectSession={hasProjectSession}
             qualityTodo={qualityTodo}
@@ -1001,6 +1009,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             }}
           />
           <CollaborationEventsPanel notify={notify} onError={setError} onGoTarget={(event) => void goToEventTarget(event)} />
+          </>}
         </ErrorBoundary>
       )}
 
@@ -1363,7 +1372,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         </ErrorBoundary>
       )}
 
-      {toast && <div className="toast">✓ &nbsp;{toast}</div>}
+      {toast && <div className="toast">✓ &nbsp;{displaySystemText(toast)}</div>}
       {loading && <div className="busy-indicator"><span />处理中</div>}
     </div>
   );

@@ -1,5 +1,6 @@
 // 跟单质量环节面板（步骤 7-8：工单选择 / 跟单 + 质量 NCR + 发运门禁；阶段十 10.5 从 RealBusinessPage 抽出）
 // 2026-10-02：发运门禁阻塞行按"未关联 / 未审批"两种情况给出不同处理入口
+import { displaySystemText } from "../../lib/system-labels";
 import { useEffect, useState } from "react";
 import NcrWorkflowCard from "../NcrWorkflowCard";
 import type { NcrForm, NcrWorkflow, QualityInfo, Quotation, ShipGateInfo, TrackingInfo, WorkOrder } from "../../types/realBusiness";
@@ -82,7 +83,7 @@ export function WorkOrderSelectPanel({
       <div className="panel-heading">
         <div>
           <h2>生产跟单与质量</h2>
-          <p>从 OpenMES 读取工单进度、质量记录和发运门禁状态</p>
+          <p>从 MES 系统读取工单进度、质量记录和发运门禁状态</p>
         </div>
       </div>
       {/* 信息架构（2026-10-02 用户反馈）：无关联工单时"下达工单"是主操作，置顶为主 CTA，
@@ -91,22 +92,22 @@ export function WorkOrderSelectPanel({
         <div className="dispatch-block primary-cta">
           <div className="dispatch-lead">
             <strong>ERP 订单 {quotation?.erp_draft_id} 还没有可跟单的 MES 工单</strong>
-            <span>系统不会用其他订单的工单代替。下一步是在审批门禁内向 OpenMES 下达本订单的工单：真实创建 + customer_order_no 自动关联 + 回读验证。</span>
+            <span>系统不会用其他订单的工单代替。下一步是在审批门禁内向 MES 系统下达本订单的工单：真实创建 + customer_order_no 自动关联 + 回读验证。</span>
           </div>
           {!dispatchFlow && (
             <div className="dispatch-cta-row">
               <button className="button primary" onClick={onOpenDispatch} disabled={loading}>
-                下达工单到 OpenMES（需人工审批）→
+                下达工单到 MES 系统（需人工审批）→
               </button>
               <button className="button ghost" onClick={onRefreshWorkOrders}>↻ 刷新工单列表</button>
             </div>
           )}
           {dispatchFlow?.stage === "confirm" && (
             <div className="dispatch-confirm">
-              <small>将执行（真实写入 OpenMES，需逐级审批）：</small>
+              <small>将执行（真实写入 MES 系统，需逐级审批）：</small>
               <code>① 建立"工单下达"审批（记录将创建的工单内容，不写入）</code>
               <code>② 人工批准该审批（审批人 = 当前登录身份）</code>
-              <code>③ 按审批创建 OpenMES 工单（order_no 由 ERP 订单号派生，customer_order_no 精确关联）→ 回读验证</code>
+              <code>③ 按审批创建 MES 系统工单（order_no 由 ERP 订单号派生，customer_order_no 精确关联）→ 回读验证</code>
               <div className="proposal-confirm-row">
                 <button className="button primary" onClick={onConfirmDispatch} disabled={loading}>
                   确认下达（①→②→③ 自动执行，过程留痕）
@@ -130,7 +131,7 @@ export function WorkOrderSelectPanel({
               </div>
             ) : (
               <div className="dispatch-result error">
-                工单下达失败：{dispatchFlow.result.error}
+                工单下达失败：{displaySystemText(dispatchFlow.result.error)}
                 <div className="proposal-confirm-row">
                   <button className="button ghost" onClick={onDismissDispatch} disabled={loading}>
                     重置后重新下达
@@ -144,7 +145,7 @@ export function WorkOrderSelectPanel({
         <>
           <div className="form-grid">
             <div className="form-group">
-              <label>工单号 (来自 OpenMES)</label>
+              <label>工单号 (来自 MES 系统)</label>
               <select
                 value={workOrderId}
                 onChange={(e) => onSelectWorkOrder(e.target.value)}
@@ -165,7 +166,7 @@ export function WorkOrderSelectPanel({
                 className="button ghost"
                 onClick={onRefreshWorkOrders}
               >
-                ↻ 刷新工单列表（在 OpenMES 建立关联后点击）
+                ↻ 刷新工单列表（在 MES 系统建立关联后点击）
               </button>
             </div>
           </div>
@@ -238,7 +239,7 @@ export function TrackingQualityGatePanels({
   onReload: () => void;
   onReset: () => void;
 }) {
-  // 真实报工（通用链路补强）：面板自包含状态；审批门禁内走 OpenMES 官方报工链路
+  // 真实报工（通用链路补强）：面板自包含状态；审批门禁内走 MES 系统官方报工链路
   const [reportQty, setReportQty] = useState("");
   const [reportElapsed, setReportElapsed] = useState("");
   const [reportLot, setReportLot] = useState("");
@@ -290,7 +291,7 @@ export function TrackingQualityGatePanels({
     setReportLot("");
   };
 
-  // 质量问题登记（通用链路补强）：审批门禁内创建真实 OpenMES NCR
+  // 质量问题登记（通用链路补强）：审批门禁内创建真实 MES 系统 NCR
   const [issueTypes, setIssueTypes] = useState<IssueTypeInfo[]>([]);
   const [issueTypesError, setIssueTypesError] = useState("");
   const [issueTypeId, setIssueTypeId] = useState("");
@@ -362,7 +363,7 @@ export function TrackingQualityGatePanels({
               <h2>跟单 Agent</h2>
               <p>工单生产进度与风险评估</p>
             </div>
-            <span className="badge blue-badge">OpenMES</span>
+            <span className="badge blue-badge">MES 系统</span>
           </div>
           <div className="tracking-info">
             <div className="tracking-row">
@@ -393,7 +394,7 @@ export function TrackingQualityGatePanels({
             </div>
             <small className="muted-text">
               {tracking.eta_status === "RATE_BASED"
-                ? `依据 OpenMES 实际速率 ${tracking.observed_rate?.units_per_hour ?? "—"} 件/小时`
+                ? `依据 MES 系统实际速率 ${tracking.observed_rate?.units_per_hour ?? "—"} 件/小时`
                 : tracking.eta_status === "COMPLETED"
                   ? "工单已完成"
                   : "缺少实际产量与耗时记录，未使用交期或固定天数代替 ETA"}
@@ -406,17 +407,17 @@ export function TrackingQualityGatePanels({
                     key={idx}
                     className={`risk-item ${risk.level === "high" ? "high" : "medium"}`}
                   >
-                    {risk.message}
+                    {displaySystemText(risk.message)}
                   </div>
                 ))}
               </div>
             )}
           </div>
-          {/* 真实报工（通用链路补强）：审批门禁内调用 OpenMES 官方报工链路，现场产生速率数据 */}
+          {/* 真实报工（通用链路补强）：审批门禁内调用 MES 系统官方报工链路，现场产生速率数据 */}
           <div className="dispatch-block">
             {!reportFlow && (
               <>
-                <small>没有速率数据？可在审批门禁内对当前工单真实报工（建批次 → 开工 → 完工，OpenMES 官方 API），报工后 ETA 自动按真实速率计算。</small>
+                <small>没有速率数据？可在审批门禁内对当前工单真实报工（建批次 → 开工 → 完工，MES 系统官方 API），报工后 ETA 自动按真实速率计算。</small>
                 <div className="proposal-confirm-row">
                   <input
                     type="number"
@@ -446,7 +447,7 @@ export function TrackingQualityGatePanels({
             )}
             {reportFlow?.stage === "confirm" && reportFlow.plan && (
               <div className="dispatch-confirm">
-                <small>将执行（真实写入 OpenMES，需逐级审批）：</small>
+                <small>将执行（真实写入 MES 系统，需逐级审批）：</small>
                 <code>① 建立"真实报工"审批（批次 {reportFlow.plan.lot_number} · 数量 {reportFlow.plan.batch_target_qty} · 实际耗时 {reportFlow.plan.actual_elapsed_minutes} 分钟，不写入）</code>
                 <code>② 人工批准该审批（审批人 = 当前登录身份）</code>
                 <code>③ 按审批走官方报工链路：建批次 → 开工 → 完工（produced_qty + actual_elapsed_minutes）→ 回读验证</code>
@@ -474,7 +475,7 @@ export function TrackingQualityGatePanels({
                 </div>
               ) : (
                 <div className="dispatch-result error">
-                  报工失败：{reportFlow.result.error}
+                  报工失败：{displaySystemText(reportFlow.result.error)}
                   <button className="button ghost" onClick={resetReportFlow}>返回修改</button>
                 </div>
               )
@@ -519,8 +520,8 @@ export function TrackingQualityGatePanels({
                     {q.severity}
                   </span>
                   <div className="quality-detail">
-                    <strong>{q.title}</strong>
-                    <small>{q.status} · {q.record_type}</small>
+                    <strong>{displaySystemText(q.title)}</strong>
+                    <small>{q.status} · {displaySystemText(q.record_type)}</small>
                   </div>
                 </div>
               ))}
@@ -530,7 +531,7 @@ export function TrackingQualityGatePanels({
             <div className="ncr-workflows">
               <div className="ncr-workflow-heading">
                 <strong>NCR 人工处置与关闭</strong>
-                <small>真实 OpenMES 写回必须经过处置方案、审批、写回、回读；关闭还必须通过纠正措施校验。</small>
+                <small>真实 MES 系统写回必须经过处置方案、审批、写回、回读；关闭还必须通过纠正措施校验。</small>
               </div>
               {quality.quality_records.filter((q) => q.record_id).map((issue) => (
                 <NcrWorkflowCard
@@ -556,18 +557,18 @@ export function TrackingQualityGatePanels({
               ))}
             </div>
           )}
-          {/* 质量问题登记（通用链路补强）：审批门禁内创建真实 OpenMES NCR，登记后立即出现在上方列表可处置 */}
+          {/* 质量问题登记（通用链路补强）：审批门禁内创建真实 MES 系统 NCR，登记后立即出现在上方列表可处置 */}
           <div className="dispatch-block">
             {!issueFlow && (
               <>
-                <small>现场发现质量问题？在审批门禁内登记为真实 OpenMES NCR（登记后立即出现在上方 NCR 列表，可直接走处置/关闭闭环）。</small>
+                <small>现场发现质量问题？在审批门禁内登记为真实 MES 系统 NCR（登记后立即出现在上方 NCR 列表，可直接走处置/关闭闭环）。</small>
                 <div className="quality-issue-form">
                   <label>
                     <span>问题类型</span>
                     <select value={issueTypeId} onChange={(e) => setIssueTypeId(e.target.value)}>
-                      <option value="">选择问题类型（OpenMES 真实类型）</option>
+                      <option value="">选择问题类型（MES 系统真实类型）</option>
                       {issueTypes.map((t) => (
-                        <option key={t.id} value={t.id}>{t.id} · {t.name}（{t.severity ?? "—"}）</option>
+                        <option key={t.id} value={t.id}>{t.id} · {displaySystemText(t.name)}（{t.severity ?? "—"}）</option>
                       ))}
                     </select>
                   </label>
@@ -595,7 +596,7 @@ export function TrackingQualityGatePanels({
                 </button>
                 {issueTypesError && (
                   <div className="dispatch-result error">
-                    问题类型加载失败：{issueTypesError}
+                    问题类型加载失败：{displaySystemText(issueTypesError)}
                     <button className="button ghost" onClick={loadIssueTypes}>重试</button>
                   </div>
                 )}
@@ -603,10 +604,10 @@ export function TrackingQualityGatePanels({
             )}
             {issueFlow?.stage === "confirm" && issueFlow.plan && (
               <div className="dispatch-confirm">
-                <small>将执行（真实写入 OpenMES，需逐级审批）：</small>
-                <code>① 建立"质量问题登记"审批（{issueFlow.plan.work_order_no} · 类型 {issueFlow.plan.issue_type_name}（{issueFlow.plan.severity}）· "{issueFlow.plan.title}"，不写入）</code>
+                <small>将执行（真实写入 MES 系统，需逐级审批）：</small>
+                <code>① 建立"质量问题登记"审批（{issueFlow.plan.work_order_no} · 类型 {displaySystemText(issueFlow.plan.issue_type_name)}（{issueFlow.plan.severity}）· "{displaySystemText(issueFlow.plan.title)}"，不写入）</code>
                 <code>② 人工批准该审批（审批人 = 当前登录身份）</code>
-                <code>③ 按审批创建 OpenMES 质量问题 → 回读验证（同工单同标题未关闭问题幂等）</code>
+                <code>③ 按审批创建 MES 系统质量问题 → 回读验证（同工单同标题未关闭问题幂等）</code>
                 <div className="proposal-confirm-row">
                   <button className="button primary" onClick={() => void confirmIssueRegistration()} disabled={loading}>
                     确认登记（①→②→③ 自动执行，过程留痕）
@@ -629,20 +630,20 @@ export function TrackingQualityGatePanels({
                 </div>
               ) : (
                 <div className="dispatch-result error">
-                  质量问题登记失败：{issueFlow.result.error}
+                  质量问题登记失败：{displaySystemText(issueFlow.result.error)}
                   <button className="button ghost" onClick={resetIssueFlow}>返回修改</button>
                 </div>
               )
             )}
           </div>
-          <p className="gate-reason">{quality.gate_details.reason}</p>
+          <p className="gate-reason">{displaySystemText(quality.gate_details.reason)}</p>
           {quality.unsupported_capabilities?.length > 0 && (
             <div className="unsupported-list">
               <small>当前系统不支持（如实标注，不伪造）</small>
               {quality.unsupported_capabilities.map((u, idx) => (
                 <div key={idx} className="unsupported-item">
-                  <strong>{u.capability}</strong>
-                  <small>{u.reason}</small>
+                  <strong>{displaySystemText(u.capability)}</strong>
+                  <small>{displaySystemText(u.reason)}</small>
                 </div>
               ))}
             </div>
@@ -673,7 +674,7 @@ export function TrackingQualityGatePanels({
                   ? "已通过"
                   : linkedErpOrderNo
                     ? `关联订单 ${linkedErpOrderNo} 未审批`
-                    : "工单未关联 ERP 销售订单——到 OpenMES 给工单补填 customer_order_no 后，回来点'重新加载跟单与门禁'"}
+                    : "工单未关联 ERP 销售订单——到 MES 系统给工单补填 customer_order_no 后，回来点'重新加载跟单与门禁'"}
               </small>
             </div>
             {!shipGate.quotation_approved && linkedErpOrderNo && onGoQuotationApproval && (
@@ -683,7 +684,7 @@ export function TrackingQualityGatePanels({
             )}
             {!shipGate.quotation_approved && !linkedErpOrderNo && (
               <a className="button ghost" href={OPENMES_UI_URL} target="_blank" rel="noreferrer">
-                到 OpenMES 建立关联 ↗
+                到 MES 系统建立关联 ↗
               </a>
             )}
           </div>
@@ -714,7 +715,7 @@ export function TrackingQualityGatePanels({
             <small>阻塞原因</small>
             <ul>
               {shipGate.blocking_reasons.map((reason, idx) => (
-                <li key={idx}>{reason}</li>
+                <li key={idx}>{displaySystemText(reason)}</li>
               ))}
             </ul>
           </div>

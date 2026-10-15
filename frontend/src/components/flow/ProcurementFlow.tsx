@@ -1,4 +1,5 @@
 // 采购环节面板（步骤 4-6：采购分析 / 方案审批 / PO 草稿；阶段十 10.5 从 RealBusinessPage 抽出）
+import { displaySystemText } from "../../lib/system-labels";
 import type { ProcurementPlan, Quotation } from "../../types/realBusiness";
 
 export function ProcurementAnalyzePanel({
@@ -54,13 +55,13 @@ export function ProcurementAnalyzePanel({
         /* BOM 缺失：缺料评估不可用，如实阻断并指引补录（不伪造"无缺料"继续流程） */
         <div className="evaluation-blocked">
           <small>缺料评估不可用（如实阻断，不给出伪结论）</small>
-          <p>{plan.recommendation}</p>
+          <p>{displaySystemText(plan.recommendation)}</p>
           <ul>
             {(plan.data_limitations ?? []).map((d, idx) => (
-              <li key={idx}>{d.detail}</li>
+              <li key={idx}>{displaySystemText(d.detail)}</li>
             ))}
           </ul>
-          <p className="field-hint">处理方式：在 ERPNext 为成品物料补录 BOM（含子项与用量）后，回到步骤 4 重新执行采购分析。</p>
+          <p className="field-hint">处理方式：在 ERP 系统为成品物料补录 BOM（含子项与用量）后，回到步骤 4 重新执行采购分析。</p>
         </div>
       ) : (
         <>
@@ -110,7 +111,7 @@ export function ProcurementAnalyzePanel({
           {plan.supplier_options.length > 0 && (
             <div className="supplier-options">
               <small>
-                供应商方案 · 推荐规则 {plan.recommendation_rule}（价格：供应商特定价格记录；
+                供应商方案 · 推荐规则 {displaySystemText(plan.recommendation_rule)}（价格：供应商特定价格记录；
                 交期：Item.lead_time_days）
               </small>
               {plan.supplier_options.map((opt) => (
@@ -169,7 +170,7 @@ export function ProcurementAnalyzePanel({
                     </tbody>
                   </table>
                   {opt.recommendation_reason && (
-                    <p className="recommend-reason">{opt.recommendation_reason}</p>
+                    <p className="recommend-reason">{displaySystemText(opt.recommendation_reason)}</p>
                   )}
                 </label>
               ))}
@@ -180,17 +181,17 @@ export function ProcurementAnalyzePanel({
             <small>数据来源与限制（如实标注）</small>
             <ul>
               {(plan.data_limitations ?? []).map((d, idx) => (
-                <li key={idx}>{d.detail}</li>
+                <li key={idx}>{displaySystemText(d.detail)}</li>
               ))}
             </ul>
             <ul className="evidence-list">
               {(plan.evidence ?? []).map((ev, idx) => (
                 <li key={idx}>
                   <span className={`source-tag ${ev.source === "ERPNext" ? "erp" : "mes"}`}>
-                    {ev.source}
+                    {displaySystemText(ev.source)}
                   </span>
-                  <span className="evidence-type">{ev.record_type}</span>
-                  <span className="evidence-summary">{ev.summary}</span>
+                  <span className="evidence-type">{displaySystemText(ev.record_type)}</span>
+                  <span className="evidence-summary">{displaySystemText(ev.summary)}</span>
                 </li>
               ))}
             </ul>
@@ -218,7 +219,7 @@ export function PlanApprovalPanel({
         <div>
           <h2>采购方案人工审批</h2>
           <p>
-            {plan.recommendation}
+            {displaySystemText(plan.recommendation)}
           </p>
         </div>
         <span className={`badge ${plan.status === "APPROVED" ? "green" : "amber-chip"}`}>
@@ -294,8 +295,8 @@ export function PoDraftPanel({
             </div>
           </div>
           <div className="source-note">
-            <span className="source-tag erp">ERPNext</span>
-            {plan.po_draft?.delivery_note || "数据来源：ERPNext REST API · 草稿 docstatus=0 · 未提交"}
+            <span className="source-tag erp">ERP 系统</span>
+            {displaySystemText(plan.po_draft?.delivery_note || "数据来源：ERP 系统 REST API · 草稿 docstatus=0 · 未提交")}
           </div>
         </div>
       ) : step === 6 ? (

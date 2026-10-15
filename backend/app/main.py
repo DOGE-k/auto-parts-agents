@@ -5,7 +5,7 @@ import hmac
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 
@@ -16,6 +16,7 @@ load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -344,6 +345,341 @@ def _actor_for_request(provided: str | None, identity, capability: str) -> str:
             },
         )
     return identity.actor_id
+
+
+# PPAP writes are local, authorized task operations. They never go through
+# the read-only coordinator catalog and never call ERP/MES write adapters.
+from app.services import ppap as ppap_service
+from app.services import ppap_inputs, ppap_template
+
+
+class PpapActorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str | None = None
+    note: str = ""
+
+
+class PpapTaskCreateRequest(PpapActorRequest):
+    mode: Literal["REAL", "TEST"] = "REAL"
+    customer_id: str = ""
+    customer_name: str
+    part_no: str
+    part_name: str
+    part_side: str
+    drawing_version: str = ""
+    engineering_change_level: str = ""
+    submission_reason: str = ""
+    submission_level: str = ""
+    reviewer: str = ""
+    due_date: str = ""
+    template_id: str = ppap_template.TEMPLATE_ID
+    authorization_ref: str = ""
+
+
+class PpapTaskUpdateRequest(PpapActorRequest):
+    patch: dict = Field(default_factory=dict)
+
+
+class PpapApplicabilityDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    element_id: str
+    requirement: str
+    basis: str = ""
+
+
+class PpapApplicabilityRequest(PpapActorRequest):
+    decisions: list[PpapApplicabilityDecision]
+
+
+class PpapCollectRequest(PpapActorRequest):
+    source_types: list[str] | None = None
+
+
+class PpapEvidenceRequest(PpapActorRequest):
+    source_type: str
+    source_id: str
+    summary: str
+    locator: str
+    element_ids: list[str] = Field(default_factory=list)
+    document_version: str = ""
+
+
+class PpapInputRequest(PpapActorRequest):
+    dataset: str
+    payload: dict
+    part_side: str = ""
+    record_key: str = ""
+    source_type: str = "user_confirmation"
+    source_ref: str
+    element_id: str = ""
+
+
+class PpapCompileRequest(PpapActorRequest):
+    request_key: str = ""
+
+
+class PpapIssueResolveRequest(PpapActorRequest):
+    status: str = "RESOLVED"
+
+
+class PpapReviewSubmitRequest(PpapActorRequest):
+    artifact_id: str = ""
+
+
+class PpapReviewDecideRequest(PpapActorRequest):
+    decision: str
+
+
+class PpapCustomerStateRequest(PpapActorRequest):
+    state: str
+    reference: str
+
+
+def _ppap_result(result: dict, identity=None) -> dict:
+    """Keep business failures explicit; never turn failed reads into empty success."""
+    if result.get("ok") is False or result.get("success") is False:
+        code = str(result.get("code") or result.get("error") or "ppap_operation_failed")
+        if code.endswith("_not_found"):
+            status_code = 404
+        elif code == "task_not_authorized":
+            status_code = 403
+        elif code in {"compile_failed", "read_back_failed"}:
+            status_code = 500
+        elif code in {
+            "artifact_hash_mismatch", "artifact_unavailable", "review_not_pending",
+            "snapshot_changed", "blocking_issues", "internal_approval_required",
+            "artifact_not_draft", "approval_required", "artifact_not_approved",
+            "request_key_conflict", "review_snapshot_mismatch", "checks_blocked",
+            "idempotency_conflict", "run_not_replayable", "stale_artifact", "stale_rules",
+            "approval_blocked", "draft_artifact_required", "latest_artifact_required",
+            "review_already_decided", "review_superseded", "approved_artifact_required",
+            "issue_still_present", "stale_evidence_file",
+        }:
+            status_code = 409
+        else:
+            status_code = 422
+        raise HTTPException(status_code=status_code, detail=result)
+    if identity is not None:
+        result["authenticated_identity"] = identity.as_dict()
+    return result
+
+
+@app.get("/api/ppap/templates", tags=["ppap"])
+def ppap_templates(identity=Depends(require_real_identity)) -> dict:
+    return {
+        "template": ppap_template.template_descriptor(),
+        "datasets": ppap_inputs.dataset_contracts(),
+    }
+
+
+@app.get("/api/ppap/tasks", tags=["ppap"])
+def ppap_tasks(customer_id: str = "", part_no: str = "", run_state: str = "",
+               package_state: str = "", owner: str = "", mode: Literal["", "REAL", "TEST"] = "",
+               limit: int = Query(50, ge=1, le=200),
+               offset: int = Query(0, ge=0), identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.list_tasks(customer_id=customer_id, part_no=part_no,
+        run_state=run_state, package_state=package_state, owner=owner, mode=mode, limit=limit, offset=offset))
+
+
+@app.post("/api/ppap/tasks", tags=["ppap"])
+def ppap_create_task(body: PpapTaskCreateRequest,
+                     _write_access: bool = Depends(require_real_write_access),
+                     identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_task_start")
+    values = body.model_dump(exclude={"actor", "note"})
+    values["data_mode"] = values.pop("mode")
+    return _ppap_result(ppap_service.create_task(**values, owner=actor, actor=actor), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}", tags=["ppap"])
+def ppap_get_task(task_id: str, include_content: bool = True,
+                  identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.get_task(task_id, include_content=include_content))
+
+
+@app.post("/api/ppap/tasks/{task_id}", tags=["ppap"])
+def ppap_update_task(task_id: str, body: PpapTaskUpdateRequest,
+                     _write_access: bool = Depends(require_real_write_access),
+                     identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_task_update")
+    return _ppap_result(ppap_service.update_task(task_id, body.patch, actor=actor, note=body.note), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/applicability", tags=["ppap"])
+def ppap_confirm_applicability(task_id: str, body: PpapApplicabilityRequest,
+                               _write_access: bool = Depends(require_real_write_access),
+                               identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_applicability_confirm")
+    return _ppap_result(ppap_service.confirm_applicability(task_id,
+        [item.model_dump() for item in body.decisions], actor=actor, note=body.note), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}/evidence-plan", tags=["ppap"])
+def ppap_evidence_plan(task_id: str, identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.plan_evidence(task_id))
+
+
+@app.post("/api/ppap/tasks/{task_id}/evidence/collect", tags=["ppap"])
+async def ppap_collect(task_id: str, body: PpapCollectRequest,
+                       _write_access: bool = Depends(require_real_write_access),
+                       identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_evidence_collect")
+    return _ppap_result(await ppap_service.collect_evidence(task_id,
+        source_types=body.source_types, actor=actor, note=body.note), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}/evidence", tags=["ppap"])
+def ppap_evidence(task_id: str, source_type: str = "", include_payload: bool = False,
+                  identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.list_evidence(task_id, source_type=source_type,
+        include_payload=include_payload))
+
+
+@app.post("/api/ppap/tasks/{task_id}/evidence", tags=["ppap"])
+def ppap_register_evidence(task_id: str, body: PpapEvidenceRequest,
+                           _write_access: bool = Depends(require_real_write_access),
+                           identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_input_confirm")
+    return _ppap_result(ppap_service.register_human_evidence(task_id,
+        **body.model_dump(exclude={"actor"}), actor=actor), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}/inputs", tags=["ppap"])
+def ppap_inputs_list(task_id: str, dataset: str = "", identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.list_inputs(task_id, dataset=dataset))
+
+
+@app.post("/api/ppap/tasks/{task_id}/inputs", tags=["ppap"])
+def ppap_confirm_input(task_id: str, body: PpapInputRequest,
+                       _write_access: bool = Depends(require_real_write_access),
+                       identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_input_confirm")
+    return _ppap_result(ppap_service.upsert_input(task_id,
+        **body.model_dump(exclude={"actor", "note"}), actor=actor), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/compile", tags=["ppap"])
+def ppap_compile(task_id: str, body: PpapCompileRequest,
+                  idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                  _write_access: bool = Depends(require_real_write_access),
+                  identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_compile")
+    key = (idempotency_key or "").strip()
+    if key and body.request_key and key != body.request_key:
+        raise HTTPException(status_code=422, detail={"code": "idempotency_key_mismatch",
+            "message": "请求头和请求体的幂等键不一致"})
+    return _ppap_result(ppap_service.compile_task(task_id, actor=actor,
+        request_key=key or body.request_key), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/checks", tags=["ppap"])
+def ppap_checks(task_id: str, body: PpapActorRequest,
+                 _write_access: bool = Depends(require_real_write_access),
+                 identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_check")
+    return _ppap_result(ppap_service.run_checks(task_id, actor=actor), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}/missing-items", tags=["ppap"])
+def ppap_missing(task_id: str, identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.get_missing_items(task_id))
+
+
+@app.get("/api/ppap/tasks/{task_id}/input-assistance", tags=["ppap"])
+def ppap_input_assistance(task_id: str, dataset: str, part_side: str = "",
+                          characteristic_id: str = "", record_key: str = "",
+                          identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.get_input_assistance(task_id, dataset=dataset,
+        part_side=part_side, characteristic_id=characteristic_id, record_key=record_key))
+
+
+@app.get("/api/ppap/tasks/{task_id}/issues", tags=["ppap"])
+def ppap_issues(task_id: str, status: str = "", limit: int = Query(100, ge=1, le=200),
+                 identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.list_issues(task_id, status=status, limit=limit))
+
+
+@app.post("/api/ppap/tasks/{task_id}/issues/{issue_id}/resolve", tags=["ppap"])
+def ppap_resolve_issue(task_id: str, issue_id: str, body: PpapIssueResolveRequest,
+                       _write_access: bool = Depends(require_real_write_access),
+                       identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_issue_resolve")
+    return _ppap_result(ppap_service.resolve_issue(task_id, issue_id, actor=actor,
+        status=body.status, note=body.note), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/reviews/submit", tags=["ppap"])
+def ppap_submit_review(task_id: str, body: PpapReviewSubmitRequest,
+                        _write_access: bool = Depends(require_real_write_access),
+                        identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_review_submit")
+    return _ppap_result(ppap_service.submit_review(task_id, actor=actor,
+        artifact_id=body.artifact_id, note=body.note), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/reviews/{review_id}/decide", tags=["ppap"])
+def ppap_decide_review(task_id: str, review_id: str, body: PpapReviewDecideRequest,
+                        _write_access: bool = Depends(require_real_write_access),
+                        identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_review_decide")
+    return _ppap_result(ppap_service.decide_review(task_id, review_id, actor=actor,
+        decision=body.decision, note=body.note, reviewer_role="quality_manager"), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/archive", tags=["ppap"])
+def ppap_archive(task_id: str, body: PpapReviewSubmitRequest,
+                  _write_access: bool = Depends(require_real_write_access),
+                  identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_archive")
+    return _ppap_result(ppap_service.archive_task(task_id, actor=actor,
+        artifact_id=body.artifact_id, note=body.note), identity)
+
+
+@app.post("/api/ppap/tasks/{task_id}/customer-state", tags=["ppap"])
+def ppap_customer_state(task_id: str, body: PpapCustomerStateRequest,
+                         _write_access: bool = Depends(require_real_write_access),
+                         identity=Depends(require_real_human_identity)) -> dict:
+    actor = _actor_for_request(body.actor, identity, "ppap_customer_state")
+    return _ppap_result(ppap_service.record_customer_state(task_id, actor=actor,
+        state=body.state, reference=body.reference, note=body.note), identity)
+
+
+@app.get("/api/ppap/tasks/{task_id}/versions", tags=["ppap"])
+def ppap_versions(task_id: str, identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.list_versions(task_id))
+
+
+@app.get("/api/ppap/tasks/{task_id}/runs", tags=["ppap"])
+def ppap_runs(task_id: str, limit: int = Query(50, ge=1, le=200), include_steps: bool = True,
+               identity=Depends(require_real_identity)) -> dict:
+    result = _ppap_result(ppap_service.list_runs(task_id, limit=limit))
+    if not include_steps:
+        for item in result.get("items", []):
+            item.pop("steps", None)
+            item.pop("call_chain", None)
+    return result
+
+
+@app.get("/api/ppap/tasks/{task_id}/source-change-impact", tags=["ppap"])
+def ppap_change_impact(task_id: str, artifact_id: str = "",
+                       identity=Depends(require_real_identity)) -> dict:
+    return _ppap_result(ppap_service.assess_source_change_impact(task_id, compare_artifact_id=artifact_id))
+
+
+@app.get("/api/ppap/tasks/{task_id}/artifacts/{artifact_id}/download", tags=["ppap"])
+def ppap_download(task_id: str, artifact_id: str, identity=Depends(require_real_identity)) -> Response:
+    from urllib.parse import quote
+
+    result = _ppap_result(ppap_service.read_artifact(task_id, artifact_id))
+    # read_artifact checks both containment and the stored content hash. Sending
+    # those verified bytes avoids reopening a path after verification.
+    artifact = result["artifact"]
+    file_name = str(artifact.get("file_name") or "ppap.xlsx")
+    return Response(content=result["content"], media_type=result["media_type"], headers={
+        "Content-Disposition": "attachment; filename*=UTF-8''" + quote(file_name, safe=""),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+    })
 
 
 @app.get("/api/integrations/status", tags=["integrations"])
@@ -859,9 +1195,6 @@ async def project_stream(websocket: WebSocket, project_id: str) -> None:
 # 真实订单业务链接口（基于真实 ERPNext / OpenMES 数据）
 # 与 /api/scenarios/{name}/run 的 Mock 场景完全分离
 # ============================================================================
-
-from pydantic import BaseModel
-
 
 class RealOrderQuotationRequest(BaseModel):
     customer_id: str

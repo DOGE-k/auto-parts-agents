@@ -2,6 +2,7 @@
 // 数据全部来自真实端点：报价/方案审批状态、协同事件、质量待办、Agent 运行记录。
 import { useCallback, useEffect, useState } from "react";
 import { agentRunTypeNames, api, getCollaborationEvents } from "../api";
+import { displaySystemText } from "../lib/system-labels";
 import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
 
@@ -95,7 +96,7 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
         </button>
       </section>
 
-      {error && <div className="error-banner"><span>总览加载失败</span> {error}<button onClick={() => setError("")}>×</button></div>}
+      {error && <div className="error-banner"><span>总览加载失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
 
       <p className="field-hint">
         待审批数为全部业务记录的全局口径（含历史模拟记录），不是当前单个订单的数量；逐条处理请进「审批与审计」。
@@ -148,8 +149,8 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
               {(runs ?? []).map((r) => (
                 <div className="run-row" key={r.run_id}>
                   <span className="badge blue-badge">{r.agent_type}</span>
-                  <span>{agentRunTypeNames[r.operation] ?? r.operation}</span>
-                  <code>{(r.result_summary ?? "").slice(0, 40)}</code>
+                  <span>{displaySystemText(agentRunTypeNames[r.operation] ?? r.operation)}</span>
+                  <code>{displaySystemText(r.result_summary).slice(0, 40)}</code>
                   <b className={r.result_status === "ok" ? "text-green" : "text-red"}>{r.result_status}</b>
                 </div>
               ))}

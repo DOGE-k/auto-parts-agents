@@ -1,4 +1,5 @@
 // 阶段九：跨工单质量待办面板（从 RealBusinessPage 抽出，阶段十 10.5）
+import { displaySystemText } from "../lib/system-labels";
 import type { QualityTodoItem } from "../api";
 
 type Props = {
@@ -25,7 +26,7 @@ export default function QualityTodoPanel({
       <div className="panel-heading">
         <div>
           <h2>质量待办</h2>
-          <p>跨工单的未关闭质量问题队列（OpenMES 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"切换到订单流程页签中该工单的 NCR 审批处置面板。</p>
+          <p>跨工单的未关闭质量问题队列（MES 系统 真实记录，OPEN/ACKNOWLEDGED/RESOLVED 三态，CLOSED 不进待办）。点击"去处置"切换到订单流程页签中该工单的 NCR 审批处置面板。</p>
         </div>
         {hasProjectSession && (
           <button className="button ghost" onClick={onRefresh} disabled={qualityTodoLoading}>
@@ -40,7 +41,7 @@ export default function QualityTodoPanel({
       )}
       {hasProjectSession && qualityTodoError && (
         <div className="quality-todo-error">
-          <strong>加载失败</strong> {qualityTodoError}
+          <strong>加载失败</strong> {displaySystemText(qualityTodoError)}
           <button className="button ghost" onClick={onRefresh}>重试</button>
         </div>
       )}
@@ -64,7 +65,7 @@ export default function QualityTodoPanel({
             {qualityTodo.map((item) => (
               <tr key={item.issue_id}>
                 <td>{item.work_order_no || `#${item.work_order_id}`}</td>
-                <td>{item.title}</td>
+                <td>{displaySystemText(item.title)}</td>
                 <td>{item.severity || "—"}</td>
                 <td>{item.status}</td>
                 <td>{item.disposition || "未处置"}</td>

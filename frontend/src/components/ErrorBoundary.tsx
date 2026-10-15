@@ -1,6 +1,7 @@
 // 面板级错误边界（阶段十模拟容错）：单个面板渲染崩溃只降级该面板，不拖垮整页。
 // React 类组件是 ErrorBoundary 的唯一实现方式；重试按钮重置内部状态重新挂载子树。
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { displaySystemText } from "../lib/system-labels";
 
 type Props = {
   /** 面板名称，用于降级文案（如"智能协同问答"）。 */
@@ -40,7 +41,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             <span className="badge red-badge">已降级</span>
           </div>
           <div className="error-boundary-body">
-            <code>{this.state.error.message}</code>
+            <code>{displaySystemText(this.state.error.message)}</code>
             <button className="button ghost" onClick={this.reset}>重试恢复该面板</button>
           </div>
         </section>

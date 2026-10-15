@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utc_now() -> datetime:
@@ -355,3 +355,249 @@ class ProjectSessionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ======================================================================
+# PPAP 编制（第四岗质量文档智能体本阶段）
+#
+# 这些表只承载项目本地的编制过程与产物版本，不代表任何 ERP/MES 写入，
+# 也不改变既有质量审批链、发运门禁或 NCR 关闭条件。四类业务状态分开
+# 存储，避免把"任务跑完"当成"内部批准"或"客户接受"。
+# ======================================================================
+
+
+class PpapTaskRow(Base):
+    """PPAP 任务：客户 + 零件 + 版本 + 提交要求，以及四类独立状态。"""
+
+    __tablename__ = "ppap_tasks"
+
+    task_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    # Immutable after creation: TEST packages cannot become formal evidence.
+    data_mode: Mapped[str] = mapped_column(String(10), index=True, default="REAL", server_default="REAL")
+    customer_id: Mapped[str] = mapped_column(String(120), index=True)
+    customer_name: Mapped[str] = mapped_column(String(200), default="")
+    part_no: Mapped[str] = mapped_column(String(120), index=True)
+    part_name: Mapped[str] = mapped_column(String(200), default="")
+    # 左右件必须各持独立零件号与独立数据，禁止按名称/时间相近自动归并。
+    part_side: Mapped[str] = mapped_column(String(10), index=True, default="NONE")
+    drawing_version: Mapped[str] = mapped_column(String(60), default="")
+    engineering_change_level: Mapped[str] = mapped_column(String(60), default="")
+    submission_reason: Mapped[str] = mapped_column(String(120), default="")
+    submission_level: Mapped[str] = mapped_column(String(60), default="")
+    template_id: Mapped[str] = mapped_column(String(80), default="")
+    template_version: Mapped[str] = mapped_column(String(40), default="")
+    template_source: Mapped[str] = mapped_column(String(40), default="project_defined")
+    owner: Mapped[str] = mapped_column(String(120), default="")
+    reviewer: Mapped[str] = mapped_column(String(120), default="")
+    due_date: Mapped[str] = mapped_column(String(40), default="")
+    # 1. 任务运行 2. 包审核 3. 客户处理 分开存；条目状态在 ppap_elements。
+    run_state: Mapped[str] = mapped_column(String(30), index=True, default="NOT_STARTED")
+    package_state: Mapped[str] = mapped_column(String(30), index=True, default="NOT_SUBMITTED")
+    customer_state: Mapped[str] = mapped_column(String(30), index=True, default="NOT_SUBMITTED")
+    business_object_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    coverage_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    input_snapshot_hash: Mapped[str] = mapped_column(String(64), default="")
+    authorized_by: Mapped[str] = mapped_column(String(120), default="")
+    authorization_ref: Mapped[str] = mapped_column(String(120), default="")
+    state_note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PpapElementRow(Base):
+    """条目状态：待资料/可编制/已生成草稿/存在冲突/待审核/已审核/不适用。"""
+
+    __tablename__ = "ppap_elements"
+    __table_args__ = (UniqueConstraint("task_id", "element_id", name="uq_ppap_elements_task_element"),)
+
+    element_row_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    # ORM 需要明确依赖顺序，才能在同一次提交中先写任务、再写22个条目。
+    # 数据库外键始终保留；这条关系不增加数据库列。
+    task: Mapped[PpapTaskRow] = relationship()
+    element_id: Mapped[str] = mapped_column(String(80), index=True)
+    category: Mapped[str] = mapped_column(String(30), default="document")
+    requirement: Mapped[str] = mapped_column(String(30), default="submit")
+    applicability_basis: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    compilation_method: Mapped[str] = mapped_column(String(40), default="reference_document")
+    status: Mapped[str] = mapped_column(String(30), index=True, default="WAITING_DATA")
+    status_reason: Mapped[str] = mapped_column(Text, default="")
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # 序列化器按映射读取（_element_dict 用 dict(...)），这里保持 dict 语义。
+    source_refs_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    check_result_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    drafted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PpapEvidenceRow(Base):
+    """证据记录：来源系统/记录 ID/版本/定位/摘要/哈希/核对状态。"""
+
+    __tablename__ = "ppap_evidence"
+    __table_args__ = (
+        UniqueConstraint("task_id", "dedup_key", name="uq_ppap_evidence_task_dedup"),
+    )
+
+    evidence_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    dedup_key: Mapped[str] = mapped_column(String(200))
+    source_system: Mapped[str] = mapped_column(String(60), default="")
+    source_type: Mapped[str] = mapped_column(String(60), index=True, default="")
+    source_id: Mapped[str] = mapped_column(String(160), default="")
+    source_version: Mapped[str] = mapped_column(String(60), default="")
+    locator: Mapped[str] = mapped_column(String(200), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # OK / EMPTY（合法空结果）/ ERROR（401、超时、解析失败）三态必须可区分。
+    read_status: Mapped[str] = mapped_column(String(20), index=True, default="OK")
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    review_state: Mapped[str] = mapped_column(String(30), index=True, default="UNVERIFIED")
+    collected_by: Mapped[str] = mapped_column(String(120), default="")
+    element_ids_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class PpapInputRow(Base):
+    """结构化工程与检验输入：原始值 + 单位 + 规格 + 来源 + 人工确认。"""
+
+    __tablename__ = "ppap_inputs"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id", "dataset", "record_key", "part_side", name="uq_ppap_inputs_record"
+        ),
+    )
+
+    input_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    dataset: Mapped[str] = mapped_column(String(60), index=True)
+    record_key: Mapped[str] = mapped_column(String(160))
+    part_side: Mapped[str] = mapped_column(String(10), default="NONE")
+    element_id: Mapped[str] = mapped_column(String(80), default="")
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source_type: Mapped[str] = mapped_column(String(60), default="user_confirmation")
+    source_ref: Mapped[str] = mapped_column(String(200), default="")
+    confirmed_by: Mapped[str] = mapped_column(String(120), default="")
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PpapCompileRunRow(Base):
+    """编制运行：输入快照、执行步骤、调用链、模板/规则版本、失败与重试。"""
+
+    __tablename__ = "ppap_compile_runs"
+    __table_args__ = (
+        UniqueConstraint("task_id", "request_key", name="uq_ppap_compile_runs_request_key"),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    trigger: Mapped[str] = mapped_column(String(40), default="manual_request")
+    request_key: Mapped[str] = mapped_column(String(120), default="")
+    input_snapshot_hash: Mapped[str] = mapped_column(String(64), index=True, default="")
+    template_id: Mapped[str] = mapped_column(String(80), default="")
+    template_version: Mapped[str] = mapped_column(String(40), default="")
+    rule_version: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(30), index=True, default="RUNNING")
+    steps_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    call_chain_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    idempotent_replay: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_by: Mapped[str] = mapped_column(String(120), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PpapArtifactRow(Base):
+    """文档条目及产物版本：内容引用、文件位置、版本关系与冻结状态。"""
+
+    __tablename__ = "ppap_artifacts"
+    __table_args__ = (
+        UniqueConstraint("task_id", "scope", "element_id", "version", name="uq_ppap_artifacts_version"),
+    )
+
+    artifact_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    run_id: Mapped[str] = mapped_column(String(60), default="")
+    scope: Mapped[str] = mapped_column(String(20), index=True, default="PACKAGE")
+    element_id: Mapped[str] = mapped_column(String(80), default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    kind: Mapped[str] = mapped_column(String(20), default="excel")
+    file_name: Mapped[str] = mapped_column(String(240), default="")
+    storage_rel_path: Mapped[str] = mapped_column(String(400), default="")
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    byte_size: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(30), index=True, default="DRAFT")
+    input_snapshot_hash: Mapped[str] = mapped_column(String(64), default="")
+    template_id: Mapped[str] = mapped_column(String(80), default="")
+    template_version: Mapped[str] = mapped_column(String(40), default="")
+    issue_count_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PpapIssueRow(Base):
+    """缺项/冲突待办：缺什么、影响哪项、责任岗位、处理状态和补录依据。"""
+
+    __tablename__ = "ppap_issues"
+    __table_args__ = (UniqueConstraint("task_id", "dedup_key", name="uq_ppap_issues_dedup"),)
+
+    issue_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    dedup_key: Mapped[str] = mapped_column(String(240))
+    kind: Mapped[str] = mapped_column(String(30), index=True, default="MISSING_DATA")
+    severity: Mapped[str] = mapped_column(String(20), index=True, default="MAJOR")
+    check_id: Mapped[str] = mapped_column(String(60), default="")
+    element_id: Mapped[str] = mapped_column(String(80), index=True, default="")
+    field_path: Mapped[str] = mapped_column(String(200), default="")
+    title: Mapped[str] = mapped_column(String(240), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    basis: Mapped[str] = mapped_column(Text, default="")
+    required_evidence: Mapped[str] = mapped_column(Text, default="")
+    responsible_role: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(20), index=True, default="OPEN")
+    resolution_note: Mapped[str] = mapped_column(Text, default="")
+    resolved_by: Mapped[str] = mapped_column(String(120), default="")
+    blocks_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PpapReviewRow(Base):
+    """审核记录：项目用户、意见、批准/退回的具体产物版本及输入快照。"""
+
+    __tablename__ = "ppap_reviews"
+
+    review_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("ppap_tasks.task_id", ondelete="CASCADE"), index=True
+    )
+    artifact_id: Mapped[str] = mapped_column(String(60), default="")
+    artifact_version: Mapped[int] = mapped_column(Integer, default=0)
+    input_snapshot_hash: Mapped[str] = mapped_column(String(64), default="")
+    decision: Mapped[str] = mapped_column(String(30), index=True)
+    reviewer: Mapped[str] = mapped_column(String(120), default="")
+    reviewer_role: Mapped[str] = mapped_column(String(60), default="")
+    author: Mapped[str] = mapped_column(String(120), default="")
+    separation_warning: Mapped[str] = mapped_column(String(80), default="")
+    comments: Mapped[str] = mapped_column(Text, default="")
+    # 阻断项清单是列表（_review_dict 用 list(...)），不是映射。
+    blocker_summary_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

@@ -1,6 +1,7 @@
 // 系统连接面板（信息架构改版 §六：会话设置从真实业务标题区迁移为独立模块）。
 // 普通用户只看数据连接与项目登录；Bearer/写入令牌等调试信息收进「高级联调设置」。
 // 状态与登录逻辑由 RealBusinessPage 持有（审批操作依赖同一 identity），本面板只做展示。
+import { displaySystemText } from "../lib/system-labels";
 import { useEffect, useState } from "react";
 import { formatSessionRemaining, getSessionRemainingMs } from "../api";
 import type { RealIdentity } from "../api";
@@ -62,14 +63,14 @@ export default function ConnectionSettingsPanel(props: Props) {
         </div>
         <div className="connection-rows">
           <div className="connection-row">
-            <span className="source-tag erp">ERPNext</span>
+            <span className="source-tag erp">ERP 系统</span>
             <span>客户 / 物料 / BOM / 价格 / 库存 · 只读 + 草稿写入</span>
             <b className={props.connErp === "connected" ? "text-green" : props.connErp === "error" ? "text-red" : ""}>
               {props.connErp === "connected" ? "已连接（身份已解析）" : props.connErp === "error" ? "连接异常" : "探测中…"}
             </b>
           </div>
           <div className="connection-row">
-            <span className="source-tag mes">OpenMES</span>
+            <span className="source-tag mes">MES 系统</span>
             <span>工单 / 进度 / 质量 · 只读 + 审批执行</span>
             <b className={props.connMes === "connected" ? "text-green" : props.connMes === "error" ? "text-red" : ""}>
               {props.connMes === "connected" ? "已连接（工单数据可读）" : props.connMes === "error" ? "连接异常" : "探测中…"}
@@ -89,7 +90,7 @@ export default function ConnectionSettingsPanel(props: Props) {
         <div className="panel-heading">
           <div>
             <h2>项目登录</h2>
-            <p>登录一次即可操作 ERPNext 与 OpenMES；审批、报工、NCR 处置等写入都使用该项目会话。</p>
+            <p>登录一次即可操作 ERP 系统 与 MES 系统；审批、报工、NCR 处置等写入都使用该项目会话。</p>
           </div>
         </div>
         {hasProjectSession && identity ? (
@@ -98,7 +99,7 @@ export default function ConnectionSettingsPanel(props: Props) {
               <span>当前项目用户</span><b>{identity.actor_id}</b>
             </div>
             <div className="connection-account-row">
-              <span>显示名</span><b>{identity.display_name}</b>
+              <span>显示名</span><b>{displaySystemText(identity.display_name)}</b>
             </div>
             <div className="connection-account-row">
               <span>会话状态</span>
@@ -120,7 +121,7 @@ export default function ConnectionSettingsPanel(props: Props) {
           <div className="real-session-login">
             {identity && (
               <p className="real-session-hint">
-                ERPNext 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）。
+                ERP 系统 数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）。
               </p>
             )}
             <strong>项目账号登录</strong>
@@ -143,9 +144,9 @@ export default function ConnectionSettingsPanel(props: Props) {
               </button>
             </div>
             <p className="real-session-hint">
-              登录由本项目创建和管理；ERPNext 与 OpenMES 账号只作为后端服务连接，不需要在这里分别登录。
+              登录由本项目创建和管理；ERP 系统 与 MES 系统 账号只作为后端服务连接，不需要在这里分别登录。
             </p>
-            {loginError && <p className="real-session-error">登录失败：{loginError}（请确认项目用户名和密码）</p>}
+            {loginError && <p className="real-session-error">登录失败：{displaySystemText(loginError)}（请确认项目用户名和密码）</p>}
           </div>
         )}
       </section>

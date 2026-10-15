@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { api, agentNames, Approval, Case, Event, eventNames, Project, writeHeaders } from "./api";
 import RealBusinessPage, { type RealModuleKey } from "./RealBusinessPage";
 import type { RealIdentity } from "./api";
+import { displaySystemText } from "./lib/system-labels";
 
 type PageKey =
   | RealModuleKey
@@ -222,13 +223,13 @@ function App() {
   // 统一连接文案（评审意见③）：区分"已连接"（真实探测通过）与"探测中/异常"，
   // 项目登录状态单独由"当前项目用户"表达，不混在连接文案里。
   const connectionText = !isRealModule(page)
-    ? "Mock + OpenMES 只读"
+    ? "Mock + MES 只读"
     : connStatus === null
       ? "连接探测中…"
       : connStatus.erpnext === "connected" && connStatus.openmes === "connected"
-        ? "ERPNext + OpenMES · 已连接"
+        ? "业务系统 · 已连接"
         : connStatus.erpnext === "connected"
-          ? "ERPNext 已连接 · OpenMES 异常"
+          ? "ERP 已连接 · MES 异常"
           : "连接异常 · 见系统连接页";
 
   const selectedProject = projects.find((item) => item.project_id === projectId);
@@ -298,7 +299,7 @@ function App() {
           </div>
         </header>
 
-        {error && <div className="error-banner"><span>连接或操作失败</span> {error}<button onClick={() => setError("")}>×</button></div>}
+        {error && <div className="error-banner"><span>连接或操作失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
         {isRealModule(page) && (
           <RealBusinessPage
             activeModule={page}
@@ -320,7 +321,7 @@ function App() {
         {page === "approvals" && <ApprovalsPage approvals={currentApprovals} snapshot={snapshot} busy={busy} onDecide={decide} />}
         {page === "mock-audit" && <AuditPage events={events} audit={audit} snapshot={snapshot} />}
       </main>
-      {toast && <div className="toast">✓ &nbsp;{toast}</div>}
+      {toast && <div className="toast">✓ &nbsp;{displaySystemText(toast)}</div>}
       {busy && <div className="busy-indicator"><span />处理中</div>}
       {!selectedProject && !isRealModule(page) && page !== "scenarios" && <div className="empty-overlay"><div className="empty-card"><span className="empty-symbol">◫</span><h2>先启动一个模拟场景</h2><p>选择正常订单或缺料协作，生成带完整审计时间线的合成项目。</p><button className="button primary" onClick={() => setPage("scenarios")}>选择场景</button></div></div>}
     </div>
@@ -330,7 +331,7 @@ function App() {
 function PageHeading({ eyebrow, title, subtitle, action, mode }: { eyebrow: string; title: string; subtitle: string; action?: ReactNode; mode?: "mock" | "real" }) {
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p>
     {mode === "mock" && <div className="mode-banner mock"><strong>Mock 模拟数据</strong><span>本页内容来自固定种子合成场景（synthetic_demo_only），不是真实 ERP/MES 业务结果。真实流程请使用「真实业务」页面。</span></div>}
-    {mode === "real" && <div className="mode-banner real"><strong>真实系统数据</strong><span>本页数据来自本地部署的 ERPNext 与 OpenMES 接口。</span></div>}
+    {mode === "real" && <div className="mode-banner real"><strong>真实系统数据</strong><span>本页数据来自已连接的 ERP 与 MES 系统接口。</span></div>}
   </div>{action && <div>{action}</div>}</div>;
 }
 

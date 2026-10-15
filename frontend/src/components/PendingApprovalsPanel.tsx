@@ -2,6 +2,7 @@
 // 数据全部来自真实端点：报价与采购方案的 PENDING_APPROVAL 记录；点击定位到对应业务模块的审批视图。
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { displaySystemText } from "../lib/system-labels";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
 
 type Props = {
@@ -47,7 +48,7 @@ export default function PendingApprovalsPanel({ onOpenQuotation, onOpenPlan }: P
           <button className="button ghost" onClick={() => void load()}>↻ 刷新</button>
         </div>
       </div>
-      {error && <div className="error-banner"><span>加载失败</span> {error}<button onClick={() => setError("")}>×</button></div>}
+      {error && <div className="error-banner"><span>加载失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
       {pendingQuotations.length === 0 && pendingPlans.length === 0 ? (
         <div className="empty-state compact">
           当前没有待审批的报价或采购方案。审批请求产生后会出现在这里。

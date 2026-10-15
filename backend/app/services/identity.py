@@ -37,6 +37,18 @@ ROLE_REQUIREMENTS = {
     "quality_resolution_write": "quality_manager",
     "quality_disposition_write": "quality_manager",
     "quality_close_write": "quality_manager",
+    "ppap_task_start": "quality_manager",
+    "ppap_task_update": "quality_manager",
+    "ppap_applicability_confirm": "quality_manager",
+    "ppap_evidence_collect": "quality_manager",
+    "ppap_input_confirm": "quality_manager",
+    "ppap_compile": "quality_manager",
+    "ppap_check": "quality_manager",
+    "ppap_review_submit": "quality_manager",
+    "ppap_review_decide": "quality_manager",
+    "ppap_archive": "quality_manager",
+    "ppap_issue_resolve": "quality_manager",
+    "ppap_customer_state": "quality_manager",
 }
 
 

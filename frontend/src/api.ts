@@ -139,6 +139,12 @@ export type Event = {
 
 export type ProductionCompletion = Record<string, any>;
 
+export class PpapRequestError extends Error {
+  constructor(message: string, public status: number, public code = "") {
+    super(message); this.name = "PpapRequestError";
+  }
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -157,7 +163,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const message =
       typeof detail === "string"
         ? detail
-        : detail?.message ?? `请求失败 (${response.status})`;
+        : detail?.message ?? (path.startsWith("/ppap/")
+          ? detail?.error || (Array.isArray(detail?.errors) ? detail.errors.join("；") : "") || detail?.code || `PPAP 请求失败 (${response.status})`
+          : `请求失败 (${response.status})`);
+    if (path.startsWith("/ppap/")) throw new PpapRequestError(message, response.status, typeof detail?.code === "string" ? detail.code : "");
     throw new Error(message);
   }
   return data as T;
@@ -1078,3 +1087,87 @@ export async function askAssistantStream(
 // 协调者执行失败（SSE error 事件）——同步端点重试必然同样失败，调用方不应回退；
 // 传输层失败（网络/非 200/流中断）抛普通 Error，调用方回退同步端点。
 export class AssistantStreamExecError extends Error {}
+
+// PPAP writes only reach the project store. Actor/reviewer are resolved by the
+// backend from the project session; never ask a browser user to supply them.
+import type { PpapDetail, PpapInputs, PpapInputAssistance, PpapJson, PpapList, PpapMode, PpapMutation, PpapPlan, PpapRun, PpapSide, PpapTaskCreateFields, PpapTemplate } from "./types/ppap";
+export type * from "./types/ppap";
+const ppapTaskPath = (taskId: string) => `/ppap/tasks/${encodeURIComponent(taskId)}`;
+export async function getPpapTemplate(): Promise<PpapTemplate> {
+  const result = await api<{ template: PpapTemplate }>("/ppap/templates");
+  return result.template;
+}
+export function getPpapTasks(offset = 0, partNo = "", mode: PpapMode | "" = ""): Promise<PpapList> {
+  const query = new URLSearchParams({ offset: String(offset), limit: "20" });
+  if (partNo.trim()) query.set("part_no", partNo.trim());
+  if (mode) query.set("mode", mode);
+  return api(`/ppap/tasks?${query}`);
+}
+export function getPpapTask(taskId: string): Promise<PpapDetail> { return api(ppapTaskPath(taskId)); }
+export function getPpapInputs(taskId: string): Promise<PpapInputs> { return api(`${ppapTaskPath(taskId)}/inputs`); }
+export function getPpapEvidencePlan(taskId: string): Promise<PpapPlan> { return api(`${ppapTaskPath(taskId)}/evidence-plan`); }
+export function getPpapChangeImpact(taskId: string, artifactId = ""): Promise<PpapJson> {
+  const query = artifactId ? `?${new URLSearchParams({ artifact_id: artifactId })}` : "";
+  return api(`${ppapTaskPath(taskId)}/source-change-impact${query}`);
+}
+export function getPpapInputAssistance(taskId: string, dataset: string, side: PpapSide, characteristicId = "", recordKey = ""): Promise<PpapInputAssistance> {
+  const query = new URLSearchParams({ dataset, part_side: side });
+  if (characteristicId) query.set("characteristic_id", characteristicId);
+  if (recordKey) query.set("record_key", recordKey);
+  return api(`${ppapTaskPath(taskId)}/input-assistance?${query}`);
+}
+export function getPpapMissingItems(taskId: string): Promise<PpapJson> { return api(`${ppapTaskPath(taskId)}/missing-items`); }
+export async function getPpapRuns(taskId: string): Promise<PpapRun[]> {
+  const result = await api<{ items: PpapRun[] }>(`${ppapTaskPath(taskId)}/runs?include_steps=true`);
+  return result.items;
+}
+async function ppapPost(path: string, body: PpapJson): Promise<PpapMutation> {
+  const result = await api<PpapMutation>(path, { method: "POST", headers: writeHeaders(), body: JSON.stringify(body) });
+  if (result.success === false || result.ok === false) throw new PpapRequestError(result.error || result.errors?.join("；") || "PPAP 操作失败", 200,
+    typeof result.code === "string" ? result.code : "");
+  if (result.rejected?.length) throw new Error(result.rejected.map((item) => `${item.element_id || "条目"}：${item.message || item.reason || "未确认"}`).join("；"));
+  return result;
+}
+export function createPpapTask(fields: PpapTaskCreateFields): Promise<PpapMutation> { return ppapPost("/ppap/tasks", { ...fields, mode: fields.mode || "REAL" }); }
+export function updatePpapTask(taskId: string, patch: PpapJson): Promise<PpapMutation> { return ppapPost(ppapTaskPath(taskId), { patch }); }
+export function confirmPpapApplicability(taskId: string, decisions: Array<{ element_id: string; requirement: string; basis: string }>): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/applicability`, { decisions });
+}
+export function collectPpapEvidence(taskId: string, sourceTypes?: string[]): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/evidence/collect`, sourceTypes ? { source_types: sourceTypes } : {});
+}
+export function registerPpapEvidence(taskId: string, fields: PpapJson): Promise<PpapMutation> { return ppapPost(`${ppapTaskPath(taskId)}/evidence`, fields); }
+export function savePpapInput(taskId: string, fields: PpapJson): Promise<PpapMutation> { return ppapPost(`${ppapTaskPath(taskId)}/inputs`, fields); }
+export function compilePpapTask(taskId: string): Promise<PpapMutation> { return ppapPost(`${ppapTaskPath(taskId)}/compile`, {}); }
+export function checkPpapTask(taskId: string): Promise<PpapMutation> { return ppapPost(`${ppapTaskPath(taskId)}/checks`, {}); }
+export function resolvePpapIssue(taskId: string, issueId: string, status: "RESOLVED" | "WAIVED", note: string): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/issues/${encodeURIComponent(issueId)}/resolve`, { status, note });
+}
+export function submitPpapReview(taskId: string, artifactId: string, comments: string): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/reviews/submit`, { artifact_id: artifactId, note: comments });
+}
+export function decidePpapReview(taskId: string, reviewId: string, decision: "APPROVED" | "RETURNED", comments: string): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/reviews/${encodeURIComponent(reviewId)}/decide`, { decision, note: comments });
+}
+export function archivePpapTask(taskId: string, artifactId: string, note: string): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/archive`, { artifact_id: artifactId, note });
+}
+export function recordPpapCustomerState(taskId: string, state: string, sourceRef: string, note: string): Promise<PpapMutation> {
+  return ppapPost(`${ppapTaskPath(taskId)}/customer-state`, { state, reference: sourceRef, note });
+}
+export async function downloadPpapArtifact(taskId: string, artifactId: string, fileName: string): Promise<void> {
+  const headers = new Headers();
+  const token = getRealSessionToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}${ppapTaskPath(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`, { credentials: "include", headers });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(typeof error?.detail === "string" ? error.detail : error?.detail?.message || `下载失败 (${response.status})`);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName.replace(/[\\/]/g, "_") || "PPAP.xlsx";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

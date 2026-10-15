@@ -1,7 +1,7 @@
 {
   "aic": "TBD-QUALITY-DOC-AGENT-001",
   "active": true,
-  "lastModifiedTime": "2026-10-02T17:00:37.278615+00:00",
+  "lastModifiedTime": "2026-10-13T16:00:11.157632+00:00",
   "protocolVersion": "02.02",
   "name": "汽车零部件质量文档智能体",
   "description": "负责质量证据收集、资料清单管理、完整性校验、资料包组卷和版本追溯。只负责文档管理和证据关联，不执行检验、不做质量放行、不确认根因。",
@@ -52,6 +52,114 @@
     "text/markdown"
   ],
   "skills": [
+    {
+      "id": "quality.ppap_find_tasks",
+      "name": "真实ppap_find_tasks",
+      "description": "按客户、零件号和编制/审核状态检索已有 PPAP 任务。先精确选择任务，再查其适用性、缺项或版本；仅查询，不创建任务或生成文件。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_applicability",
+      "name": "真实ppap_get_applicability",
+      "description": "查询 PPAP 任务各条目的提交/保留/按需/不适用及人工确认依据；不代替客户要求确认。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_status",
+      "name": "真实ppap_get_status",
+      "description": "查询 PPAP 任务、条目编制、内部审核、客户处理四类独立状态，以及来源覆盖度、审查记录。生成草稿不等于批准，内部批准不等于客户接受，也不改变 NCR 或发运门禁。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_explain_missing",
+      "name": "真实ppap_explain_missing",
+      "description": "只读解释已有 PPAP 任务的缺项、检查冲突、需要的证据及责任岗位。区分合法空读取、读取失败和截断；不把缺证据解释为合格，不修复数据、不执行检查写回。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_evidence_plan",
+      "name": "真实ppap_evidence_plan",
+      "description": "查询 PPAP 任务可执行的只读取证计划、已确认业务关联、来源角色和必需人工输入。只返回计划，不请求远端取证，不新增证据记录。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_versions",
+      "name": "真实ppap_get_versions",
+      "description": "查询 PPAP 产物版本、输入快照、内容哈希与冻结/归档状态；不生成、批准或更新版本。",
+      "version": "1.0.0",
+      "tags": [
+        "真实数据",
+        "AIP",
+        "quality"
+      ],
+      "examples": [],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
     {
       "id": "quality.get_real_package",
       "name": "真实get_real_package",

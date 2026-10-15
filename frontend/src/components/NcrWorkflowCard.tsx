@@ -1,6 +1,7 @@
 // NCR 人工处置与关闭卡片（阶段八-十：处置/关闭双审批线，写回后回读；10.5 从 RealBusinessPage 抽出为展示组件）
 // 2026-10-02 补"解决"通道：处置写回 ≠ 问题解决——issue 状态需经"解决审批 → resolve 写回"
 // 翻成 RESOLVED，关闭前置条件"问题已解决"才满足（此前前端未暴露该通道，用户卡在让步接收后）。
+import { displaySystemText } from "../lib/system-labels";
 import { useState } from "react";
 import type { NcrForm, NcrWorkflow } from "../types/realBusiness";
 import type { RealIdentity, RealQualityIssue } from "../api";
@@ -65,20 +66,20 @@ export default function NcrWorkflowCard({
     <div key={issueId} id={`ncr-issue-${issueId}`} className={`ncr-workflow-card ${focused ? "ncr-issue-focus" : ""}`}>
       <div className="ncr-workflow-title">
         <div>
-          <strong>{issue.title || issue.record_type || `质量问题 ${issueId}`}</strong>
+          <strong>{displaySystemText(issue.title || issue.record_type || `质量问题 ${issueId}`)}</strong>
           <small>#{issueId} · {issue.severity ?? "未标严重度"} · 当前状态 {issue.status ?? "未知"} · 当前处置 {issue.disposition ?? "pending"}</small>
         </div>
         <span className={`badge ${isClosed ? "green" : dispositionRecorded ? "blue-badge" : "red-badge"}`}>
           {isClosed ? "已关闭" : dispositionRecorded ? "已登记处置" : "待处置"}
         </span>
       </div>
-      {issue.description && <p className="ncr-description">{issue.description}</p>}
+      {issue.description && <p className="ncr-description">{displaySystemText(issue.description)}</p>}
       {!isClosed && (
         <>
           {String(issue.record_type ?? "").toLowerCase().includes("shortage") && (
             <div className="ncr-shortage-hint">
-              <strong>缺料类问题（{issue.record_type}）：补库存走采购，不走 NCR 处置出口</strong>
-              <span>OpenMES 的 NCR 处置出口只有四种（报废/返工/退供应商/让步接收），不含"补库存"——这是上游 API 的定义，系统不伪造第五种。补库存的业务动作在「采购与缺料」模块：缺料分析 → 供应商方案 → PO 采购补货 → 到货。物料到位后，本 NCR 一般按"让步接收（use_as_is）"关闭，并把采购单号写进遏制措施留痕。</span>
+              <strong>缺料类问题（{displaySystemText(issue.record_type)}）：补库存走采购，不走 NCR 处置出口</strong>
+              <span>MES 系统 的 NCR 处置出口只有四种（报废/返工/退供应商/让步接收），不含"补库存"——这是上游 API 的定义，系统不伪造第五种。补库存的业务动作在「采购与缺料」模块：缺料分析 → 供应商方案 → PO 采购补货 → 到货。物料到位后，本 NCR 一般按"让步接收（use_as_is）"关闭，并把采购单号写进遏制措施留痕。</span>
               {onGoProcurement && (
                 <button className="button ghost" onClick={onGoProcurement}>去采购与缺料（补库存）→</button>
               )}
@@ -129,13 +130,13 @@ export default function NcrWorkflowCard({
             )}
             {workflow?.dispositionApprovalId && workflow.dispositionApproved && (
               <button className="button primary" disabled={busy} onClick={() => onWriteDisposition(issueId)}>
-                {workflow?.busy === "writing_disposition" ? "写回并回读中…" : "③ 写回 OpenMES"}
+                {workflow?.busy === "writing_disposition" ? "写回并回读中…" : "③ 写回 MES 系统"}
               </button>
             )}
           </div>
           {workflow?.dispositionResult && (
             <div className={`ncr-result ${workflow.dispositionResult.error ? "error" : "ok"}`}>
-              处置状态：{workflow.dispositionResult.error ?? workflow.dispositionResult.status ?? "未知"}
+              处置状态：{displaySystemText(workflow.dispositionResult.error ?? workflow.dispositionResult.status ?? "未知")}
               {workflow.dispositionResult.read_back_verified ? " · 回读已验证" : ""}
               {workflow.dispositionResult.idempotent ? " · 幂等命中" : ""}
             </div>
@@ -170,7 +171,7 @@ export default function NcrWorkflowCard({
               </div>
               {workflow?.resolutionResult && (
                 <div className={`ncr-result ${workflow.resolutionResult.error ? "error" : "ok"}`}>
-                  解决状态：{workflow.resolutionResult.error ?? workflow.resolutionResult.status ?? "未知"}
+                  解决状态：{displaySystemText(workflow.resolutionResult.error ?? workflow.resolutionResult.status ?? "未知")}
                   {workflow.resolutionResult.read_back_verified ? " · 回读已验证" : ""}
                   {workflow.resolutionResult.idempotent ? " · 幂等命中" : ""}
                 </div>
@@ -217,14 +218,14 @@ export default function NcrWorkflowCard({
           )}
           {workflow?.closeResult && (
             <div className={`ncr-result ${workflow.closeResult.error ? "error" : "ok"}`}>
-              关闭状态：{workflow.closeResult.error ?? workflow.closeResult.status ?? "未知"}
+              关闭状态：{displaySystemText(workflow.closeResult.error ?? workflow.closeResult.status ?? "未知")}
               {workflow.closeResult.read_back_verified ? " · 回读已验证" : ""}
               {workflow.closeResult.idempotent ? " · 幂等命中" : ""}
             </div>
           )}
         </>
       )}
-      <small className="ncr-audit-hint">身份：{identity?.actor_id ?? "未解析"} · 来源：{identity?.authority ?? "—"} · 数据：{issue.data_source ?? dataSource}</small>
+      <small className="ncr-audit-hint">身份：{identity?.actor_id ?? "未解析"} · 来源：{displaySystemText(identity?.authority ?? "—")} · 数据：{displaySystemText(issue.data_source ?? dataSource)}</small>
     </div>
   );
 }

@@ -32,6 +32,74 @@ TOOL_TIMEOUT_SECONDS = 60.0
 # agent_type/skill_id 与 AIP 服务注册的真实技能一一对应。
 REAL_SKILL_TOOLS: list[dict[str, Any]] = [
     {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_find_tasks", "read_only": True, "requires_approval": False,
+        "description": (
+            "按客户、零件号和编制/审核状态检索已有 PPAP 任务。先精确选择任务，再查其适用性、"
+            "缺项或版本；仅查询，不创建任务或生成文件。"
+        ),
+        "parameters": {
+            "type": "object", "properties": {
+                "customer_id": {"type": "string", "description": "客户编号"},
+                "part_no": {"type": "string", "description": "精确零件号，左右件分别查询"},
+                "run_state": {"type": "string", "description": "任务运行状态"},
+                "package_state": {"type": "string", "description": "内部包审核状态"},
+                "owner": {"type": "string", "description": "任务负责人账号"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "offset": {"type": "integer", "minimum": 0},
+            },
+        },
+    },
+    {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_get_applicability", "read_only": True, "requires_approval": False,
+        "description": "查询 PPAP 任务各条目的提交/保留/按需/不适用及人工确认依据；不代替客户要求确认。",
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "string", "description": "真实 PPAP 任务编号，由任务检索返回"},
+        }, "required": ["task_id"]},
+    },
+    {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_get_status", "read_only": True, "requires_approval": False,
+        "description": (
+            "查询 PPAP 任务、条目编制、内部审核、客户处理四类独立状态，以及来源覆盖度、审查记录。"
+            "生成草稿不等于批准，内部批准不等于客户接受，也不改变 NCR 或发运门禁。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "string", "description": "真实 PPAP 任务编号"},
+        }, "required": ["task_id"]},
+    },
+    {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_explain_missing", "read_only": True, "requires_approval": False,
+        "description": (
+            "只读解释已有 PPAP 任务的缺项、检查冲突、需要的证据及责任岗位。区分合法空读取、"
+            "读取失败和截断；不把缺证据解释为合格，不修复数据、不执行检查写回。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "string", "description": "真实 PPAP 任务编号"},
+        }, "required": ["task_id"]},
+    },
+    {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_evidence_plan", "read_only": True, "requires_approval": False,
+        "description": (
+            "查询 PPAP 任务可执行的只读取证计划、已确认业务关联、来源角色和必需人工输入。"
+            "只返回计划，不请求远端取证，不新增证据记录。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "string", "description": "真实 PPAP 任务编号"},
+        }, "required": ["task_id"]},
+    },
+    {
+        "agent_type": "quality", "aip_agent": "quality-document",
+        "skill_id": "quality.ppap_get_versions", "read_only": True, "requires_approval": False,
+        "description": "查询 PPAP 产物版本、输入快照、内容哈希与冻结/归档状态；不生成、批准或更新版本。",
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "string", "description": "真实 PPAP 任务编号"},
+        }, "required": ["task_id"]},
+    },
+    {
         "agent_type": "tracking",
         "aip_agent": "tracking",
         "skill_id": "tracking.find_real_by_no",

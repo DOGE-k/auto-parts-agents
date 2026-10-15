@@ -8,6 +8,7 @@ import {
   takeoverCollaborationEvent,
 } from "../api";
 import type { CollaborationEvent } from "../api";
+import { displaySystemText } from "../lib/system-labels";
 
 // 每类事件的"去处置/去处理"文案（导航由父页面实现；面板只校验编号并回调）
 const GO_TARGET_LABELS: Record<string, string> = {
@@ -65,7 +66,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
       setEvents(result.items ?? []);
       onError("");
     } catch (e) {
-      onError(e instanceof Error ? e.message : "协同事件加载失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "协同事件加载失败"));
     } finally {
       setLoading(false);
     }
@@ -82,7 +83,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
       notify(`事件 ${eventId} 已重试`);
       await load();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "重试失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "重试失败"));
     } finally {
       setBusyId("");
     }
@@ -95,7 +96,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
       notify(`事件 ${eventId} 已人工接管（处置请走 NCR 审批门禁）`);
       await load();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "接管失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "接管失败"));
     } finally {
       setBusyId("");
     }
@@ -136,14 +137,14 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
                       ev.payload?.plan_id ? `方案 ${ev.payload.plan_id}` : "",
                     ].filter(Boolean).join(" · ") || "采购分析事件"
                   : `${ev.payload?.work_order_no ? `工单 ${ev.payload.work_order_no}` : `工单 id ${ev.payload?.work_order_id ?? "?"}`}${ev.payload?.issue_id ? ` · 问题 #${ev.payload.issue_id}` : ""}`}
-                {ev.payload?.title ? ` · ${ev.payload.title}` : ""}
+                {ev.payload?.title ? ` · ${displaySystemText(ev.payload.title)}` : ""}
               </span>
               <span className="collab-event-meta">
                 {ev.created_at ? new Date(ev.created_at).toLocaleString("zh-CN", { hour12: false }) : ""}
               </span>
             </div>
             {ev.status === "FAILED" && ev.error?.message && (
-              <div className="collab-event-error">失败原因：{ev.error.message}（失败 {ev.failure_count}/{ev.max_retries} 次）</div>
+              <div className="collab-event-error">失败原因：{displaySystemText(ev.error.message)}（失败 {ev.failure_count}/{ev.max_retries} 次）</div>
             )}
             {ev.status === "MANUAL_HANDLED" && (
               <div className="collab-event-takenover">
@@ -188,7 +189,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
             {detail && (
               <div className="collab-event-detail">
                 {(detail.conclusions ?? []).map((c: string, i: number) => (
-                  <div key={i} className="collab-conclusion">{c}</div>
+                  <div key={i} className="collab-conclusion">{displaySystemText(c)}</div>
                 ))}
                 {detail.quality_impact && (
                   <div className="collab-section">
@@ -197,7 +198,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
                       未关闭问题 {detail.quality_impact.open_issues_count ?? "?"} 项 ·
                       质量门禁{detail.quality_impact.quality_gate_passed ? "通过" : "未通过"}
                       {((detail.quality_impact.missing_documents ?? []) as string[]).length > 0 &&
-                        `（缺文档：${(detail.quality_impact.missing_documents ?? []).join("、")}）`}
+                        displaySystemText(`（缺文档：${(detail.quality_impact.missing_documents ?? []).join("、")}）`)}
                     </span>
                   </div>
                 )}
@@ -206,7 +207,7 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
                     <strong>生产维度</strong>
                     <span>
                       完成率 {detail.tracking.completion_rate ?? "?"}% · 交期 {detail.tracking.due_date || "—"} ·
-                      ETA 口径 {detail.tracking.eta_status || "—"}
+                      ETA 口径 {displaySystemText(detail.tracking.eta_status || "—")}
                     </span>
                   </div>
                 )}
@@ -226,12 +227,12 @@ export default function CollaborationEventsPanel({ notify, onError, onGoTarget }
                     <strong>数据缺口（如实标注）</strong>
                     <ul>
                       {(detail.data_gaps ?? []).map((g: { dimension: string; detail: string }, i: number) => (
-                        <li key={i}>[{g.dimension}] {g.detail}</li>
+                        <li key={i}>[{displaySystemText(g.dimension)}] {displaySystemText(g.detail)}</li>
                       ))}
                     </ul>
                   </div>
                 )}
-                <p className="field-hint">{detail.authority}</p>
+                <p className="field-hint">{displaySystemText(detail.authority)}</p>
               </div>
             )}
           </div>

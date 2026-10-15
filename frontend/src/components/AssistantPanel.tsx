@@ -8,6 +8,7 @@
 //    数据缺失明细默认折叠，不截断任何事实。
 import { useState, useCallback, useEffect, useRef } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
+import { displaySystemText } from "../lib/system-labels";
 import {
   agentRunTypeNames,
   askAssistant,
@@ -194,7 +195,7 @@ export default function AssistantPanel({
       setAssistantAnswer(result);
       notify("协调智能体已回答");
     } catch (e) {
-      onError(e instanceof Error ? e.message : "协调智能体调用失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "协调智能体调用失败"));
     } finally {
       // 新会话首问结束后恢复正常页面上下文策略（交接文档 §4.2）
       setSuppressPageContext(false);
@@ -243,7 +244,7 @@ export default function AssistantPanel({
       setSuppressPageContext(false);
       notify(`已切回历史会话 ${targetSessionId}（${messages.length} 条消息）`);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "历史会话消息加载失败");
+      onError(displaySystemText(e instanceof Error ? e.message : "历史会话消息加载失败"));
     } finally {
       setSwitchingSession(false);
     }
@@ -335,7 +336,7 @@ export default function AssistantPanel({
               onClick={() => void switchToSession(s.session_id)}
               title={s.session_id}
             >
-              <span className="assistant-session-title">{s.title || s.session_id}</span>
+              <span className="assistant-session-title">{displaySystemText(s.title || s.session_id)}</span>
               <time>{s.last_active_at ? new Date(s.last_active_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</time>
             </button>
           ))}
@@ -381,14 +382,14 @@ export default function AssistantPanel({
           m.role === "user" ? (
             <div key={`u-${m.id}-${i}`} className="assistant-msg user">
               <span className="assistant-msg-role">我</span>
-              <div className="assistant-msg-body">{m.content}</div>
+              <div className="assistant-msg-body">{displaySystemText(m.content)}</div>
             </div>
           ) : (
             <div key={`a-${m.id}-${i}`} className="assistant-msg assistant">
               <span className="assistant-msg-role">协调智能体</span>
               <div
                 className="assistant-msg-body md-body"
-                dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(m.content) }}
+                dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(m.content)) }}
               />
             </div>
           )
@@ -401,9 +402,9 @@ export default function AssistantPanel({
               {streamSteps.map((step) => (
                 <div key={step.seq} className={`assistant-step ${step.status}`}>
                   <span className="assistant-step-seq">{step.seq}</span>
-                  <span className="assistant-step-callee">{agentRunTypeNames[step.callee] ?? step.callee}</span>
+                  <span className="assistant-step-callee">{displaySystemText(agentRunTypeNames[step.callee] ?? step.callee)}</span>
                   <code className="assistant-step-skill">{step.skill_id}</code>
-                  <code className="assistant-step-args">{JSON.stringify(step.arguments)}</code>
+                  <code className="assistant-step-args">{displaySystemText(JSON.stringify(step.arguments))}</code>
                   <span className="assistant-step-status">
                     {step.status === "ok" ? "✓" : "✗"} {step.elapsed_ms}ms
                   </span>
@@ -420,7 +421,7 @@ export default function AssistantPanel({
             )}
             {/* P0：上下文沿用回显（用户可纠正） */}
             {assistantAnswer.applied_context && (
-              <div className="assistant-context-echo">{assistantAnswer.applied_context}</div>
+              <div className="assistant-context-echo">{displaySystemText(assistantAnswer.applied_context)}</div>
             )}
             {/* P0：槽位追问（缺什么/为什么/补充后调用哪个智能体） */}
             {assistantAnswer.needs_input && (assistantAnswer.missing_slots?.length ?? 0) > 0 && (
@@ -429,7 +430,7 @@ export default function AssistantPanel({
                 <ul>
                   {assistantAnswer.missing_slots!.map((m) => (
                     <li key={m.slot}>
-                      <code>{m.slot}</code> —— {m.why}；补充后将调用 {m.agent}
+                      <code>{m.slot}</code> —— {displaySystemText(m.why)}；补充后将调用 {displaySystemText(m.agent)}
                     </li>
                   ))}
                 </ul>
@@ -444,7 +445,7 @@ export default function AssistantPanel({
                     <li key={`${s.type}-${s.id}-${i}`}>
                       {s.type === "quotation" ? "报价" : s.type === "procurement_plan" ? "采购方案" : s.type === "erp_so_draft" ? "ERP 销售订单草稿" : s.type === "erp_po_draft" ? "ERP 采购订单草稿" : s.type === "mes_work_order" ? "MES 工单" : s.type}
                       {" "}
-                      <code>{s.id}</code>：{s.reason}
+                      <code>{s.id}</code>：{displaySystemText(s.reason)}
                     </li>
                   ))}
                 </ul>
@@ -460,7 +461,7 @@ export default function AssistantPanel({
             )}
             <div
               className="assistant-answer md-body"
-              dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(assistantAnswer.answer) }}
+              dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(assistantAnswer.answer)) }}
             />
             {jumpButtons.length > 0 && (
               <div className="assistant-jump-row">
@@ -493,7 +494,7 @@ export default function AssistantPanel({
                     return (
                       <div key={opt.option_id} className={`proposal-card ${opt.is_recommended ? "recommended" : ""}`}>
                         <div className="proposal-card-head">
-                          <strong>{opt.supplier_name}</strong>
+                          <strong>{displaySystemText(opt.supplier_name)}</strong>
                           {opt.is_recommended && <span className="badge green">推荐</span>}
                           <span className="proposal-coverage">{opt.coverage} 项覆盖</span>
                         </div>
@@ -511,12 +512,12 @@ export default function AssistantPanel({
                             <div className="proposal-card-row"><span>材料毛利</span><strong>{cost.material_margin_before} → {cost.material_margin_after}</strong></div>
                           </>
                         )}
-                        <div className="proposal-card-note">{opt.recommendation_reason}</div>
+                        <div className="proposal-card-note">{displaySystemText(opt.recommendation_reason)}</div>
                         {/* 阶段七：方案批准 → PO 草稿（审批门禁内，草稿级写入） */}
                         {planId && opt.total_cost_complete && (execResult ? (
                           <div className={`proposal-exec-result ${execResult.error ? "error" : "ok"}`}>
                             {execResult.error
-                              ? `执行失败：${execResult.error}`
+                              ? `执行失败：${displaySystemText(execResult.error)}`
                               : `✓ 已批准方案（${execResult.approval_id}）${execResult.quotation_approval_id ? `，报价审批（${execResult.quotation_approval_id}）` : ""}，PO 草稿 ${execResult.po_draft_id ?? "?"} ${execResult.read_back_verified ? "回读确认" : "待回读"}`}
                           </div>
                         ) : executing ? (
@@ -532,7 +533,7 @@ export default function AssistantPanel({
                                   {needsQuotationApproval && qid && (
                                     <code>① 审批报价 {qid}（当前状态 {assistantAnswer.proposal_options?.quotation_status}，审批人 {proposalExec?.quotationApprover}）</code>
                                   )}
-                                  <code>{needsQuotationApproval ? "②" : "①"} 审批方案 {planId} 选 {opt.option_id}（{opt.supplier_name}，{opt.total_cost} {opt.currency}）→ 创建采购订单草稿</code>
+                                  <code>{needsQuotationApproval ? "②" : "①"} 审批方案 {planId} 选 {opt.option_id}（{displaySystemText(opt.supplier_name)}，{opt.total_cost} {opt.currency}）→ 创建采购订单草稿</code>
                                   <div className="proposal-confirm-row">
                                     {needsQuotationApproval && qid && (
                                       <input
@@ -579,7 +580,7 @@ export default function AssistantPanel({
                 </div>
                 {(assistantAnswer.proposal_options.delivery_assessments ?? []).map((d, idx) => (
                   <div key={idx} className={`proposal-delivery ${d.verdict === "arrival_after_due" ? "late" : "ok"}`}>
-                    交期影响：{d.conclusion}（到货 {d.material_ready_date} vs 交期 {d.due_date}）
+                    交期影响：{displaySystemText(d.conclusion)}（到货 {d.material_ready_date} vs 交期 {d.due_date}）
                   </div>
                 ))}
                 {/* 质量影响明细默认折叠（首屏只留结论行，展开看记录表/批次/处理选项/数据缺口） */}
@@ -598,7 +599,7 @@ export default function AssistantPanel({
                               {q.quality_records.map((r, i) => (
                                 <tr key={i}>
                                   <td>{r.severity}</td>
-                                  <td>{r.title}</td>
+                                  <td>{displaySystemText(r.title)}</td>
                                   <td>{r.status}</td>
                                 </tr>
                               ))}
@@ -611,19 +612,19 @@ export default function AssistantPanel({
                           </div>
                         )}
                         <ul className="quality-impact-conclusions">
-                          {q.impact_conclusions.map((c, i) => <li key={i}>{c}</li>)}
+                          {q.impact_conclusions.map((c, i) => <li key={i}>{displaySystemText(c)}</li>)}
                         </ul>
                         {q.handling_options.length > 0 && (
                           <div className="quality-impact-options">
                             <small>可执行处理选项（均需人工确认）：</small>
                             {q.handling_options.map((o, i) => (
-                              <div key={i} className="quality-impact-option">{o.option} — {o.how}</div>
+                              <div key={i} className="quality-impact-option">{displaySystemText(o.option)} — {displaySystemText(o.how)}</div>
                             ))}
                           </div>
                         )}
                         {q.data_gaps.length > 0 && (
                           <div className="quality-impact-gaps">
-                            数据缺口（如实标注）：{q.data_gaps.map((g) => g.detail).join("；")}
+                            数据缺口（如实标注）：{displaySystemText(q.data_gaps.map((g) => g.detail).join("；"))}
                           </div>
                         )}
                       </div>
@@ -636,7 +637,7 @@ export default function AssistantPanel({
                     <summary>数据缺失明细（{assistantAnswer.proposal_options.data_missing!.length} 项，点击展开）</summary>
                     {(assistantAnswer.proposal_options.data_missing ?? []).map((m, idx) => (
                       <div key={idx} className="proposal-missing">
-                        数据缺失（{m.source_skill}）：{m.missing_fields.map((f) => f.detail).join("；")} → {m.need}
+                        数据缺失（{m.source_skill}）：{displaySystemText(m.missing_fields.map((f) => f.detail).join("；"))} → {displaySystemText(m.need)}
                       </div>
                     ))}
                   </details>
@@ -658,16 +659,16 @@ export default function AssistantPanel({
               {(assistantAnswer.call_chain ?? []).map((step) => (
                 <div key={step.seq} className={`assistant-step ${step.status}`}>
                   <span className="assistant-step-seq">{step.seq}</span>
-                  <span className="assistant-step-callee">{agentRunTypeNames[step.callee] ?? step.callee}</span>
+                  <span className="assistant-step-callee">{displaySystemText(agentRunTypeNames[step.callee] ?? step.callee)}</span>
                   <code className="assistant-step-skill">{step.skill_id}</code>
-                  <code className="assistant-step-args">{JSON.stringify(step.arguments)}</code>
+                  <code className="assistant-step-args">{displaySystemText(JSON.stringify(step.arguments))}</code>
                   <span className="assistant-step-status">
                     {step.status === "ok" ? "✓" : "✗"} {step.elapsed_ms}ms
                   </span>
                 </div>
               ))}
             </details>
-            <p className="field-hint">数据来源：{assistantAnswer.authority}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
+            <p className="field-hint">数据来源：{displaySystemText(assistantAnswer.authority)}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
           </div>
         )}
       </div>

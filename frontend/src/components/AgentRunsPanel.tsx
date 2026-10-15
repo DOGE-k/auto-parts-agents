@@ -2,6 +2,7 @@
 import { useState, useCallback } from "react";
 import { api, agentRunTypeNames } from "../api";
 import type { AgentRunSummary, AgentRunDetail, AgentRunEvidenceItem } from "../api";
+import { displaySystemText } from "../lib/system-labels";
 
 export default function AgentRunsPanel() {
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -83,7 +84,7 @@ export default function AgentRunsPanel() {
             </button>
             {agentRunsLoading && <small>加载中...</small>}
           </div>
-          {agentRunsError && <p className="field-hint">{agentRunsError}</p>}
+          {agentRunsError && <p className="field-hint">{displaySystemText(agentRunsError)}</p>}
           {!agentRunsLoading && !agentRunsError && agentRuns.length === 0 && (
             <p className="field-hint">暂无运行记录（执行一次报价/采购/跟单操作后这里会出现记录）</p>
           )}
@@ -96,9 +97,9 @@ export default function AgentRunsPanel() {
                       {run.result_status === "ok" ? "✓" : "✗"}
                     </span>
                     <span className="agent-run-id">{run.run_id}</span>
-                    <span className="agent-run-type">{agentRunTypeNames[run.agent_type] ?? run.agent_type}</span>
-                    <span className="agent-run-op">{run.operation}</span>
-                    <span className="agent-run-summary">{run.result_summary || "—"}</span>
+                    <span className="agent-run-type">{displaySystemText(agentRunTypeNames[run.agent_type] ?? run.agent_type)}</span>
+                    <span className="agent-run-op">{displaySystemText(run.operation)}</span>
+                    <span className="agent-run-summary">{displaySystemText(run.result_summary || "—")}</span>
                     <span className="agent-run-time">{run.started_at?.replace("T", " ").slice(0, 19) ?? ""}</span>
                   </button>
                   {expandedRunId === run.run_id && (
@@ -108,12 +109,12 @@ export default function AgentRunsPanel() {
                         <>
                           <div className="agent-run-input">
                             <small>输入</small>
-                            <code>{JSON.stringify(agentRunDetail.input?.args ?? [])}{JSON.stringify(agentRunDetail.input?.kwargs ?? {})}</code>
+                            <code>{displaySystemText(JSON.stringify(agentRunDetail.input?.args ?? []))}{displaySystemText(JSON.stringify(agentRunDetail.input?.kwargs ?? {}))}</code>
                           </div>
                           {agentRunDetail.error && (
                             <div className="agent-run-error">
                               <small>错误</small>
-                              <code>{agentRunDetail.error.type}: {agentRunDetail.error.message}</code>
+                              <code>{displaySystemText(agentRunDetail.error.type)}: {displaySystemText(agentRunDetail.error.message)}</code>
                             </div>
                           )}
                           {(agentRunDetail.result?.evidence ?? []).length > 0 && (
@@ -121,10 +122,10 @@ export default function AgentRunsPanel() {
                               <small>证据链（真实记录编号，可追溯）</small>
                               {(agentRunDetail.result?.evidence as AgentRunEvidenceItem[]).map((ev, idx) => (
                                 <div key={idx} className="evidence-item">
-                                  <span className="evidence-source">{ev.source ?? "—"}</span>
-                                  <span className="evidence-type">{ev.record_type ?? "—"}</span>
+                                  <span className="evidence-source">{displaySystemText(ev.source ?? "—")}</span>
+                                  <span className="evidence-type">{displaySystemText(ev.record_type ?? "—")}</span>
                                   <code className="evidence-id">{ev.record_id ?? "—"}</code>
-                                  <span className="evidence-summary">{ev.summary ?? ""}</span>
+                                  <span className="evidence-summary">{displaySystemText(ev.summary ?? "")}</span>
                                 </div>
                               ))}
                             </div>
@@ -133,7 +134,7 @@ export default function AgentRunsPanel() {
                             <div className="agent-run-limitations">
                               <small>数据限制（如实标注）</small>
                               {(agentRunDetail.result?.data_limitations as Record<string, string>[]).map((lim, idx) => (
-                                <div key={idx} className="limitation-item">{lim.field ?? ""} {lim.reason ?? JSON.stringify(lim)}</div>
+                                <div key={idx} className="limitation-item">{displaySystemText(lim.field ?? "")} {displaySystemText(lim.reason ?? JSON.stringify(lim))}</div>
                               ))}
                             </div>
                           )}

@@ -1,4 +1,5 @@
 // 报价环节面板（步骤 1-3：报价分析 / 报价审批 / ERP 销售订单草稿；阶段十 10.5 从 RealBusinessPage 抽出）
+import { displaySystemText } from "../../lib/system-labels";
 import type { Customer, Item, Quotation } from "../../types/realBusiness";
 
 export function QuotationInputStep({
@@ -38,7 +39,7 @@ export function QuotationInputStep({
       </div>
       <div className="form-grid">
         <div className="form-group">
-          <label>客户 (来自 ERPNext)</label>
+          <label>客户 (来自 ERP 系统)</label>
           <select
             value={selectedCustomer}
             onChange={(e) => onSelectCustomer(e.target.value)}
@@ -51,7 +52,7 @@ export function QuotationInputStep({
           </select>
         </div>
         <div className="form-group">
-          <label>物料 (来自 ERPNext)</label>
+          <label>物料 (来自 ERP 系统)</label>
           <select
             value={selectedItem}
             onChange={(e) => onSelectItem(e.target.value)}
@@ -112,7 +113,7 @@ export function QuotationReviewPanel({
           <h2>报价方案</h2>
           <p>
             报价 ID: {quotation.quotation_id} · 数据源:{" "}
-            {quotation.adapter_mode === "real" ? "ERPNext 真实数据" : "Mock"}
+            {quotation.adapter_mode === "real" ? "ERP 系统真实数据" : "Mock"}
           </p>
         </div>
         <span
@@ -145,7 +146,7 @@ export function QuotationReviewPanel({
           <span className="kpi-icon amber">◷</span>
           <span className="kpi-label">预计交期</span>
           <strong
-            title={quotation.delivery_estimate?.note || ""}
+            title={displaySystemText(quotation.delivery_estimate?.note)}
           >
             {quotation.delivery_estimate?.estimated_days != null
               ? `${quotation.delivery_estimate.estimated_days} 天`
@@ -154,8 +155,8 @@ export function QuotationReviewPanel({
           {quotation.delivery_estimate?.basis === "missing" ? (
             <small>需补录 ERP 交期数据</small>
           ) : quotation.delivery_estimate?.basis === "mes_work_order_schedule" ? (
-            <small title={quotation.delivery_estimate?.note}>
-              MES 排程倒计时 · {quotation.delivery_estimate.source}
+            <small title={displaySystemText(quotation.delivery_estimate?.note)}>
+              MES 排程倒计时 · {displaySystemText(quotation.delivery_estimate.source)}
             </small>
           ) : quotation.delivery_estimate?.basis === "stock_available" ? (
             <small>成品库存可直发</small>
@@ -179,10 +180,10 @@ export function QuotationReviewPanel({
             {quotation.evidence.map((ev, idx) => (
               <li key={idx}>
                 <span className={`source-tag ${ev.source === "ERPNext" ? "erp" : "mes"}`}>
-                  {ev.source}
+                  {displaySystemText(ev.source)}
                 </span>
-                <span className="evidence-type">{ev.record_type}</span>
-                <span className="evidence-summary">{ev.summary}</span>
+                <span className="evidence-type">{displaySystemText(ev.record_type)}</span>
+                <span className="evidence-summary">{displaySystemText(ev.summary)}</span>
               </li>
             ))}
           </ul>
@@ -240,7 +241,7 @@ export function ErpDraftPanel({
       <div className="panel-heading">
         <div>
           <h2>ERP 销售订单草稿</h2>
-          <p>审批通过后，在 ERPNext 中创建销售订单草稿（docstatus=0，不提交）</p>
+          <p>审批通过后，在 ERP 系统中创建销售订单草稿（docstatus=0，不提交）</p>
         </div>
         {quotation.erp_draft_id ? (
           <span className="badge green">已创建</span>
@@ -276,8 +277,8 @@ export function ErpDraftPanel({
             </div>
           </div>
           <div className="source-note">
-            <span className="source-tag erp">ERPNext</span>
-            数据来源：ERPNext REST API · 草稿 docstatus=0 · 未提交
+            <span className="source-tag erp">ERP 系统</span>
+            数据来源：ERP 系统 REST API · 草稿 docstatus=0 · 未提交
           </div>
         </div>
       ) : step === 3 ? (

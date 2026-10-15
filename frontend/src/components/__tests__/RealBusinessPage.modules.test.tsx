@@ -32,6 +32,9 @@ vi.mock("../../api", async (importOriginal) => {
       }),
     ),
     getQualityTodo: vi.fn(() => Promise.resolve({ items: [] })),
+    getPpapTasks: vi.fn(() => Promise.resolve({ items: [], total: 0, offset: 0, limit: 20 })),
+    getPpapTemplate: vi.fn(() => Promise.resolve({ template_source: "project_defined", notice: "项目自定义模板，客户模板待确认" })),
+    getCollaborationEvents: vi.fn(() => Promise.resolve([])),
   };
 });
 
@@ -108,7 +111,7 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     const text = textOf(page.container);
     // ERPNext 服务端集成账号不能显示为审批身份；必须明确标注"未登录"
     expect(text).toContain("项目账号未登录");
-    expect(text).toContain("ERPNext 数据连接账号：Administrator");
+    expect(text).toContain("ERP 系统数据连接账号：Administrator");
     expect(text).toContain("服务端集成账号");
     expect(text).not.toContain("当前审批人：Administrator");
     // 身份详情折叠存在（无 OpenMES 会话时展示只读说明与数据连接账号）
@@ -163,5 +166,19 @@ describe("RealBusinessPage 信息架构改版（模块化视图）", () => {
     expect(connText).toContain("项目登录");
     // 高级联调设置默认折叠，Bearer/写入令牌不在展开文案里直接铺开（验收 11）
     expect(connText).toContain("高级联调设置");
+  });
+
+  it("质量中心可切换 PPAP 编制和原质量问题处理，原待办与协同事件保留", async () => {
+    const page = mountPage("quality"); cleanups.push(page.cleanup);
+    expect(page.container.querySelector(".quality-todo-panel")).toBeTruthy();
+    const ppapButton = Array.from(page.container.querySelectorAll("button")).find((button) => button.textContent === "PPAP 编制")!;
+    await act(async () => { ppapButton.click(); });
+    expect(page.container.querySelector('[aria-label="PPAP 编制工作台"]')).toBeTruthy();
+    expect(page.container.querySelector(".quality-todo-panel")).toBeNull();
+    const qualityButton = Array.from(page.container.querySelectorAll("button")).find((button) => button.textContent === "质量问题处理")!;
+    await act(async () => { qualityButton.click(); });
+    expect(page.container.querySelector(".quality-todo-panel")).toBeTruthy();
+    expect(page.container.textContent).toContain("协同事件");
+    expect(page.container.querySelector('[aria-label="PPAP 编制工作台"]')).toBeNull();
   });
 });

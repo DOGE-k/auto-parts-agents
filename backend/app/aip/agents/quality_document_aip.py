@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from app.aip.aip_agent_service import AipAgentService
-from app.services import real_order
+from app.services import ppap, real_order
 from app.tools.registry import tool_registry
 from app.domain.models import AgentType
 
@@ -67,6 +67,52 @@ def create_quality_document_aip_service(aic: str = "local-quality-doc-001") -> A
         skill_name="全厂未关闭质量问题队列",
         handler=real_list_open_issues,
     )
+
+    # PPAP 问答技能只查询项目持久化数据，不创建任务、编制或批准。
+    async def ppap_find_tasks(inputs: dict) -> dict:
+        allowed = ("customer_id", "part_no", "run_state", "package_state", "owner", "limit", "offset")
+        return ppap.list_tasks(**{key: inputs[key] for key in allowed if key in inputs})
+
+    async def ppap_get_applicability(inputs: dict) -> dict:
+        result = ppap.get_task(str(inputs["task_id"]), include_content=False)
+        if not result.get("ok"):
+            return result
+        return {
+            "ok": True, "task_id": result["task"]["task_id"],
+            "template": result["template"], "applicability": result["applicability"],
+            "elements": [{key: item.get(key) for key in (
+                "element_id", "title", "requirement", "applicability_basis",
+                "suggested_requirement", "applicability_condition", "responsible_role",
+            )} for item in result["elements"]],
+            "authority": "ppap_local", "read_only": True,
+        }
+
+    async def ppap_get_status(inputs: dict) -> dict:
+        result = ppap.get_task(str(inputs["task_id"]), include_content=False)
+        if not result.get("ok"):
+            return result
+        return {key: result[key] for key in (
+            "ok", "task", "elements", "issues", "artifacts", "reviews", "runs", "authority",
+        )}
+
+    async def ppap_explain_missing(inputs: dict) -> dict:
+        return ppap.get_missing_items(str(inputs["task_id"]))
+
+    async def ppap_evidence_plan(inputs: dict) -> dict:
+        return ppap.plan_evidence(str(inputs["task_id"]))
+
+    async def ppap_get_versions(inputs: dict) -> dict:
+        return ppap.list_versions(str(inputs["task_id"]))
+
+    for skill_id, skill_name, handler in (
+        ("quality.ppap_find_tasks", "PPAP 任务检索", ppap_find_tasks),
+        ("quality.ppap_get_applicability", "PPAP 条目适用性查询", ppap_get_applicability),
+        ("quality.ppap_get_status", "PPAP 编制与审核状态查询", ppap_get_status),
+        ("quality.ppap_explain_missing", "PPAP 缺项与冲突解释", ppap_explain_missing),
+        ("quality.ppap_evidence_plan", "PPAP 只读取证计划", ppap_evidence_plan),
+        ("quality.ppap_get_versions", "PPAP 产物版本查询", ppap_get_versions),
+    ):
+        service.register_skill(skill_id=skill_id, skill_name=skill_name, handler=handler)
 
     # ===== Mock 场景模拟技能 =====
 
