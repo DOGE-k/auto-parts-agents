@@ -1,0 +1,13 @@
+# Public service configuration only. No credentials or private keys belong here.
+[registry]
+base_url = "https://wt.ioa.pub/registry-server"
+
+[auth]
+user_token_file = "./.acps-cli/tokens/registry-user.json"
+admin_token_file = "./.acps-cli/tokens/registry-admin.json"
+
+[ca]
+base_url = "https://wt.ioa.pub/ca-server"
+
+[discovery]
+base_url = "https://wt.ioa.pub/discovery"

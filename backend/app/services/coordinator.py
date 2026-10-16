@@ -552,6 +552,7 @@ class BusinessCoordinator:
         deepseek_client,
         self_base_url: str | None = None,
         skill_invoker=None,
+        allowed_skill_ids: set[str] | frozenset[str] | None = None,
     ):
         self._deepseek = deepseek_client
         self._self_base_url = (
@@ -561,6 +562,10 @@ class BusinessCoordinator:
         # skill_invoker(agent_type, skill_id, inputs) -> dict；默认走 AIP RPC。
         # 测试可注入假实现。
         self._skill_invoker = skill_invoker or self._invoke_via_aip
+        # Listener-local restriction; never replace the shared capability catalog.
+        self._allowed_skill_ids = (
+            frozenset(allowed_skill_ids) if allowed_skill_ids is not None else None
+        )
         self._aip_clients: dict[str, AipAgentClient] = {}
 
     def _aip_client(self, agent_type: str) -> AipAgentClient:
@@ -617,11 +622,23 @@ class BusinessCoordinator:
         collected_results: list[tuple[str, dict[str, Any]]] = []
         final_answer = ""
         rounds = 0
-        index = _tool_index()
+        active_tools = _active_tools()
+        if self._allowed_skill_ids is not None:
+            active_tools = [t for t in active_tools if t["skill_id"] in self._allowed_skill_ids]
+        index = {_llm_tool_name(t["skill_id"]): t for t in active_tools}
+        name_to_skill = {name: t["skill_id"] for name, t in index.items()}
+        tool_specs = [{
+            "type": "function",
+            "function": {
+                "name": _llm_tool_name(t["skill_id"]),
+                "description": f"[{t['agent_type']}智能体] {t['description']}",
+                "parameters": t["parameters"],
+            },
+        } for t in active_tools]
 
         for rounds in range(1, MAX_TOOL_ROUNDS + 1):
             response = await self._deepseek.chat_completion(
-                messages, tools=_tool_specs(), max_tokens=4096
+                messages, tools=tool_specs, max_tokens=4096
             )
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls") or []
@@ -636,7 +653,7 @@ class BusinessCoordinator:
             for call in tool_calls:
                 function = call.get("function", {})
                 llm_name = function.get("name", "")
-                skill_id = _llm_name_to_skill().get(llm_name, llm_name)
+                skill_id = name_to_skill.get(llm_name, llm_name)
                 try:
                     import json
 
@@ -868,7 +885,7 @@ class BusinessCoordinator:
         return proposal
 
 
-def build_coordinator() -> BusinessCoordinator:
+def build_coordinator(*, skill_invoker=None, allowed_skill_ids=None) -> BusinessCoordinator:
     """从环境构建协调者；DeepSeek 未配置时抛出 IntegrationNotConfigured。"""
     from app.integrations.deepseek import DeepSeekClient
     from app.integrations.settings import IntegrationSettings
@@ -881,5 +898,7 @@ def build_coordinator() -> BusinessCoordinator:
             settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
-        )
+        ),
+        skill_invoker=skill_invoker,
+        allowed_skill_ids=allowed_skill_ids,
     )

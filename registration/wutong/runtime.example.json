@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "bindHost": "0.0.0.0",
+  "publicHost": "129.204.33.138",
+  "trustBundle": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/trust-bundle.pem",
+  "leaderClient": {
+    "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/leader-client.pem",
+    "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/leader-client.key"
+  },
+  "agents": {
+    "leader": {
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "port": 9443,
+      "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/leader-server.pem",
+      "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/leader-server.key",
+      "allowedCallerAics": ["*"]
+    },
+    "quotation": {
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.L0628O.R6C3J5.11WB",
+      "port": 9444,
+      "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/quotation-server.pem",
+      "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/quotation-server.key",
+      "allowedCallerAics": ["*"]
+    },
+    "procurement": {
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.VK300S.9Q16X9.0I5X",
+      "port": 9445,
+      "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/procurement-server.pem",
+      "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/procurement-server.key",
+      "allowedCallerAics": ["*"]
+    },
+    "tracking": {
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.AA08ZH.CV2T2Y.0SGQ",
+      "port": 9446,
+      "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/tracking-server.pem",
+      "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/tracking-server.key",
+      "allowedCallerAics": ["*"]
+    },
+    "quality-document": {
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.419WDF.7SIZEL.0Y9H",
+      "port": 9447,
+      "certFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/certs/quality-document-server.pem",
+      "keyFile": "/home/ubuntu/tools/wutong-cli-2.2.0/keyfiles/private/quality-document-server.key",
+      "allowedCallerAics": ["*"]
+    }
+  }
+}

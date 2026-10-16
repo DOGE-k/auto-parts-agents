@@ -17,10 +17,6 @@ import logging
 from fastapi import FastAPI
 
 from app.aip.aip_agent_service import register_aip_agent_router
-from app.aip.agents.quotation_aip import create_quotation_aip_service
-from app.aip.agents.procurement_aip import create_procurement_aip_service
-from app.aip.agents.tracking_aip import create_tracking_aip_service
-from app.aip.agents.quality_document_aip import create_quality_document_aip_service
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +39,13 @@ def init_aip_agents(app: FastAPI) -> None:
     """
     global _quotation_service, _procurement_service
     global _tracking_service, _quality_document_service
+
+    # A standalone TLS configuration check must not import the business database
+    # or load application credentials merely by importing app.aip.
+    from app.aip.agents.quotation_aip import create_quotation_aip_service
+    from app.aip.agents.procurement_aip import create_procurement_aip_service
+    from app.aip.agents.tracking_aip import create_tracking_aip_service
+    from app.aip.agents.quality_document_aip import create_quality_document_aip_service
 
     # 创建四个智能体服务
     _quotation_service = create_quotation_aip_service()

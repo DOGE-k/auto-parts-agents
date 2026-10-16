@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from uuid import uuid4
 from typing import Any, Optional
 
 from acps_sdk.aip import AipRpcClient, TaskState
@@ -32,12 +33,14 @@ class AipAgentClient:
         ssl_context=None,
         identity_binding_enabled: bool = False,
         expected_partner_aic: str | None = None,
+        transport=None,
     ):
         self.partner_url = partner_url
         self.leader_id = leader_id
         self.ssl_context = ssl_context
         self.identity_binding_enabled = identity_binding_enabled
         self.expected_partner_aic = expected_partner_aic
+        self.transport = transport
         self._client: Optional[AipRpcClient] = None
 
     async def _get_client(self) -> AipRpcClient:
@@ -48,6 +51,7 @@ class AipAgentClient:
                 ssl_context=self.ssl_context,
                 identity_binding_enabled=self.identity_binding_enabled,
                 expected_partner_aic=self.expected_partner_aic,
+                transport=self.transport,
             )
         return self._client
 
@@ -82,45 +86,60 @@ class AipAgentClient:
             TimeoutError: 任务超时
             RuntimeError: 任务执行失败或被取消
         """
+        if timeout <= 0 or poll_interval <= 0:
+            raise ValueError("timeout 和 poll_interval 必须大于零")
+        if not isinstance(inputs, dict):
+            raise ValueError("技能输入必须是 JSON 对象")
         client = await self._get_client()
+        # Allocate before start: even a lost/late start response can be cancelled.
+        task_id = f"task-{uuid4()}"
 
-        # 1. 启动任务
-        task_result = await client.start_task(
-            session_id=session_id,
-            user_input=f"{skill_id}|{json.dumps(inputs, ensure_ascii=False)}",
-        )
-        task_id = task_result.taskId
-        logger.info(f"已启动任务: {skill_id}, task_id={task_id}, 初始状态: {task_result.status.state}")
+        async def invoke() -> dict[str, Any]:
+            result = await client.start_task(
+                session_id=session_id,
+                user_input=f"{skill_id}|{json.dumps(inputs, ensure_ascii=False)}",
+                task_id=task_id,
+            )
+            if result.taskId != task_id:
+                raise RuntimeError("AIP 响应任务编号与请求不一致")
+            if result.status.state not in self._terminal_states():
+                result = await self._wait_for_completion(
+                    task_id, session_id, timeout, poll_interval
+                )
+            state = result.status.state
+            if state in {TaskState.Failed, TaskState.Rejected, TaskState.Canceled}:
+                message = next(
+                    (item.text for item in (result.status.dataItems or []) if getattr(item, "text", None)),
+                    str(state),
+                )
+                raise RuntimeError(f"技能 {skill_id} 未成功: {message}")
+            data = self._extract_result(result)
+            if state == TaskState.AwaitingCompletion:
+                completed = await client.complete_task(task_id, session_id)
+                if completed.status.state != TaskState.Completed:
+                    raise RuntimeError("AIP 任务完成确认未被接受")
+            return data
 
-        # 2. 轮询等待完成
-        result = await self._wait_for_completion(
-            task_id, session_id=session_id, timeout=timeout, poll_interval=poll_interval
-        )
+        try:
+            # Bound the whole exchange, including network calls and acknowledgement.
+            return await asyncio.wait_for(invoke(), timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            await self._cancel_remote(client, task_id, session_id)
+            raise
 
-        # 3. 检查状态
-        state = result.status.state
-        if state == TaskState.Failed:
-            error_msg = "任务执行失败"
-            if result.status.dataItems:
-                for item in result.status.dataItems:
-                    if hasattr(item, "text"):
-                        error_msg = item.text
-                        break
-            raise RuntimeError(f"技能 {skill_id} 执行失败: {error_msg}")
+    @staticmethod
+    def _terminal_states() -> set[TaskState]:
+        return {
+            TaskState.Completed, TaskState.Failed, TaskState.Rejected,
+            TaskState.Canceled, TaskState.AwaitingCompletion,
+        }
 
-        if state == TaskState.Rejected:
-            raise RuntimeError(f"技能 {skill_id} 被拒绝")
-
-        if state == TaskState.Canceled:
-            raise RuntimeError(f"技能 {skill_id} 被取消")
-
-        # 4. 自动确认完成（如果在 awaiting-completion 状态）
-        if state == TaskState.AwaitingCompletion:
-            await client.complete_task(task_id, session_id)
-            logger.info(f"已确认任务完成: {skill_id}, task_id={task_id}")
-
-        # 5. 提取结果
-        return self._extract_result(result)
+    @staticmethod
+    async def _cancel_remote(client, task_id: str, session_id: str) -> None:
+        try:
+            await asyncio.shield(asyncio.wait_for(client.cancel_task(task_id, session_id), timeout=2.0))
+        except (Exception, asyncio.CancelledError):
+            logger.warning("未能确认远端 AIP 任务已取消: %s", task_id)
 
     async def _wait_for_completion(
         self,
@@ -131,43 +150,33 @@ class AipAgentClient:
     ):
         """轮询等待任务到达终态或 awaiting-completion。"""
         client = await self._get_client()
-        elapsed = 0.0
-        terminal_states = {
-            TaskState.Completed,
-            TaskState.Failed,
-            TaskState.Rejected,
-            TaskState.Canceled,
-            TaskState.AwaitingCompletion,  # 也作为"可获取结果"状态
-        }
-
-        while elapsed < timeout:
+        deadline = asyncio.get_running_loop().time() + timeout
+        result = None
+        while asyncio.get_running_loop().time() < deadline:
             result = await client.get_task(task_id, session_id)
+            if result.taskId != task_id:
+                raise RuntimeError("AIP 响应任务编号与请求不一致")
             state = result.status.state
-
-            if state in terminal_states:
+            if state in self._terminal_states():
                 return result
-
             await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
 
         raise TimeoutError(
-            f"任务 {task_id} 超时（{timeout}s），当前状态: {result.status.state}"
+            f"任务 {task_id} 超时（{timeout}s）"
         )
 
     def _extract_result(self, task_result) -> dict[str, Any]:
         """从 TaskResult 中提取技能执行结果。"""
-        if not task_result.products:
-            return {}
+        from acps_sdk.aip.aip_base_model import StructuredDataItem, TextDataItem
 
-        for product in task_result.products:
+        for product in task_result.products or []:
             if product.dataItems:
                 for item in product.dataItems:
-                    if hasattr(item, "data") and item.data is not None:
+                    if isinstance(item, StructuredDataItem):
                         return dict(item.data)
-                    if hasattr(item, "text") and item.text:
+                    if isinstance(item, TextDataItem) and item.text:
                         return {"text": item.text}
-
-        return {}
+        raise RuntimeError("AIP 成功任务没有可读取的结果产物")
 
 
 # ========== 客户端工厂 ==========

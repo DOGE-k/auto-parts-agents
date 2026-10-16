@@ -1,0 +1,148 @@
+{
+  "formatVersion": "1.0",
+  "source": "user_provided_approved_agent_names_and_aics",
+  "recordedDate": "2026-10-16",
+  "userReportedApproval": true,
+  "platformAcsReadBack": true,
+  "certificateIssuedByThisTask": false,
+  "runtimeConfiguredByThisTask": false,
+  "runtimeImplementedLocally": true,
+  "serverDeployedByThisTask": false,
+  "platformInvocationVerified": false,
+  "serverEnvironmentUserReported": {
+    "codeCommit": "b85619d",
+    "python": "3.13.16",
+    "acps-sdk": "2.2.0",
+    "uvicorn": "0.54.0",
+    "h11": "0.16.0",
+    "candidatePortsNotInReportedListenSnapshot": [9443, 9444, 9445, 9446, 9447],
+    "portAvailabilityIsNotPublicReachability": true
+  },
+  "agents": [
+    {
+      "role": "leader",
+      "name": "汽车零部件协同智能体",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "platformAcsFile": "registration/wutong/approved/leader.acs.json",
+      "platformAcsSha256": "bf4de1df638a12bb5da5ed9934f65e55271132e1169f1650d4da3a3dcdef99d5"
+    },
+    {
+      "role": "quotation",
+      "name": "汽车零部件报价智能体",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.L0628O.R6C3J5.11WB",
+      "platformAcsFile": "registration/wutong/approved/quotation.acs.json",
+      "platformAcsSha256": "559bb8ba63f21e0a146f4efd82979d44e4e4ca6153fe4da984f92d742246fb46"
+    },
+    {
+      "role": "procurement",
+      "name": "汽车零部件采购智能体",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.VK300S.9Q16X9.0I5X",
+      "platformAcsFile": "registration/wutong/approved/procurement.acs.json",
+      "platformAcsSha256": "68b41d6c4768e63d92d6a22fec0d733d190f336749841d04070299234b4817b9"
+    },
+    {
+      "role": "tracking",
+      "name": "汽车零部件生产跟单智能体",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.AA08ZH.CV2T2Y.0SGQ",
+      "platformAcsFile": "registration/wutong/approved/tracking.acs.json",
+      "platformAcsSha256": "ca9be8e79940bab6daf7e3623867d60960530d4539edaa1f2db0162c7cb5dd6c"
+    },
+    {
+      "role": "quality-document",
+      "name": "汽车零部件质量文档智能体",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.419WDF.7SIZEL.0Y9H",
+      "platformAcsFile": "registration/wutong/approved/quality-document.acs.json",
+      "platformAcsSha256": "9fbf3cccd4ddee200a13d81ebc1041e6ada57adb7e7bcfea34b6599301d8171a"
+    }
+  ],
+  "platformAcsReadBackAt": "2026-10-16T16:46:40+08:00",
+  "platformAcsReadBackMethod": "public_atr_get_no_credentials",
+  "platformAcsActiveForAllFive": true,
+  "platformIpSanConfirmedForAllFive": "129.204.33.138",
+  "userReportedCertificates": [
+    {
+      "role": "leader",
+      "usage": "serverAuth",
+      "evidence": "user_provided_openssl_x509_public_output_screenshot",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T08:54:13Z",
+      "notAfter": "2026-12-04T08:54:13Z",
+      "serverRelativePath": "keyfiles/certs/leader-server.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    },
+    {
+      "role": "leader",
+      "usage": "clientAuth",
+      "evidence": "user_provided_openssl_x509_public_output_text",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.O321QO.LHD18D.18NY",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T08:58:41Z",
+      "notAfter": "2026-12-04T08:58:41Z",
+      "serverRelativePath": "keyfiles/certs/leader-client.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    },
+    {
+      "role": "quotation",
+      "usage": "serverAuth",
+      "evidence": "user_provided_openssl_x509_public_output_text",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.L0628O.R6C3J5.11WB",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.L0628O.R6C3J5.11WB",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T09:02:41Z",
+      "notAfter": "2026-12-04T09:02:41Z",
+      "serverRelativePath": "keyfiles/certs/quotation-server.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    },
+    {
+      "role": "procurement",
+      "usage": "serverAuth",
+      "evidence": "user_provided_openssl_x509_public_output_text",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.VK300S.9Q16X9.0I5X",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.VK300S.9Q16X9.0I5X",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T09:03:54Z",
+      "notAfter": "2026-12-04T09:03:54Z",
+      "serverRelativePath": "keyfiles/certs/procurement-server.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    },
+    {
+      "role": "tracking",
+      "usage": "serverAuth",
+      "evidence": "user_provided_openssl_x509_public_output_text",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.AA08ZH.CV2T2Y.0SGQ",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.AA08ZH.CV2T2Y.0SGQ",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T09:05:31Z",
+      "notAfter": "2026-12-04T09:05:31Z",
+      "serverRelativePath": "keyfiles/certs/tracking-server.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    },
+    {
+      "role": "quality-document",
+      "usage": "serverAuth",
+      "evidence": "user_provided_openssl_x509_public_output_text",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.419WDF.7SIZEL.0Y9H",
+      "organization": "广航海燕队",
+      "uriSan": "acps://1.2.156.3088.1.BUPT.R2QTUC.419WDF.7SIZEL.0Y9H",
+      "ipSan": "129.204.33.138",
+      "notBefore": "2026-10-16T09:06:35Z",
+      "notAfter": "2026-12-04T09:06:35Z",
+      "serverRelativePath": "keyfiles/certs/quality-document-server.pem",
+      "certificateChainVerifiedByThisTask": false,
+      "liveEndpointVerifiedByThisTask": false
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "aic": "",
+  "active": false,
+  "lastModifiedTime": "2026-10-16T15:54:34+08:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件报价智能体",
+  "description": "面向汽车零部件工厂的销售与报价业务，基于客户、物料、BOM、价格、库存及交期信息生成报价分析方案，查询报价与销售订单关联状态，评估材料成本变化及其影响。报价审批和订单写入通过项目授权流程处理。",
+  "version": "0.1.0",
+  "webAppUrl": "http://129.204.33.138:5173/",
+  "provider": {
+    "organization": "广航海燕队",
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com"
+  },
+  "securitySchemes": {},
+  "endPoints": [],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "quotation.analyze_real",
+      "name": "报价分析",
+      "description": "根据客户、物料和数量读取价格、BOM、库存与交期依据，生成并保存本地报价分析方案；不创建ERP订单或完成审批。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "报价分析",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.get_real",
+      "name": "报价内容与状态查询",
+      "description": "查询已保存报价的价格、内容、审批状态及关联ERP草稿编号；不修改报价。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "报价内容与状态查询",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.find_real_by_erp_order",
+      "name": "按销售订单查询报价",
+      "description": "根据销售订单号查找已保存的关联报价及最新采购方案摘要；无正式关联时如实返回未找到。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "按销售订单查询报价",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quotation.assess_cost_impact",
+      "name": "材料成本影响评估",
+      "description": "依据已有采购选项和价格记录计算材料成本变化及材料毛利影响；缺少价格时报告缺项，不作全成本利润结论。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "材料成本影响评估",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ],
+  "certificate": {
+    "altNames": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    }
+  }
+}

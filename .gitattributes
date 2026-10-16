@@ -1,0 +1,2 @@
+scripts/start_wutong.sh text eol=lf
+scripts/stop_wutong.sh text eol=lf

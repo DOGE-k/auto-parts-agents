@@ -1,0 +1,122 @@
+{
+  "aic": "",
+  "active": false,
+  "lastModifiedTime": "2026-10-16T15:54:34+08:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件生产跟单智能体",
+  "description": "面向汽车零部件工厂的生产履约跟踪，查询销售订单与工单关联、生产进度及质量风险，评估物料到货时间对交期的影响，检查生产完成度与发运前置条件，提供阻塞原因和跟进依据。",
+  "version": "0.1.0",
+  "webAppUrl": "http://129.204.33.138:5173/",
+  "provider": {
+    "organization": "广航海燕队",
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com"
+  },
+  "securitySchemes": {},
+  "endPoints": [],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "tracking.find_real_by_no",
+      "name": "按工单编号查找工单",
+      "description": "将用户可见工单编号精确转换为系统工单ID，供进度、质量及门禁查询使用；不猜测ID。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "按工单编号查找工单",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.lookup_order_link",
+      "name": "销售订单与生产工单关联查询",
+      "description": "按正式订单关联字段查找生产工单；产品编码相同的记录不据此视为正式订单关联。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "销售订单与生产工单关联查询",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.track_real",
+      "name": "生产进度与风险查询",
+      "description": "查询工单进度、完成率、质量风险和有依据的完工预估；缺少速率时报告缺项，可能产生本地延期或临期协同事件。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "生产进度与风险查询",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.check_real_ship_gate",
+      "name": "发运条件检查",
+      "description": "基于调用方传入且应先核对的审批状态、质量门禁和生产完成率检查发运条件并解释阻塞原因；不执行发运或签发质量放行。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "发运条件检查",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "tracking.assess_delivery_impact",
+      "name": "物料到货与交期影响评估",
+      "description": "比较物料预计到货日与工单交期，提示物料维度的延期风险；不将这一比较作为完整排程或剩余产量的完工预测。",
+      "version": "1.0.0",
+      "tags": [
+        "汽车零部件",
+        "物料到货与交期影响评估",
+        "查询与分析"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ],
+  "certificate": {
+    "altNames": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    }
+  }
+}

@@ -1,0 +1,640 @@
+{
+  "formatVersion": "2.0",
+  "generatedAt": "2026-10-16T15:54:34+08:00",
+  "timezone": "Asia/Shanghai",
+  "overallReadiness": "NOT_READY",
+  "readinessMeaning": "NOT_READY表示平台调用尚未就绪，不表示禁止尝试在平台注册页面保存草稿",
+  "purpose": "五份正式初次注册申请ACS的内部核对记录；本文件不粘贴到平台注册表单",
+  "publicContentPolicy": "ACS仅包含对外业务能力、提供方和协议字段；内部准备状态、待办与校验记录只保存在本清单和文档中",
+  "admissionFeedback": {
+    "source": "user_supplied_platform_rejection_screenshot",
+    "submittedAt": "2026-10-16T15:46:58+08:00",
+    "processedAt": "2026-10-16T15:50:33+08:00",
+    "agentRole": "leader",
+    "status": "REJECTED",
+    "rule": "registry-admission-2.0-static-format-llm-whole-acs",
+    "message": "At least one valid Endpoint or webAppUrl is required",
+    "correction": "补充真实、可访问的webAppUrl；该网页入口不冒充AIP端点，未提交重新审核",
+    "schemaValidationIsAdmissionApproval": false
+  },
+  "webApplication": {
+    "url": "http://129.204.33.138:5173/",
+    "applicationScope": "同一项目网页提供Leader协同问答及四个岗位模块，当前没有独立模块URL路由",
+    "checkedAt": "2026-10-16T15:52:12+08:00",
+    "httpStatus": 200,
+    "redirected": false,
+    "pageTitle": "汽车零部件智能体协作平台",
+    "browserPageRendered": true,
+    "browserObservedModules": [
+      "AI协同问答",
+      "销售与订单",
+      "采购与缺料",
+      "生产跟单",
+      "质量中心"
+    ],
+    "health": {
+      "status": "ok",
+      "database": "connected"
+    },
+    "businessActionPerformed": false,
+    "note": "仅验证网页可打开及应用健康，页面同时显示MES异常；不作为所有业务或AIP调用正常的证明。生成器不执行网络检查。"
+  },
+  "inputContract": {
+    "convention": "TextDataItem.text=技能ID|JSON参数；带参数调用须使用实际业务标识和契约要求的JSON类型",
+    "naturalLanguageDirectInvocationImplemented": false,
+    "parameterSchemas": {
+      "quality.ppap_find_tasks": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "description": "客户编号"
+          },
+          "part_no": {
+            "type": "string",
+            "description": "精确零件号，左右件分别查询"
+          },
+          "run_state": {
+            "type": "string",
+            "description": "任务运行状态"
+          },
+          "package_state": {
+            "type": "string",
+            "description": "内部包审核状态"
+          },
+          "owner": {
+            "type": "string",
+            "description": "任务负责人账号"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "quality.ppap_get_applicability": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "真实 PPAP 任务编号，由任务检索返回"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "quality.ppap_get_status": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "真实 PPAP 任务编号"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "quality.ppap_explain_missing": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "真实 PPAP 任务编号"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "quality.ppap_evidence_plan": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "真实 PPAP 任务编号"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "quality.ppap_get_versions": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "真实 PPAP 任务编号"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "tracking.find_real_by_no": {
+        "type": "object",
+        "properties": {
+          "work_order_no": {
+            "type": "string",
+            "description": "MES 工单编号，如 WO-2026-001"
+          }
+        },
+        "required": [
+          "work_order_no"
+        ]
+      },
+      "tracking.lookup_order_link": {
+        "type": "object",
+        "properties": {
+          "erp_order_id": {
+            "type": "string",
+            "description": "ERP 销售订单号，如 SAL-ORD-2026-00023"
+          }
+        },
+        "required": [
+          "erp_order_id"
+        ]
+      },
+      "tracking.track_real": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "MES 工单数字 id（由 lookup_order_link 返回）"
+          }
+        },
+        "required": [
+          "work_order_id"
+        ]
+      },
+      "quality.get_real_package": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "MES 工单数字 id"
+          }
+        },
+        "required": [
+          "work_order_id"
+        ]
+      },
+      "quality.assess_quality_impact": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "MES 工单数字 id"
+          }
+        },
+        "required": [
+          "work_order_id"
+        ]
+      },
+      "quality.check_issue_closure": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "OpenMES 质量问题/NCR id"
+          },
+          "issue_id": {
+            "type": "string",
+            "description": "OpenMES 质量问题/NCR id"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "issue_id"
+        ]
+      },
+      "quality.list_open_issues": {
+        "type": "object",
+        "properties": {}
+      },
+      "tracking.check_real_ship_gate": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "MES 工单数字 id"
+          },
+          "quotation_approved": {
+            "type": "boolean",
+            "description": "报价/订单是否已人工审批；不确定时先查报价再传入"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "quotation_approved"
+        ]
+      },
+      "quotation.analyze_real": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "description": "ERP 客户编号/名称"
+          },
+          "item_code": {
+            "type": "string",
+            "description": "物料编码，如 BD-2401"
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "数量"
+          },
+          "delivery_date": {
+            "type": "string",
+            "description": "客户要求交期 YYYY-MM-DD（可选）"
+          },
+          "erp_order_id": {
+            "type": "string",
+            "description": "相关 ERP 销售订单号（可选；用户问题中提到订单时传入）"
+          }
+        },
+        "required": [
+          "customer_id",
+          "item_code",
+          "quantity"
+        ]
+      },
+      "quotation.get_real": {
+        "type": "object",
+        "properties": {
+          "quotation_id": {
+            "type": "string",
+            "description": "报价编号，如 QUO-XXXXXXXX"
+          }
+        },
+        "required": [
+          "quotation_id"
+        ]
+      },
+      "quotation.find_real_by_erp_order": {
+        "type": "object",
+        "properties": {
+          "erp_order_id": {
+            "type": "string",
+            "description": "ERP 销售订单号 SAL-ORD-YYYY-NNNNN"
+          }
+        },
+        "required": [
+          "erp_order_id"
+        ]
+      },
+      "procurement.find_real_plan_by_quotation": {
+        "type": "object",
+        "properties": {
+          "quotation_id": {
+            "type": "string",
+            "description": "报价编号 QUO-XXXXXXXX"
+          }
+        },
+        "required": [
+          "quotation_id"
+        ]
+      },
+      "quotation.assess_cost_impact": {
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "description": "采购方案编号 PROC-XXXXXXXX"
+          },
+          "option_id": {
+            "type": "string",
+            "description": "供应商选项编号，如 OPT-1"
+          }
+        },
+        "required": [
+          "plan_id",
+          "option_id"
+        ]
+      },
+      "tracking.assess_delivery_impact": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "description": "MES 工单数字 id"
+          },
+          "material_ready_date": {
+            "type": "string",
+            "description": "物料预计到货日 YYYY-MM-DD（今天 + 方案 lead_time_days）"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "material_ready_date"
+        ]
+      },
+      "procurement.inventory_overview": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "返回条数上限（默认 50，最大 200）"
+          }
+        },
+        "required": []
+      },
+      "procurement.analyze_real": {
+        "type": "object",
+        "properties": {
+          "quotation_id": {
+            "type": "string",
+            "description": "报价编号 QUO-XXXXXXXX"
+          }
+        },
+        "required": [
+          "quotation_id"
+        ]
+      },
+      "procurement.get_real_plan": {
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "description": "采购方案编号"
+          }
+        },
+        "required": [
+          "plan_id"
+        ]
+      },
+      "procurement.assess_combination": {
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "description": "采购方案编号 PROC-XXXXXXXX"
+          },
+          "option_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "组合中包含的供应商选项编号列表，如 [\"OPT-2\", \"OPT-3\"]"
+          }
+        },
+        "required": [
+          "plan_id",
+          "option_ids"
+        ]
+      }
+    },
+    "examplePolicy": "公开ACS仅保留两个已核对的无参技能文本示例，其他技能省略可选examples，避免伪造业务ID或错误JSON类型",
+    "localPersistenceDisclosure": "部分分析保存本地方案、协同事件及运行记录；不据此取得ERP/MES审批写入权限"
+  },
+  "sourceCatalog": "backend/app/services/coordinator.py",
+  "sourceCatalogSha256": "fd03d7c7101f063ae10a834db5710c3f56687532dd7db88f9229b07d29ea2f0b",
+  "connectionPlan": {
+    "type": "public-ip",
+    "publicIp": "129.204.33.138",
+    "authority": "user_selected_existing_server_public_ip",
+    "certificateSanRequestedInDraft": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    },
+    "certificateIssued": false,
+    "verifiedHttpsAipEndpoint": null,
+    "note": "IP SAN仅是注册资料中的期望证书配置；不代表已申请、签发证书或平台认可IP归属",
+    "observedByParentTask": {
+      "date": "2026-10-16",
+      "checks": [
+        {
+          "url": "http://129.204.33.138:5173/api/health",
+          "httpStatus": 200,
+          "response": {
+            "status": "ok",
+            "database": "connected"
+          }
+        },
+        {
+          "url": "http://129.204.33.138:9000/openapi.json",
+          "result": "RemoteDisconnected，没有HTTP响应"
+        },
+        {
+          "url": "http://129.204.33.138:9000/aip/quotation/health",
+          "result": "RemoteDisconnected，没有HTTP响应"
+        }
+      ],
+      "conclusion": "应用健康检查可达；未证明公开AIP或HTTPS/mTLS可用，未据连接中断猜测原因；本脚本不发起网络检查"
+    }
+  },
+  "domain": {
+    "value": "bgcloud.top",
+    "authority": "user_provided",
+    "selectedForConnection": false,
+    "isVerifiedServiceEndpoint": false,
+    "observedByParentTask": {
+      "date": "2026-10-16",
+      "httpObservation": "http://bgcloud.top:5173/ 跳转至腾讯云网站接入备案拦截页",
+      "httpsObservation": "https://bgcloud.top/ 连接失败",
+      "conclusion": "当前不能作为已验证可用的RPC入口；本脚本未发起网络复测"
+    }
+  },
+  "provider": {
+    "publicationBasis": "项目团队",
+    "organization": "广航海燕队",
+    "organizationConfirmed": true,
+    "organizationAuthority": "user_provided_team_name_not_platform_verified",
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com",
+    "contactConfirmed": true,
+    "contactAuthority": "user_provided_public_registration_contact_not_platform_verified",
+    "omittedUnconfirmedFields": [
+      "countryCode",
+      "department",
+      "url",
+      "license",
+      "domainRegistrations"
+    ],
+    "note": "官方AgentProvider各子字段未列为required；不把联系人、邮箱、官网、备案全部设为草稿前置条件，也不编造值"
+  },
+  "platformAssignedFields": {
+    "aic": "首次注册时由平台分配；空值不作为首次注册的前置阻塞",
+    "active": "草稿固定false，不代表平台注册状态",
+    "lastModifiedTime": "本地生成时间，不是平台注册服务回执时间"
+  },
+  "drafts": [
+    {
+      "file": "01-leader.acs.json",
+      "role": "leader",
+      "readiness": "NOT_READY",
+      "skillCount": 0,
+      "verifiedPublicEndpoint": null,
+      "webAppUrl": "http://129.204.33.138:5173/",
+      "gaps": [
+        "标准AIP Leader总入口尚未实现，未编造技能ID",
+        "已选择公网IP方案；实际HTTPS端口与AIP端点尚未部署验证，不从网页端口推定RPC地址",
+        "正式mTLS端点、证书部署及AIC身份绑定尚待实施和验证",
+        "需验证调用方与任务所有权隔离，不可直接依赖当前共享内存任务字典",
+        "普通自然语言调用与StructuredDataItem技能选择适配尚待补齐；当前只记录技能ID|JSON文本约定",
+        "提供方团队、联系人和邮箱已由用户提供；平台认证及其他审核材料按实际要求核对",
+        "尚未完成梧桐平台注册、审批回执和平台到服务的调用验证"
+      ]
+    },
+    {
+      "file": "02-quotation.acs.json",
+      "role": "quotation",
+      "readiness": "NOT_READY",
+      "skillCount": 4,
+      "verifiedPublicEndpoint": null,
+      "webAppUrl": "http://129.204.33.138:5173/",
+      "gaps": [
+        "已选择公网IP方案；实际HTTPS端口与AIP端点尚未部署验证，不从网页端口推定RPC地址",
+        "正式mTLS端点、证书部署及AIC身份绑定尚待实施和验证",
+        "需验证调用方与任务所有权隔离，不可直接依赖当前共享内存任务字典",
+        "普通自然语言调用与StructuredDataItem技能选择适配尚待补齐；当前只记录技能ID|JSON文本约定",
+        "提供方团队、联系人和邮箱已由用户提供；平台认证及其他审核材料按实际要求核对",
+        "尚未完成梧桐平台注册、审批回执和平台到服务的调用验证"
+      ]
+    },
+    {
+      "file": "03-procurement.acs.json",
+      "role": "procurement",
+      "readiness": "NOT_READY",
+      "skillCount": 5,
+      "verifiedPublicEndpoint": null,
+      "webAppUrl": "http://129.204.33.138:5173/",
+      "gaps": [
+        "已选择公网IP方案；实际HTTPS端口与AIP端点尚未部署验证，不从网页端口推定RPC地址",
+        "正式mTLS端点、证书部署及AIC身份绑定尚待实施和验证",
+        "需验证调用方与任务所有权隔离，不可直接依赖当前共享内存任务字典",
+        "普通自然语言调用与StructuredDataItem技能选择适配尚待补齐；当前只记录技能ID|JSON文本约定",
+        "提供方团队、联系人和邮箱已由用户提供；平台认证及其他审核材料按实际要求核对",
+        "尚未完成梧桐平台注册、审批回执和平台到服务的调用验证"
+      ]
+    },
+    {
+      "file": "04-tracking.acs.json",
+      "role": "tracking",
+      "readiness": "NOT_READY",
+      "skillCount": 5,
+      "verifiedPublicEndpoint": null,
+      "webAppUrl": "http://129.204.33.138:5173/",
+      "gaps": [
+        "已选择公网IP方案；实际HTTPS端口与AIP端点尚未部署验证，不从网页端口推定RPC地址",
+        "正式mTLS端点、证书部署及AIC身份绑定尚待实施和验证",
+        "需验证调用方与任务所有权隔离，不可直接依赖当前共享内存任务字典",
+        "普通自然语言调用与StructuredDataItem技能选择适配尚待补齐；当前只记录技能ID|JSON文本约定",
+        "提供方团队、联系人和邮箱已由用户提供；平台认证及其他审核材料按实际要求核对",
+        "尚未完成梧桐平台注册、审批回执和平台到服务的调用验证"
+      ]
+    },
+    {
+      "file": "05-quality-document.acs.json",
+      "role": "quality-document",
+      "readiness": "NOT_READY",
+      "skillCount": 10,
+      "verifiedPublicEndpoint": null,
+      "webAppUrl": "http://129.204.33.138:5173/",
+      "gaps": [
+        "已选择公网IP方案；实际HTTPS端口与AIP端点尚未部署验证，不从网页端口推定RPC地址",
+        "正式mTLS端点、证书部署及AIC身份绑定尚待实施和验证",
+        "需验证调用方与任务所有权隔离，不可直接依赖当前共享内存任务字典",
+        "普通自然语言调用与StructuredDataItem技能选择适配尚待补齐；当前只记录技能ID|JSON文本约定",
+        "提供方团队、联系人和邮箱已由用户提供；平台认证及其他审核材料按实际要求核对",
+        "尚未完成梧桐平台注册、审批回执和平台到服务的调用验证"
+      ]
+    }
+  ],
+  "localContractValidation": {
+    "status": "PASSED",
+    "checks": [
+      "严格JSON解析与回读",
+      "四岗技能ID集合与24条当前声明逐项一致且无重复",
+      "全部目录项仍声明read_only=true和requires_approval=false",
+      "空AIC、inactive、空端点、空安全方案",
+      "webAppUrl为已实测HTTP200并在浏览器显示的真实项目入口",
+      "provider仅包含用户确认的团队、联系人和邮箱，不伪造平台认证",
+      "仅申请已选择公网IP的精确SAN，不宣称证书已签发",
+      "只声明text/plain输入和application/json输出",
+      "仅保留两个已核对的无参文本示例，不含虚构业务ID或占位值",
+      "公开ACS不含内部准备状态、待办或entityMeta；持久化及输入契约说明保存在内部清单"
+    ]
+  },
+  "schemaValidation": {
+    "schema": "acps-sdk-src/registry-server/app/agent/acsSchema.json",
+    "schemaSha256": "2451b556aa764c6e9fa8fead87005292c46f2f9cf1b4e6877188a9e739fb1397",
+    "dialect": "https://json-schema.org/draft/2020-12/schema",
+    "status": "PASSED",
+    "note": "五份完整Schema及格式校验通过，均填写真实已观测网页入口。线上自动准入规则未公开，本地未复现完整自动审核，也未重新提交。",
+    "validator": "jsonschema.Draft202012Validator",
+    "validatorVersion": "4.26.0",
+    "formatCheckerEnabled": true,
+    "fullJsonSchemaValidationPerformed": true,
+    "sdkModelCoversCertificate": false,
+    "certificateCoveredByFullJsonSchema": true,
+    "knownEntryPresenceRequirementChecked": true,
+    "onlineAdmissionReproduced": false,
+    "files": [
+      {
+        "file": "01-leader.acs.json",
+        "fullJsonSchemaStatus": "PASSED",
+        "knownEntryPresenceRequirementStatus": "PASSED",
+        "knownWebAppUrlStatus": "MATCHES_HTTP_AND_BROWSER_OBSERVATION",
+        "sdkModelStatus": "PASSED_EXCLUDING_CERTIFICATE",
+        "sha256": "9a92fa264971bd3e0b8a24bdf730ce02931ef959bfe46c1f5797a483514534c2"
+      },
+      {
+        "file": "02-quotation.acs.json",
+        "fullJsonSchemaStatus": "PASSED",
+        "knownEntryPresenceRequirementStatus": "PASSED",
+        "knownWebAppUrlStatus": "MATCHES_HTTP_AND_BROWSER_OBSERVATION",
+        "sdkModelStatus": "PASSED_EXCLUDING_CERTIFICATE",
+        "sha256": "81ee66915ce88b78c3273836110f699ccdba83b73bdffefe26281248010fd4b6"
+      },
+      {
+        "file": "03-procurement.acs.json",
+        "fullJsonSchemaStatus": "PASSED",
+        "knownEntryPresenceRequirementStatus": "PASSED",
+        "knownWebAppUrlStatus": "MATCHES_HTTP_AND_BROWSER_OBSERVATION",
+        "sdkModelStatus": "PASSED_EXCLUDING_CERTIFICATE",
+        "sha256": "1ee058c649307aeb325d0937121f5b22768e919e82ebde3d6a77099327990c46"
+      },
+      {
+        "file": "04-tracking.acs.json",
+        "fullJsonSchemaStatus": "PASSED",
+        "knownEntryPresenceRequirementStatus": "PASSED",
+        "knownWebAppUrlStatus": "MATCHES_HTTP_AND_BROWSER_OBSERVATION",
+        "sdkModelStatus": "PASSED_EXCLUDING_CERTIFICATE",
+        "sha256": "ca3e40ab1e8495f4d24a04abd3efe58fa6b0250459b513e0f6ba38162eac5ab7"
+      },
+      {
+        "file": "05-quality-document.acs.json",
+        "fullJsonSchemaStatus": "PASSED",
+        "knownEntryPresenceRequirementStatus": "PASSED",
+        "knownWebAppUrlStatus": "MATCHES_HTTP_AND_BROWSER_OBSERVATION",
+        "sdkModelStatus": "PASSED_EXCLUDING_CERTIFICATE",
+        "sha256": "d6bad80b38acc9ff521993e92a2f36492276c147ba3ee14e77be2bc14a245cee"
+      }
+    ]
+  },
+  "onlineValidation": {
+    "performed": false,
+    "registrationSubmitted": true,
+    "registrationSubmissionSource": "user_screenshot_of_prior_leader_application",
+    "latestObservedReviewState": "REJECTED",
+    "currentFilesSubmitted": false,
+    "resubmissionPerformed": false,
+    "certificateRequested": false,
+    "platformInvocationVerified": false
+  },
+  "sensitiveDataHandling": {
+    "environmentFilesRead": false,
+    "databasesRead": false,
+    "credentialFilesRead": false,
+    "privateValuesIncluded": false,
+    "note": "仅从仓库代码声明与人工已确认公开信息生成；没有密码、Token、Cookie、密钥或数据库连接串字段"
+  }
+}

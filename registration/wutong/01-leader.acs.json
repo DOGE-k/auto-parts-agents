@@ -1,0 +1,36 @@
+{
+  "aic": "",
+  "active": false,
+  "lastModifiedTime": "2026-10-16T15:54:34+08:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件协同智能体",
+  "description": "面向汽车零部件工厂的跨岗位业务协同，接收业务问题，协调报价、采购、生产跟单和质量文档四个岗位，汇总订单、物料、进度与质量信息，提供处理建议及相关依据。",
+  "version": "0.1.0",
+  "webAppUrl": "http://129.204.33.138:5173/",
+  "provider": {
+    "organization": "广航海燕队",
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com"
+  },
+  "securitySchemes": {},
+  "endPoints": [],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [],
+  "certificate": {
+    "altNames": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    }
+  }
+}
