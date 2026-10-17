@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from app.aip.aip_agent_service import AipAgentService
-from app.services import real_order
+from app.services import order_linkage, real_order
 from app.tools.registry import tool_registry
 from app.domain.models import AgentType
 
@@ -29,6 +29,16 @@ def create_quotation_aip_service(aic: str = "local-quotation-001") -> AipAgentSe
     )
 
     # ===== 真实业务技能（数据来自真实 ERPNext/OpenMES，evidence 可追溯） =====
+
+    async def real_list_sales_orders(inputs: dict) -> dict:
+        """只读列出 ERP 销售订单，供协同智能体选择具体订单。"""
+        return await order_linkage.list_real_sales_orders(limit=int(inputs.get("limit", 50)))
+
+    service.register_skill(
+        skill_id="quotation.list_real_sales_orders",
+        skill_name="列出 ERP 销售订单",
+        handler=real_list_sales_orders,
+    )
 
     async def real_analyze(inputs: dict) -> dict:
         """真实报价分析：读取真实 ERP 客户/物料/价格/BOM/库存与 MES 排程。"""

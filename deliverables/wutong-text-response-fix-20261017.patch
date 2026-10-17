@@ -1,0 +1,38 @@
+diff --git a/backend/app/aip/aip_agent_service.py b/backend/app/aip/aip_agent_service.py
+index a27b63d..bd08225 100644
+--- a/backend/app/aip/aip_agent_service.py
++++ b/backend/app/aip/aip_agent_service.py
+@@ -256,7 +256,9 @@ class AipAgentService(CommandHandlers):
+     async def _execute_skill(self, task_id: str, skill_id: str, inputs: dict,
+                              command: TaskCommand) -> None:
+         try:
+-            if self._natural_language_handler and skill_id == self._natural_language_skill_id:
++            natural_language = (self._natural_language_handler is not None
++                                and skill_id == self._natural_language_skill_id)
++            if natural_language:
+                 result_data = await self._natural_language_handler(inputs["question"], command)
+                 skill_name = self._natural_language_skill_name
+             else:
+@@ -264,12 +266,21 @@ class AipAgentService(CommandHandlers):
+                 skill_name = self._skill_names.get(skill_id, skill_id)
+             if not isinstance(result_data, dict):
+                 raise ValueError("技能结果必须为 JSON 对象")
++            if natural_language:
++                answer = result_data.get("answer")
++                if not isinstance(answer, str) or not answer.strip():
++                    raise ValueError("智能问答未生成文字答复")
++                display_text = answer.strip()
++            else:
++                display_text = json.dumps(result_data, ensure_ascii=False, indent=2,
++                                          default=str)
+             task = self._tasks[task_id]
+             if task.status.state in _TERMINAL_STATES:
+                 return
+             task.products = [Product(id=f"prod-{task_id}", name=skill_name,
+                 description=f"技能 {skill_id} 的执行结果", dataItems=[
+-                    StructuredDataItem(data=result_data, metadata={"skill_id": skill_id})])]
++                    StructuredDataItem(data=result_data, metadata={"skill_id": skill_id}),
++                    TextDataItem(text=display_text)])]
+             self._update_status(task_id, TaskState.AwaitingCompletion)
+         except asyncio.CancelledError:
+             if self._tasks[task_id].status.state not in _TERMINAL_STATES:

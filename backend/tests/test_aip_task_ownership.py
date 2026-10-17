@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 import uuid
 
@@ -63,6 +64,9 @@ class AipTaskOwnershipTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(item.model_dump(exclude_none=True), {
                 "type": "data", "data": {"echo": {"value": 3}},
                 "metadata": {"skill_id": "echo"}})
+            text_item = fetched.result.products[0].dataItems[1]
+            self.assertEqual(text_item.type, "text")
+            self.assertEqual(json.loads(text_item.text), {"echo": {"value": 3}})
             self.assertEqual(initial.result.status.state, TaskState.Working)
             self.assertIsNone(TaskManager.get_task(task_id))
             complete = await self.service.dispatch_rpc(rpc(task_id, "complete"))
@@ -175,6 +179,38 @@ class AipTaskOwnershipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed, [
             ("查询工单", LEADER, "session-a", "group-a"),
             ("查询报价", LEADER, "session-a", "group-a")])
+        fetched = await self.service.dispatch_rpc(rpc("nl", "get"))
+        self.assertEqual(fetched.result.products[0].dataItems[0].data,
+                         {"answer": "查询工单"})
+        self.assertEqual(fetched.result.products[0].dataItems[1].text, "查询工单")
+
+    async def test_empty_natural_language_answer_does_not_claim_success(self):
+        async def no_answer(_text, _command):
+            return {"answer": "  "}
+
+        self.service.set_natural_language_handler(no_answer, skill_id="leader.ask")
+        await self.service.dispatch_rpc(rpc("empty-answer", data=[{
+            "type": "text", "text": "查询 PPAP 任务"}]))
+        await self.drain()
+        fetched = await self.service.dispatch_rpc(rpc("empty-answer", "get"))
+        self.assertEqual(fetched.result.status.state, TaskState.Failed)
+        self.assertIsNone(fetched.result.products)
+
+    async def test_failure_reason_is_visible_and_secrets_are_redacted(self):
+        async def fails(_inputs):
+            raise RuntimeError("DEEPSEEK_API_KEY=sk-secretvalue123 不可用")
+
+        self.service.register_skill("tracking.boom", "失败技能", fails)
+        await self.service.dispatch_rpc(rpc(
+            "boom", data=[{"type": "text", "text": "tracking.boom|{}"}]))
+        await self.drain()
+        fetched = await self.service.dispatch_rpc(rpc("boom", "get"))
+        self.assertEqual(fetched.result.status.state, TaskState.Failed)
+        text = fetched.result.status.dataItems[0].text
+        # 平台页面要能看到原因类型，否则只能靠服务器日志猜
+        self.assertIn("RuntimeError", text)
+        self.assertNotIn("sk-secretvalue123", text)
+        self.assertNotIn("DEEPSEEK_API_KEY", text)
 
     async def test_start_without_task_id_assigns_service_id(self):
         response = await self.service.dispatch_rpc(rpc(None))

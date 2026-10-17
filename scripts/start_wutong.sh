@@ -126,9 +126,12 @@ for role in ROLES:
     family = socket.AF_INET6 if ":" in settings["bindHost"] else socket.AF_INET
     probe_socket = socket.socket(family, socket.SOCK_STREAM)
     try:
+        # Match the listener's reuse policy so recently closed TCP sessions do not
+        # block an immediate restart while a live listener still fails this bind.
+        probe_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe_socket.bind((settings["bindHost"], settings["agents"][role]["port"]))
-    except OSError:
-        raise SystemExit("[失败] " + role + " 端口被占用；未停止占用进程。")
+    except OSError as error:
+        raise SystemExit("[失败] " + role + " 端口无法绑定 (" + str(error) + ")；未启动新进程。")
     finally:
         probe_socket.close()
 

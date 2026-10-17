@@ -53,6 +53,16 @@
   ],
   "skills": [
     {
+      "id": "tracking.list_real_work_orders",
+      "name": "真实list_real_work_orders",
+      "description": "只读列出 MES 当前生产工单（首批最多 100 条），返回工单编号、状态、数量、交期与来源。用户问‘现在有哪些 MES 工单’且未提供具体工单号时使用；达到 limit 时不能声称已列出全量。",
+      "version": "1.0.0",
+      "tags": ["真实数据", "AIP", "tracking"],
+      "examples": [],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
       "id": "tracking.find_real_by_no",
       "name": "真实find_real_by_no",
       "description": "按用户提供的 MES 工单编号（如 WO-2026-001）精确查询数字 work_order_id。用户给出 WO- 开头的工单编号时，必须先调用本工具完成编号到数字 ID 的转换，再把返回的 work_order_id 传给进度、质量或发运门禁工具；不得猜测数字 ID。",

@@ -244,6 +244,11 @@ class RealIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_body["tools"][0]["function"]["name"], "read_order")
         self.assertEqual(result["model"], "deepseek-flash")
 
+    def test_deepseek_rejects_non_ascii_key_without_exposing_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY 包含非 ASCII 字符") as error:
+            DeepSeekClient("中文占位密钥")
+        self.assertNotIn("中文占位密钥", str(error.exception))
+
     def test_public_status_does_not_expose_secrets(self) -> None:
         settings = IntegrationSettings(
             deepseek_base_url="https://api.deepseek.com",

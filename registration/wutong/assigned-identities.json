@@ -9,13 +9,40 @@
   "runtimeImplementedLocally": true,
   "serverDeployedByThisTask": false,
   "platformInvocationVerified": false,
+  "userReportedRuntimeStarted": true,
+  "userReportedLocalMtlsChecksPassed": [
+    "leader",
+    "quotation",
+    "procurement",
+    "tracking",
+    "quality-document"
+  ],
+  "publicTcpCheckByThisTask": {
+    "date": "2026-10-17",
+    "source": "local_windows_client_async_tcp_connect",
+    "host": "129.204.33.138",
+    "passedPorts": [
+      9443,
+      9444,
+      9445,
+      9446,
+      9447
+    ],
+    "doesNotProvePlatformInvocation": true
+  },
   "serverEnvironmentUserReported": {
     "codeCommit": "b85619d",
     "python": "3.13.16",
     "acps-sdk": "2.2.0",
     "uvicorn": "0.54.0",
     "h11": "0.16.0",
-    "candidatePortsNotInReportedListenSnapshot": [9443, 9444, 9445, 9446, 9447],
+    "candidatePortsNotInReportedListenSnapshot": [
+      9443,
+      9444,
+      9445,
+      9446,
+      9447
+    ],
     "portAvailabilityIsNotPublicReachability": true
   },
   "agents": [
@@ -144,5 +171,91 @@
       "certificateChainVerifiedByThisTask": false,
       "liveEndpointVerifiedByThisTask": false
     }
-  ]
+  ],
+  "successorLeader": {
+    "name": "汽车零部件协同智能体",
+    "version": "0.1.1",
+    "aic": "1.2.156.3088.1.BUPT.R2QTUC.JHX0M4.IYWC8Q.13RH",
+    "status": "approved_public_readback",
+    "platformAcsFile": "registration/wutong/approved/leader-v011.acs.json",
+    "platformAcsSha256": "b84ba6c4c8b7ebecc3a5a6c558fc86ab149d300cc35323bffb6e0ddf4db30009",
+    "platformAcsReadBackAt": "2026-10-17T01:02:37+08:00",
+    "runtimeStillUsesOriginalLeaderAic": false,
+    "newServerAndClientCertificatesVerified": true,
+    "runtimeLocalProbeVerifiedByUser": true,
+    "publicTcpReachabilityVerifiedByThisTask": true,
+    "platformInvocationVerified": false,
+    "platformTaskCompletedWithoutTextBody": true,
+    "userReportedNewCertificatesIssued": [
+      {
+        "usage": "serverAuth",
+        "path": "keyfiles/certs/leader-v011-server.pem",
+        "evidence": "user_screenshot_2026-10-17"
+      },
+      {
+        "usage": "clientAuth",
+        "path": "keyfiles/certs/leader-v011-client.pem",
+        "evidence": "user_screenshot_2026-10-17"
+      }
+    ]
+  },
+  "successorPartners": [
+    {
+      "role": "quotation",
+      "name": "汽车零部件报价智能体",
+      "version": "0.1.1",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.I9R43D.CONCQL.0Q3H",
+      "status": "approved_public_readback",
+      "platformAcsFile": "registration/wutong/approved/quotation-v011.acs.json",
+      "platformAcsSha256": "a853df8d4b860f5880abbc8fe9b68f505825d1adc5d2b1d1669e1b6802c9f00b",
+      "runtimeStillUsesOriginalPartnerAic": false,
+      "newServerCertificateVerified": true,
+      "platformInvocationVerified": false
+    },
+    {
+      "role": "procurement",
+      "name": "汽车零部件采购智能体",
+      "version": "0.1.1",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.13BULF.MGD8EE.16LL",
+      "status": "approved_public_readback",
+      "platformAcsFile": "registration/wutong/approved/procurement-v011.acs.json",
+      "platformAcsSha256": "22cf46e190bd5d2f6ac13d04dced963ec126850f26d28a96c0bf1489ff5f7c91",
+      "runtimeStillUsesOriginalPartnerAic": false,
+      "newServerCertificateVerified": true,
+      "platformInvocationVerified": false
+    },
+    {
+      "role": "tracking",
+      "name": "汽车零部件生产跟单智能体",
+      "version": "0.1.1",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.Q3Z3E9.W3LSHJ.0JSB",
+      "status": "approved_public_readback",
+      "platformAcsFile": "registration/wutong/approved/tracking-v011.acs.json",
+      "platformAcsSha256": "eaeaa6059349511e96f72ef31b991996b897381aee2884315fae6e6c6a033504",
+      "runtimeStillUsesOriginalPartnerAic": false,
+      "newServerCertificateVerified": true,
+      "platformInvocationVerified": false
+    },
+    {
+      "role": "quality-document",
+      "name": "汽车零部件质量文档智能体",
+      "version": "0.1.1",
+      "aic": "1.2.156.3088.1.BUPT.R2QTUC.29V5OZ.4N2I6C.0EDR",
+      "status": "approved_public_readback",
+      "platformAcsFile": "registration/wutong/approved/quality-document-v011.acs.json",
+      "platformAcsSha256": "6507db5c99f4f408b1d53bd8d6ff45ee81831465e72214e6d335d12c13410a10",
+      "runtimeStillUsesOriginalPartnerAic": false,
+      "newServerCertificateVerified": true,
+      "platformInvocationVerified": false
+    }
+  ],
+  "successorPartnersPublicReadBackAt": "2026-10-17T12:38:19+08:00",
+  "successorPartnersRuntimeCertificatesCheckedByThisTask": {
+    "date": "2026-10-17",
+    "method": "public_tls_peer_certificate_read_without_client_certificate",
+    "ports": {"9444": "quotation", "9445": "procurement", "9446": "tracking", "9447": "quality-document"},
+    "observedCnEqualsSuccessorAic": true,
+    "observedIpSan": "129.204.33.138",
+    "note": "只证明四个端口对外出示的服务器证书已是 0.1.1 新 AIC；不代表业务调用成功，也不代表平台侧 ACS 已更新"
+  }
 }

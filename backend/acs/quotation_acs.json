@@ -53,6 +53,16 @@
   ],
   "skills": [
     {
+      "id": "quotation.list_real_sales_orders",
+      "name": "真实list_real_sales_orders",
+      "description": "只读列出 ERP 当前销售订单（首批最多 100 条），返回订单号、客户、状态、金额与来源。用户问‘现在有哪些 ERP 订单’且未提供具体订单号时使用；达到 limit 时不能声称已列出全量。",
+      "version": "1.0.0",
+      "tags": ["真实数据", "AIP", "quotation"],
+      "examples": [],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
       "id": "quotation.analyze_real",
       "name": "真实analyze_real",
       "description": "对给定客户/物料/数量做真实报价分析：ERP 真实价格、BOM 成本、库存、基于 MES 排程的交期参考。问“这个件多少钱/多久能交”或需要报价与缺料分析时使用；已知 ERP 订单号时必须传入 erp_order_id（声明式上下文，供后续状态查询关联）。",

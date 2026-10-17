@@ -1,0 +1,76 @@
+{
+  "aic": "",
+  "active": false,
+  "lastModifiedTime": "2026-10-17T00:38:13+08:00",
+  "protocolVersion": "02.02",
+  "name": "汽车零部件协同智能体",
+  "description": "面向汽车零部件工厂的跨岗位业务协同，接收业务问题，协调报价、采购、生产跟单和质量文档四个岗位，汇总订单、物料、进度与质量信息，提供处理建议及相关依据。",
+  "version": "0.1.1",
+  "webAppUrl": "http://129.204.33.138:5173/",
+  "provider": {
+    "organization": "广航海燕队",
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com"
+  },
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS"
+    }
+  },
+  "endPoints": [
+    {
+      "url": "https://129.204.33.138:9443/aip/leader/rpc",
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "mtls": []
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "leader.ask",
+      "name": "汽车零部件协同问答",
+      "description": "接收业务问题，按需调用报价、采购、生产跟单与质量文档岗位的真实只读技能，汇总结果和调用依据。",
+      "version": "0.1.1",
+      "tags": [
+        "汽车零部件",
+        "业务协同",
+        "质量",
+        "采购",
+        "生产"
+      ],
+      "examples": [
+        "查询当前已有 PPAP 任务及其编制状态",
+        "按订单号查询生产进度与质量风险"
+      ],
+      "inputModes": [
+        "text/plain",
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ],
+  "certificate": {
+    "altNames": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    }
+  }
+}

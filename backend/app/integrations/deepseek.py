@@ -18,14 +18,17 @@ class DeepSeekClient:
         timeout_seconds: float = 45.0,
         client=None,
     ) -> None:
-        if not api_key.strip():
+        normalized_key = api_key.strip()
+        if not normalized_key:
             raise IntegrationNotConfigured("DeepSeek", ["DEEPSEEK_API_KEY"])
+        if not normalized_key.isascii():
+            raise ValueError("DEEPSEEK_API_KEY 包含非 ASCII 字符；请检查服务器上的密钥配置")
         if not model.strip():
             raise ValueError("DeepSeek 模型名称不能为空")
         self.model = model.strip()
         self._http = JsonHttpClient(
             base_url,
-            headers={"Authorization": f"Bearer {api_key.strip()}", "Accept": "application/json"},
+            headers={"Authorization": f"Bearer {normalized_key}", "Accept": "application/json"},
             timeout_seconds=timeout_seconds,
             client=client,
         )

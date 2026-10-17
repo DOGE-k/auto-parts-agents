@@ -1,0 +1,224 @@
+{
+  "aic": "",
+  "name": "汽车零部件质量文档智能体",
+  "active": false,
+  "skills": [
+    {
+      "id": "quality.ppap_find_tasks",
+      "name": "PPAP任务检索",
+      "tags": [
+        "汽车零部件",
+        "PPAP任务检索",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "按客户、零件号、负责人及状态检索已有PPAP任务；不新建任务，须按返回的数据模式区分正式与测试任务。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_applicability",
+      "name": "PPAP条目适用性查询",
+      "tags": [
+        "汽车零部件",
+        "PPAP条目适用性查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "查询各条目的提交、保留、按需或不适用要求及确认依据；不代替客户要求确认。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_status",
+      "name": "PPAP编制与审核状态查询",
+      "tags": [
+        "汽车零部件",
+        "PPAP编制与审核状态查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "查询任务、条目编制、内部审核、客户处理及覆盖度等状态；不把草稿或内部批准视为客户接受。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_explain_missing",
+      "name": "PPAP缺项与冲突解释",
+      "tags": [
+        "汽车零部件",
+        "PPAP缺项与冲突解释",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "根据现有输入和证据解释缺项、冲突及责任岗位；不补造资料，不保存检查结果或修改任务。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_evidence_plan",
+      "name": "PPAP取证计划查询",
+      "tags": [
+        "汽车零部件",
+        "PPAP取证计划查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "查询任务可用来源、已确认业务关联和待补人工输入；仅返回计划，不执行远端取证或新增证据。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.ppap_get_versions",
+      "name": "PPAP版本查询",
+      "tags": [
+        "汽车零部件",
+        "PPAP版本查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "查询产物版本、输入快照、内容哈希及冻结、归档状态；不生成、批准或变更版本。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.get_real_package",
+      "name": "工单质量资料与门禁查询",
+      "tags": [
+        "汽车零部件",
+        "工单质量资料与门禁查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "汇集已有质量问题、工程文档和检验记录，检查资料及问题门禁；不生成检测数据或签发质量放行。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.assess_quality_impact",
+      "name": "质量异常影响分析",
+      "tags": [
+        "汽车零部件",
+        "质量异常影响分析",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "交叉分析质量问题、批次、门禁与生产进度，解释交付影响及处理方向；不执行处置、关闭或放行。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.check_issue_closure",
+      "name": "NCR关闭前置检查",
+      "tags": [
+        "汽车零部件",
+        "NCR关闭前置检查",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "检查指定工单的NCR状态、处置、根因、遏制和措施验证条件；只报告前置条件，不关闭问题。",
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "quality.list_open_issues",
+      "name": "未关闭质量问题查询",
+      "tags": [
+        "汽车零部件",
+        "未关闭质量问题查询",
+        "查询与分析"
+      ],
+      "version": "1.0.0",
+      "examples": [
+        "quality.list_open_issues|{}"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "description": "查询跨工单的未关闭质量问题及严重度、状态和已报告时长；不改变问题状态。",
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ],
+  "version": "0.1.1",
+  "provider": {
+    "name": "柯树鑫",
+    "email": "2698322689@qq.com",
+    "organization": "广航海燕队"
+  },
+  "endPoints": [
+    {
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "mtls": []
+        }
+      ],
+      "url": "https://129.204.33.138:9447/aip/quality-document/rpc"
+    }
+  ],
+  "webAppUrl": "http://129.204.33.138:5173/",
+  "certificate": {
+    "altNames": {
+      "ip": [
+        "129.204.33.138"
+      ]
+    }
+  },
+  "description": "面向汽车零部件工厂的质量资料管理与PPAP业务，提供PPAP任务检索、条目适用性、编制审核状态、缺项解释、取证计划和版本查询；汇集工单质量资料，分析质量异常影响，并检查NCR关闭前置条件。PPAP编制与审核通过项目任务流程处理。",
+  "capabilities": {
+    "streaming": false,
+    "messageQueue": [],
+    "notification": false
+  },
+  "protocolVersion": "02.02",
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS"
+    }
+  },
+  "lastModifiedTime": "2026-10-17T01:33:23+08:00",
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ]
+}

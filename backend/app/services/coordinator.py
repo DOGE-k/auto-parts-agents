@@ -102,6 +102,19 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
     {
         "agent_type": "tracking",
         "aip_agent": "tracking",
+        "skill_id": "tracking.list_real_work_orders",
+        "read_only": True, "requires_approval": False,
+        "description": (
+            "只读列出 MES 当前生产工单（首批最多 100 条），返回工单编号、状态、数量、交期与来源。"
+            "用户问‘现在有哪些 MES 工单’且未提供具体工单号时使用；达到 limit 时不能声称已列出全量。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100,
+                      "description": "最多返回条数，默认 50"},
+        }},
+    },
+    {
+        "agent_type": "tracking", "aip_agent": "tracking",
         "skill_id": "tracking.find_real_by_no",
         "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
         "requires_approval": False,
@@ -261,6 +274,19 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
     {
         "agent_type": "quotation",
         "aip_agent": "quotation",
+        "skill_id": "quotation.list_real_sales_orders",
+        "read_only": True, "requires_approval": False,
+        "description": (
+            "只读列出 ERP 当前销售订单（首批最多 100 条），返回订单号、客户、状态、金额与来源。"
+            "用户问‘现在有哪些 ERP 订单’且未提供具体订单号时使用；达到 limit 时不能声称已列出全量。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100,
+                      "description": "最多返回条数，默认 50"},
+        }},
+    },
+    {
+        "agent_type": "quotation", "aip_agent": "quotation",
         "skill_id": "quotation.analyze_real",
         "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
         "requires_approval": False,
@@ -474,6 +500,7 @@ SYSTEM_PROMPT = """你是汽车零部件工厂的协调智能体。用户会用�
 3. 一次调用拿到的信息不够时，继续调用其他工具补齐；与问题无关的工具不要调用。
 4. 拿到足够信息后，用中文给出结论式回答：先直接回答用户的问题，再列出依据（真实记录编号、来源系统、时间）。
 5. 数据缺失或未建立关联时，明确说缺什么、需要谁补录，不要给猜测性答案。用户给出 WO- 开头的工单编号时，先调用 tracking.find_real_by_no 换成数字 work_order_id，再调用其他工单工具；严禁把编号中的数字当成数据库 ID。
+   用户问当前有哪些 ERP 销售订单或 MES 生产工单且没有提供订单号时，分别调用 quotation.list_real_sales_orders、tracking.list_real_work_orders；结果达到 limit 时说明可能还有后续记录，不称为全量。
 6. 你只有只读查询能力；不要承诺任何写入操作（创建订单/审批/发运等），如用户要求，告知需在真实业务页面走审批流程。
 7. 回答保持简洁，用短段落或列表。
 

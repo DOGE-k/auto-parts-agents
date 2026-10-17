@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.integrations.errors import IntegrationError
 from app.services import order_linkage
@@ -84,6 +84,30 @@ class _FakeMES:
 
 
 class OrderLinkageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_order_lists_keep_authoritative_sources_and_limit_boundary(self) -> None:
+        erp = _FakeERP(None)
+        erp.list_sales_orders = AsyncMock(return_value=[_make_erp_order()])
+        mes = _FakeMES([_make_wo("WO-2026-001", "BD-2401")])
+        with patch.object(order_linkage, "get_erp_adapter", return_value=erp), \
+             patch.object(order_linkage, "get_mes_adapter", return_value=mes), \
+             patch.object(order_linkage, "get_adapter_mode", return_value="real"):
+            sales = await order_linkage.list_real_sales_orders(limit=1)
+            works = await order_linkage.list_real_work_orders(limit=1)
+
+        erp.list_sales_orders.assert_awaited_once_with(limit=1)
+        self.assertEqual(sales["authority"], "ERPNext")
+        self.assertEqual(works["authority"], "OpenMES")
+        self.assertEqual(sales["orders"][0]["order_id"], "SAL-ORD-2026-00001")
+        self.assertEqual(works["orders"][0]["work_order_no"], "WO-2026-001")
+        self.assertTrue(sales["possibly_truncated"])
+        self.assertTrue(works["possibly_truncated"])
+
+    async def test_mes_list_read_error_is_not_reported_as_empty(self) -> None:
+        mes = _FakeMES([], error=IntegrationError("OpenMES read failed"))
+        with patch.object(order_linkage, "get_mes_adapter", return_value=mes):
+            with self.assertRaises(IntegrationError):
+                await order_linkage.list_real_work_orders()
+
     async def test_linked_when_customer_order_no_matches(self) -> None:
         erp = _FakeERP(_make_erp_order())
         mes = _FakeMES([_make_wo("WO-2026-001", "BD-2401", customer_order_no="SAL-ORD-2026-00001")])

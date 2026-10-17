@@ -45,13 +45,34 @@ def _date_part(value: str) -> str:
 
 async def list_real_sales_orders(limit: int = 50) -> dict[str, Any]:
     """列出真实 ERP 销售订单（供用户选择）。连接失败时异常直接向上抛。"""
+    if not 1 <= limit <= 100:
+        raise ValueError("limit 必须在 1 到 100 之间")
     erp = get_erp_adapter()
     orders = await erp.list_sales_orders(limit=limit)
     return {
         "orders": orders,
         "count": len(orders),
+        "limit": limit,
+        "possibly_truncated": len(orders) >= limit,
         "adapter_mode": get_adapter_mode(),
         "authority": orders[0].get("authority", "") if orders else erp.authority,
+        "data_source": orders[0].get("data_source", "") if orders else "",
+    }
+
+
+async def list_real_work_orders(limit: int = 50) -> dict[str, Any]:
+    """列出 MES 首批生产工单；读取失败不得伪装为空列表。"""
+    if not 1 <= limit <= 100:
+        raise ValueError("limit 必须在 1 到 100 之间")
+    mes = get_mes_adapter()
+    orders = await mes.get_work_orders_strict({"limit": limit})
+    return {
+        "orders": orders,
+        "count": len(orders),
+        "limit": limit,
+        "possibly_truncated": len(orders) >= limit,
+        "adapter_mode": get_adapter_mode(),
+        "authority": orders[0].get("authority", "") if orders else getattr(mes, "authority", ""),
         "data_source": orders[0].get("data_source", "") if orders else "",
     }
 

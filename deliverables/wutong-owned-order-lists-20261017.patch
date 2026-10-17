@@ -1,0 +1,246 @@
+diff --git a/backend/acs/quotation_acs.json b/backend/acs/quotation_acs.json
+index af1f37a..175796d 100644
+--- a/backend/acs/quotation_acs.json
++++ b/backend/acs/quotation_acs.json
+@@ -52,6 +52,16 @@
+     "text/markdown"
+   ],
+   "skills": [
++    {
++      "id": "quotation.list_real_sales_orders",
++      "name": "真实list_real_sales_orders",
++      "description": "只读列出 ERP 当前销售订单（首批最多 100 条），返回订单号、客户、状态、金额与来源。用户问‘现在有哪些 ERP 订单’且未提供具体订单号时使用；达到 limit 时不能声称已列出全量。",
++      "version": "1.0.0",
++      "tags": ["真实数据", "AIP", "quotation"],
++      "examples": [],
++      "inputModes": ["application/json"],
++      "outputModes": ["application/json"]
++    },
+     {
+       "id": "quotation.analyze_real",
+       "name": "真实analyze_real",
+@@ -125,4 +135,4 @@
+       ]
+     }
+   ]
+-}
+\ No newline at end of file
++}
+diff --git a/backend/acs/tracking_acs.json b/backend/acs/tracking_acs.json
+index d6e2776..b07b207 100644
+--- a/backend/acs/tracking_acs.json
++++ b/backend/acs/tracking_acs.json
+@@ -52,6 +52,16 @@
+     "text/markdown"
+   ],
+   "skills": [
++    {
++      "id": "tracking.list_real_work_orders",
++      "name": "真实list_real_work_orders",
++      "description": "只读列出 MES 当前生产工单（首批最多 100 条），返回工单编号、状态、数量、交期与来源。用户问‘现在有哪些 MES 工单’且未提供具体工单号时使用；达到 limit 时不能声称已列出全量。",
++      "version": "1.0.0",
++      "tags": ["真实数据", "AIP", "tracking"],
++      "examples": [],
++      "inputModes": ["application/json"],
++      "outputModes": ["application/json"]
++    },
+     {
+       "id": "tracking.find_real_by_no",
+       "name": "真实find_real_by_no",
+@@ -143,4 +153,4 @@
+       ]
+     }
+   ]
+-}
+\ No newline at end of file
++}
+diff --git a/backend/app/aip/agents/quotation_aip.py b/backend/app/aip/agents/quotation_aip.py
+index 5ee99d3..f60c881 100644
+--- a/backend/app/aip/agents/quotation_aip.py
++++ b/backend/app/aip/agents/quotation_aip.py
+@@ -10,7 +10,7 @@ from __future__ import annotations
+ import logging
+ 
+ from app.aip.aip_agent_service import AipAgentService
+-from app.services import real_order
++from app.services import order_linkage, real_order
+ from app.tools.registry import tool_registry
+ from app.domain.models import AgentType
+ 
+@@ -30,6 +30,16 @@ def create_quotation_aip_service(aic: str = "local-quotation-001") -> AipAgentSe
+ 
+     # ===== 真实业务技能（数据来自真实 ERPNext/OpenMES，evidence 可追溯） =====
+ 
++    async def real_list_sales_orders(inputs: dict) -> dict:
++        """只读列出 ERP 销售订单，供协同智能体选择具体订单。"""
++        return await order_linkage.list_real_sales_orders(limit=int(inputs.get("limit", 50)))
++
++    service.register_skill(
++        skill_id="quotation.list_real_sales_orders",
++        skill_name="列出 ERP 销售订单",
++        handler=real_list_sales_orders,
++    )
++
+     async def real_analyze(inputs: dict) -> dict:
+         """真实报价分析：读取真实 ERP 客户/物料/价格/BOM/库存与 MES 排程。"""
+         return await real_order.analyze_quotation(
+diff --git a/backend/app/aip/agents/tracking_aip.py b/backend/app/aip/agents/tracking_aip.py
+index 89accf4..2069dd9 100644
+--- a/backend/app/aip/agents/tracking_aip.py
++++ b/backend/app/aip/agents/tracking_aip.py
+@@ -26,6 +26,16 @@ def create_tracking_aip_service(aic: str = "local-tracking-001") -> AipAgentServ
+ 
+     # ===== 真实业务技能 =====
+ 
++    async def real_list_work_orders(inputs: dict) -> dict:
++        """只读列出 MES 生产工单，供协同智能体选择具体工单。"""
++        return await order_linkage.list_real_work_orders(limit=int(inputs.get("limit", 50)))
++
++    service.register_skill(
++        skill_id="tracking.list_real_work_orders",
++        skill_name="列出 MES 生产工单",
++        handler=real_list_work_orders,
++    )
++
+     async def real_track(inputs: dict) -> dict:
+         """真实生产跟单：读取真实 MES 工单进度与风险。"""
+         return await real_order.track_order(str(inputs["work_order_id"]))
+diff --git a/backend/app/services/coordinator.py b/backend/app/services/coordinator.py
+index b9596ed..134df9d 100644
+--- a/backend/app/services/coordinator.py
++++ b/backend/app/services/coordinator.py
+@@ -102,6 +102,19 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
+     {
+         "agent_type": "tracking",
+         "aip_agent": "tracking",
++        "skill_id": "tracking.list_real_work_orders",
++        "read_only": True, "requires_approval": False,
++        "description": (
++            "只读列出 MES 当前生产工单（首批最多 100 条），返回工单编号、状态、数量、交期与来源。"
++            "用户问‘现在有哪些 MES 工单’且未提供具体工单号时使用；达到 limit 时不能声称已列出全量。"
++        ),
++        "parameters": {"type": "object", "properties": {
++            "limit": {"type": "integer", "minimum": 1, "maximum": 100,
++                      "description": "最多返回条数，默认 50"},
++        }},
++    },
++    {
++        "agent_type": "tracking", "aip_agent": "tracking",
+         "skill_id": "tracking.find_real_by_no",
+         "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+         "requires_approval": False,
+@@ -261,6 +274,19 @@ REAL_SKILL_TOOLS: list[dict[str, Any]] = [
+     {
+         "agent_type": "quotation",
+         "aip_agent": "quotation",
++        "skill_id": "quotation.list_real_sales_orders",
++        "read_only": True, "requires_approval": False,
++        "description": (
++            "只读列出 ERP 当前销售订单（首批最多 100 条），返回订单号、客户、状态、金额与来源。"
++            "用户问‘现在有哪些 ERP 订单’且未提供具体订单号时使用；达到 limit 时不能声称已列出全量。"
++        ),
++        "parameters": {"type": "object", "properties": {
++            "limit": {"type": "integer", "minimum": 1, "maximum": 100,
++                      "description": "最多返回条数，默认 50"},
++        }},
++    },
++    {
++        "agent_type": "quotation", "aip_agent": "quotation",
+         "skill_id": "quotation.analyze_real",
+         "read_only": True,  # 目录强制显式声明：协调者通道只含免审批只读技能
+         "requires_approval": False,
+@@ -474,6 +500,7 @@ SYSTEM_PROMPT = """你是汽车零部件工厂的协调智能体。用户会用
+ 3. 一次调用拿到的信息不够时，继续调用其他工具补齐；与问题无关的工具不要调用。
+ 4. 拿到足够信息后，用中文给出结论式回答：先直接回答用户的问题，再列出依据（真实记录编号、来源系统、时间）。
+ 5. 数据缺失或未建立关联时，明确说缺什么、需要谁补录，不要给猜测性答案。用户给出 WO- 开头的工单编号时，先调用 tracking.find_real_by_no 换成数字 work_order_id，再调用其他工单工具；严禁把编号中的数字当成数据库 ID。
++   用户问当前有哪些 ERP 销售订单或 MES 生产工单且没有提供订单号时，分别调用 quotation.list_real_sales_orders、tracking.list_real_work_orders；结果达到 limit 时说明可能还有后续记录，不称为全量。
+ 6. 你只有只读查询能力；不要承诺任何写入操作（创建订单/审批/发运等），如用户要求，告知需在真实业务页面走审批流程。
+ 7. 回答保持简洁，用短段落或列表。
+ 
+diff --git a/backend/app/services/order_linkage.py b/backend/app/services/order_linkage.py
+index b6e935a..d9a9324 100644
+--- a/backend/app/services/order_linkage.py
++++ b/backend/app/services/order_linkage.py
+@@ -45,17 +45,38 @@ def _date_part(value: str) -> str:
+ 
+ async def list_real_sales_orders(limit: int = 50) -> dict[str, Any]:
+     """列出真实 ERP 销售订单（供用户选择）。连接失败时异常直接向上抛。"""
++    if not 1 <= limit <= 100:
++        raise ValueError("limit 必须在 1 到 100 之间")
+     erp = get_erp_adapter()
+     orders = await erp.list_sales_orders(limit=limit)
+     return {
+         "orders": orders,
+         "count": len(orders),
++        "limit": limit,
++        "possibly_truncated": len(orders) >= limit,
+         "adapter_mode": get_adapter_mode(),
+         "authority": orders[0].get("authority", "") if orders else erp.authority,
+         "data_source": orders[0].get("data_source", "") if orders else "",
+     }
+ 
+ 
++async def list_real_work_orders(limit: int = 50) -> dict[str, Any]:
++    """列出 MES 首批生产工单；读取失败不得伪装为空列表。"""
++    if not 1 <= limit <= 100:
++        raise ValueError("limit 必须在 1 到 100 之间")
++    mes = get_mes_adapter()
++    orders = await mes.get_work_orders_strict({"limit": limit})
++    return {
++        "orders": orders,
++        "count": len(orders),
++        "limit": limit,
++        "possibly_truncated": len(orders) >= limit,
++        "adapter_mode": get_adapter_mode(),
++        "authority": orders[0].get("authority", "") if orders else getattr(mes, "authority", ""),
++        "data_source": orders[0].get("data_source", "") if orders else "",
++    }
++
++
+ async def get_sales_order_detail(order_id: str) -> dict[str, Any]:
+     """读取真实 ERP 销售订单详情。"""
+     erp = get_erp_adapter()
+diff --git a/backend/tests/test_order_linkage.py b/backend/tests/test_order_linkage.py
+index d92578d..97386ef 100644
+--- a/backend/tests/test_order_linkage.py
++++ b/backend/tests/test_order_linkage.py
+@@ -2,7 +2,7 @@
+ from __future__ import annotations
+ 
+ import unittest
+-from unittest.mock import patch
++from unittest.mock import AsyncMock, patch
+ 
+ from app.integrations.errors import IntegrationError
+ from app.services import order_linkage
+@@ -84,6 +84,30 @@ class _FakeMES:
+ 
+ 
+ class OrderLinkageTests(unittest.IsolatedAsyncioTestCase):
++    async def test_order_lists_keep_authoritative_sources_and_limit_boundary(self) -> None:
++        erp = _FakeERP(None)
++        erp.list_sales_orders = AsyncMock(return_value=[_make_erp_order()])
++        mes = _FakeMES([_make_wo("WO-2026-001", "BD-2401")])
++        with patch.object(order_linkage, "get_erp_adapter", return_value=erp), \
++             patch.object(order_linkage, "get_mes_adapter", return_value=mes), \
++             patch.object(order_linkage, "get_adapter_mode", return_value="real"):
++            sales = await order_linkage.list_real_sales_orders(limit=1)
++            works = await order_linkage.list_real_work_orders(limit=1)
++
++        erp.list_sales_orders.assert_awaited_once_with(limit=1)
++        self.assertEqual(sales["authority"], "ERPNext")
++        self.assertEqual(works["authority"], "OpenMES")
++        self.assertEqual(sales["orders"][0]["order_id"], "SAL-ORD-2026-00001")
++        self.assertEqual(works["orders"][0]["work_order_no"], "WO-2026-001")
++        self.assertTrue(sales["possibly_truncated"])
++        self.assertTrue(works["possibly_truncated"])
++
++    async def test_mes_list_read_error_is_not_reported_as_empty(self) -> None:
++        mes = _FakeMES([], error=IntegrationError("OpenMES read failed"))
++        with patch.object(order_linkage, "get_mes_adapter", return_value=mes):
++            with self.assertRaises(IntegrationError):
++                await order_linkage.list_real_work_orders()
++
+     async def test_linked_when_customer_order_no_matches(self) -> None:
+         erp = _FakeERP(_make_erp_order())
+         mes = _FakeMES([_make_wo("WO-2026-001", "BD-2401", customer_order_no="SAL-ORD-2026-00001")])

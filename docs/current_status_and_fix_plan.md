@@ -2565,3 +2565,49 @@ Leader 的两种用途证书现均有用户执行成功的公开输出。下一�
 最终本地验证：在隔离覆盖的 uvicorn 0.54.0（与服务器版本相同）下，完整后端 638 passed。TLS 验收使用本机真实 HTTPS/mTLS 网络连接和临时 CA，覆盖无证书、伪造 AIC、错误目标 AIC、受限调用者拒绝、公开认证策略、Leader→Partner 实际链路、任务生命周期、配置/证书用途/私钥不匹配及离线拒绝导出。新入口导入不加载业务数据库或模型配置；原业务回归继续使用独立测试库。Bash 与内嵌 Python 语法检查、五份更新 ACS 的官方完整 Schema 校验均通过。未把这些本地结果声称为目标 Ubuntu 启停脚本或真实平台调用已成功。
 
 本地代码提交 4698137 已实际 push 到 GitHub main，远端由 b85619d 快进至该提交。准备 backend/data/wutong-update-20261016.bundle，从服务器已确认拥有的 b85619d 打包后续提交，git bundle verify 通过；该包不包含凭据文件、私钥或数据库。用户可以从 Windows 经 SCP 上传，再在服务器 fetch bundle HEAD 并 merge --ff-only，不依赖服务器访问 GitHub。服务器操作仍由用户执行，当前无远程上线或平台调用成功证据。
+
+### 3.92 用户服务器启动成功与公网 TCP 实测（2026-10-17）
+
+用户先前将 Windows SCP 上传命令误在 Ubuntu SSH 内执行，E: 被解释为远程主机，文件未上传；退出 SSH 返回 PS C:\\Users\\DOGE> 后上传成功。随后用户提供服务器 fast-forward 至 524e56f 的截图、应用依赖安装成功、--check 返回 status=ok，以及 start_wutong.sh 的五个角色本机 mTLS 健康检查全部通过和完成输出。目标 Ubuntu 启动脚本至此有用户执行成功的证据，不代表由本任务登录服务器执行。
+
+本任务从当前 Windows 客户端对 129.204.33.138 的 9443、9444、9445、9446、9447 五个端口分别并行执行真实 TCP 连接，全部成功。该结果是此刻从当前客户端的公网 TCP 可达性，不冒充携带平台调用方证书的业务调用，也不能代表平台已更新 ACS。随后用户 --export-acs 返回 status=prepared、submitted=false、publicReachabilityVerified=false，证明更新文件已生成，未上传平台。未请求或取得服务器私钥、EAB、Token 或 .env 内容。
+
+### 3.93 已通过注册记录的 ACS 更新权限限制（2026-10-17）
+
+此前指导用户直接编辑已通过的 Leader ACS 不准确。用户截图证实详情页只读；本任务进一步无认证读取线上 Registry OpenAPI，PUT /api/v1/agent/client/{agent_id} 明确说明“审核通过的不能再更新”。官方 2.2.0 服务源码也拒绝更新 APPROVED/PENDING 记录，CLI save 复用同一更新接口；撤回和工作人员审核处理只接受 PENDING，不能作为修改已通过记录的办法。官网使用指南虽要求变更服务地址时同步更新 ACS，但未给出保留 AIC 修改已通过记录的可执行入口。
+
+已纠正服务器接入操作文档第 6 节：保留五份生成的完整 ACS，联系平台管理员确认保留原 AIC 的变更流程，不删除重注册、不尝试绕过权限，也不假定管理员普通驳回按钮能解除限制。服务器五角色本机健康检查与本任务公网 TCP 检查已有成功证据；平台 ACS 更新、携带平台调用方身份的实际业务调用与 AMP 上报仍未完成。
+
+### 3.94 用户同意先新建 Leader 0.1.1 注册（2026-10-17）
+
+用户询问能否删除后重新注册。核对官方实现：删除会停用旧记录并通知 CA 吊销对应证书，新注册审批后会分配新 AIC；不能只重新审核而沿用原身份与证书。说明先保留旧记录、新建版本 0.1.1、完成新 AIC 证书和运行配置后再处理旧版本的顺序，用户回复“可以”。本轮只准备协同智能体的新注册文件，未注册或删除平台记录，也未改动服务器配置。
+
+新增 registration/wutong/new-registration-0.1.1/01-leader.acs.json 及同目录使用说明，保留用户确认的名称/提供方/IP，将 aic 清空、active=false，声明正式 Leader JSONRPC 端点、mutualTLS、leader.ask、文本与 JSON 输入。能力描述只覆盖查询与分析；未宣称开放审批、ERP/MES 写入、标准流式或消息队列。文件通过官方完整 ACS JSON Schema 与格式校验、端点/安全绑定和无旧 AIC 检查。root README 增加新文件入口，原五身份映射及 approved/ 原回执保持不变。下一步由用户新建 0.1.1 记录并提交审核，获批后提供新 AIC，再准备该身份的 serverAuth/clientAuth 和运行配置变更。
+
+### 3.95 新协同身份 0.1.1 已在平台回读（2026-10-17）
+
+用户提供新 AIC 1.2.156.3088.1.BUPT.R2QTUC.JHX0M4.IYWC8Q.13RH。本任务无认证访问公开 ATR ACS 接口取得 HTTP 200，核对 name=汽车零部件协同智能体、version=0.1.1、active=true、leader.ask 技能、mutualTLS、安全端点 https://129.204.33.138:9443/aip/leader/rpc 和 IP SAN 129.204.33.138。原始完整回执保存到 registration/wutong/approved/leader-v011.acs.json，并通过官方 ACS Schema 与格式检查；SHA256 已写入 assigned-identities.json 的 successorLeader。旧五身份映射及旧 Leader 回执不变。
+
+新版本平台登记已完成，但服务器此前运行配置与证书仍对应旧 Leader AIC，不能因公开 ACS 有端点就声称平台调用新身份成功。下一步由用户在现有 CLI 工具目录领取新身份 EAB，签发互不覆盖的 serverAuth/clientAuth 两张证书，然后安全切换 Leader 配置并验证真实调用。此轮未读取、输出或保存 EAB、私钥、账号 Token，也未修改服务器或平台账号。
+
+### 3.96 新 Leader 已切换，本机与公网 TCP 验证通过（2026-10-17）
+
+用户截图显示新 AIC 的 EAB 领取及 serverAuth/clientAuth 签发成功。两张公开证书检查输出中的 CN、URI SAN 均为 `1.2.156.3088.1.BUPT.R2QTUC.JHX0M4.IYWC8Q.13RH`，IP SAN 为 `129.204.33.138`，EKU 各自符合服务端和客户端用途。用户在服务器生成候选配置，`--check` 对五角色返回 `status=ok`，涵盖链、用途、地址、密钥配对；本任务未读取私钥。
+
+第一次切换时 stop 脚本停掉五个登记进程，启动预检立即将 9443 绑定失败报告为占用，回滚恢复了旧配置但也未能立即重启。用户随后用 `ss -ltnp 'sport = :9443'` 看到无监听进程；间隔一段时间再次复制已检查的候选配置并启动，五角色本机 mTLS 健康检查全部通过。`--role leader --probe` 返回 `status=healthy` 且 AIC 为新身份。不能仅凭这次现象确定唯一根因，但快速重启遇到 TIME_WAIT 而预检未启用 SO_REUSEADDR 是合理解释；已在本地修正预检重用地址并使错误保留 OS 细节，尚未同步到服务器，不声称服务器已应用此修正。
+
+本任务从 Windows 外网客户端再次对 9443–9447 执行 TCP 连接，均成功；公开 ATR ACS 再次回读新 AIC、version 0.1.1、active=true、端点指向 9443。以上只证明部署身份、本机 mTLS、客户端到端口的 TCP 可达及平台注册资料一致。叮当/其他梧桐智能体到 Leader 的实际业务调用仍待验收；四个旧 Partner 的已批准 ACS 仍为空端点，不能声称平台可分别直接调用它们。
+
+### 3.97 叮当实际请求到达，业务执行因 DeepSeek 密钥编码失败（2026-10-17）
+
+用户在叮当工作助手选择新 Leader AIC 后发起协作，请求进入执行节点，但返回项目代码中的“技能执行失败，请检查服务日志”。用户随后提供 Leader 日志末尾：`coordinator.py` 请求 DeepSeek，`httpx` 在编码请求头时抛出 `UnicodeEncodeError: 'ascii' codec can't encode characters in position 7-9`。项目 `DeepSeekClient` 的请求头仅有固定 ASCII 的 Accept 与 `Authorization: Bearer {DEEPSEEK_API_KEY}`；位置 7 起是密钥内容，因此可定位到生效的 `DEEPSEEK_API_KEY` 含非 ASCII 字符。平台发现、mTLS 接入和任务下发均已走通，但业务结果未成功，不能记为平台调用验收通过。
+
+本地 `DeepSeekClient` 增加不回显密钥的 ASCII 预检，未来会在发送 HTTP 请求前报清楚配置错误；定向集成测试 15 passed。此改动尚未部署到服务器，实际修复仍需用户在服务器确定密钥来源、填入有效 ASCII 密钥并重启梧桐接入进程。没有读取或索取实际密钥。
+
+### 3.98 叮当失败复现与「四岗运行身份已切换」的实测更正（2026-10-17）
+
+用户再次提供叮当协作截图：任务下发成功、DAG 中出现「生产跟单」「报价」两个失败节点，其余节点正常，页面提示「协作尚未完成，以下节点仍未成功完成」。本次从当前 Windows 客户端重新核对：9443–9447 公网 TCP 全部可连接；对五个端口做无客户端证书的 TLS 握手，读取到的服务端证书 CN 依次为新 Leader AIC 与四个 0.1.1 新 Partner AIC，IP SAN 均为 129.204.33.138。因此四个 Partner 的运行配置和证书**已经**切到新身份，`assigned-identities.json` 中 `runtimeStillUsesOriginalPartnerAic: true` 与实测不符，已改为 false 并补充证书实测记录；该证据只表示对外出示的服务器证书，不代表业务调用成功。
+
+根因复核：`backend/app/aip/aip_agent_service.py` 的 `_execute_skill` 对所有异常统一记录日志，并且只向平台回一句「技能执行失败，请检查服务日志」，截图中的失败文案正是这一句，所以平台侧看不到真实原因。此前用户提供的 Leader 日志已显示 `httpx` 编码 Authorization 头时抛 `UnicodeEncodeError: 'ascii' codec can't encode characters in position 7-9`，位置 7 起即密钥内容，说明服务器上生效的 `DEEPSEEK_API_KEY` 含非 ASCII 字符。Leader 与四个 Partner 共用同一份 `.env` 和同一个 `build_coordinator`，所以只要进入模型调用，任何节点都会以同样方式失败，这与截图中「部分节点失败、部分节点正常」的表现一致。
+
+本次新增只读诊断脚本 `deliverables/diagnose_deepseek_key.py`（只输出长度、ASCII 判定、非 ASCII 首次位置与布尔值，不打印密钥），并编写 `deliverables/叮当调用失败-定位与修复.md` 作为服务器侧修复步骤。本机用项目 `.env` 实跑该脚本：密钥 ASCII、长度 35、`sk-` 开头，`--live` 请求返回 HTTP 200，说明本机密钥可用，服务器密钥需在服务器上重新判定。本地 `backend/tests` 658 passed。修复仍需用户在服务器替换密钥、同步本次代码并重启接入进程；未读取或索取任何实际密钥。

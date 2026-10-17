@@ -26,6 +26,16 @@ def create_tracking_aip_service(aic: str = "local-tracking-001") -> AipAgentServ
 
     # ===== 真实业务技能 =====
 
+    async def real_list_work_orders(inputs: dict) -> dict:
+        """只读列出 MES 生产工单，供协同智能体选择具体工单。"""
+        return await order_linkage.list_real_work_orders(limit=int(inputs.get("limit", 50)))
+
+    service.register_skill(
+        skill_id="tracking.list_real_work_orders",
+        skill_name="列出 MES 生产工单",
+        handler=real_list_work_orders,
+    )
+
     async def real_track(inputs: dict) -> dict:
         """真实生产跟单：读取真实 MES 工单进度与风险。"""
         return await real_order.track_order(str(inputs["work_order_id"]))

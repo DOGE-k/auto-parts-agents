@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,6 +28,26 @@ _TERMINAL_STATES = {
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_SECRET_PATTERNS = (
+    re.compile(r"sk-[A-Za-z0-9_\-]{6,}"),
+    re.compile(r"(?i)bearer\s+\S+"),
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[=:]\s*\S+"),
+)
+
+
+def _failure_text(exc: BaseException) -> str:
+    """平台侧可见的失败原因：异常类型 + 脱敏后的简短消息。
+
+    调用方（平台页面）此前只看到一句固定文案，必须再去服务器翻日志才能定位。
+    这里只回传异常类型和截断后的消息，并抹掉疑似凭据片段；完整堆栈仍只写日志。
+    """
+    detail = " ".join(str(exc).split())[:200]
+    for pattern in _SECRET_PATTERNS:
+        detail = pattern.sub("[已隐藏]", detail)
+    reason = type(exc).__name__ + (f": {detail}" if detail else "")
+    return f"技能执行失败，请检查服务日志（{reason}）"
 
 
 @dataclass(frozen=True)
@@ -256,7 +277,9 @@ class AipAgentService(CommandHandlers):
     async def _execute_skill(self, task_id: str, skill_id: str, inputs: dict,
                              command: TaskCommand) -> None:
         try:
-            if self._natural_language_handler and skill_id == self._natural_language_skill_id:
+            natural_language = (self._natural_language_handler is not None
+                                and skill_id == self._natural_language_skill_id)
+            if natural_language:
                 result_data = await self._natural_language_handler(inputs["question"], command)
                 skill_name = self._natural_language_skill_name
             else:
@@ -264,22 +287,31 @@ class AipAgentService(CommandHandlers):
                 skill_name = self._skill_names.get(skill_id, skill_id)
             if not isinstance(result_data, dict):
                 raise ValueError("技能结果必须为 JSON 对象")
+            if natural_language:
+                answer = result_data.get("answer")
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("智能问答未生成文字答复")
+                display_text = answer.strip()
+            else:
+                display_text = json.dumps(result_data, ensure_ascii=False, indent=2,
+                                          default=str)
             task = self._tasks[task_id]
             if task.status.state in _TERMINAL_STATES:
                 return
             task.products = [Product(id=f"prod-{task_id}", name=skill_name,
                 description=f"技能 {skill_id} 的执行结果", dataItems=[
-                    StructuredDataItem(data=result_data, metadata={"skill_id": skill_id})])]
+                    StructuredDataItem(data=result_data, metadata={"skill_id": skill_id}),
+                    TextDataItem(text=display_text)])]
             self._update_status(task_id, TaskState.AwaitingCompletion)
         except asyncio.CancelledError:
             if self._tasks[task_id].status.state not in _TERMINAL_STATES:
                 self._update_status(task_id, TaskState.Canceled)
-        except Exception:
+        except Exception as exc:
             logger.exception("[%s] AIP 技能失败: skill=%s task=%s",
                              self.agent_name, skill_id, task_id)
             if self._tasks[task_id].status.state not in _TERMINAL_STATES:
                 self._update_status(task_id, TaskState.Failed,
-                    [TextDataItem(text="技能执行失败，请检查服务日志")])
+                    [TextDataItem(text=_failure_text(exc))])
         finally:
             self._executions.pop(task_id, None)
 
