@@ -125,6 +125,9 @@ def _read_dotenv_key():
 
 dotenv_key = _read_dotenv_key()
 shell_key = os.environ.get("DEEPSEEK_API_KEY")
+# 子进程无法仅凭"变量已存在"区分来源，因为这里会把 .env 的值写进它的环境；
+# 用显式标记告诉运行期真实来源，避免把 dotenv 误报成 shellEnvironment。
+os.environ.pop("DEEPSEEK_API_KEY_SOURCE", None)
 if dotenv_key is not None:
     source = ".env"
     key = dotenv_key
@@ -133,9 +136,12 @@ if dotenv_key is not None:
               + str(len(shell_key.strip())) + "），已按 .env 为准覆盖，子进程使用 .env 的值。",
               file=sys.stderr)
     os.environ["DEEPSEEK_API_KEY"] = dotenv_key
+    os.environ["DEEPSEEK_API_KEY_SOURCE"] = "dotenv"
 else:
     source = "启动时的 shell 环境变量（.env 里没有）"
     key = (shell_key or "").strip()
+    if key:
+        os.environ["DEEPSEEK_API_KEY_SOURCE"] = "shellEnvironment"
 if not key:
     print("[警告] 未读到 DEEPSEEK_API_KEY；协同问答会在调用模型时失败。", file=sys.stderr)
 else:

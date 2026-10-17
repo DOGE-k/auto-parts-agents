@@ -303,6 +303,7 @@ def test_configuration_entry_import_does_not_load_business_database_or_model_set
     assert child.returncode == 0, child.stderr.decode(errors="replace")
 
 def test_deepseek_key_status_reports_encoding_without_exposing_value(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY_SOURCE", raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-abc123")
     clean = deepseek_key_status(from_shell=True)
     assert clean == {"configured": True, "length": 9, "ascii": True,
@@ -319,3 +320,17 @@ def test_deepseek_key_status_reports_encoding_without_exposing_value(monkeypatch
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     missing = deepseek_key_status(from_shell=False)
     assert missing["configured"] is False and missing["length"] == 0
+
+def test_key_source_marker_overrides_inherited_variable(monkeypatch):
+    # 启动脚本会把 .env 的值写进子进程环境，子进程仅凭"变量存在"会误判来源；
+    # 显式标记必须优先，否则日志会把 dotenv 错报成 shellEnvironment。
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-abc123")
+    monkeypatch.setenv("DEEPSEEK_API_KEY_SOURCE", "dotenv")
+    assert deepseek_key_status(from_shell=True)["source"] == "dotenv"
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY_SOURCE", "shellEnvironment")
+    assert deepseek_key_status(from_shell=False)["source"] == "shellEnvironment"
+
+    # 非法标记回退到调用方判断，不静默接受未知值
+    monkeypatch.setenv("DEEPSEEK_API_KEY_SOURCE", "bogus")
+    assert deepseek_key_status(from_shell=False)["source"] == "dotenv"

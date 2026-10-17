@@ -305,6 +305,11 @@ def export_acs(config: RuntimeConfig) -> Path:
     return target
 
 
+# 启动脚本在拉起子进程前会把 .env 的值写进子进程环境；此时子进程无法仅凭
+# "变量已存在"判断来源。启动脚本用这个标记显式告知来源，避免把 dotenv 误报成 shell。
+_KEY_SOURCE_MARKER = "DEEPSEEK_API_KEY_SOURCE"
+
+
 def deepseek_key_status(*, from_shell: bool) -> dict:
     """只报告密钥的编码判定，绝不返回值本身。
 
@@ -315,12 +320,19 @@ def deepseek_key_status(*, from_shell: bool) -> dict:
 
     value = os.getenv("DEEPSEEK_API_KEY", "").strip()
     non_ascii = [index for index, char in enumerate(value) if ord(char) > 127]
+    marker = os.getenv(_KEY_SOURCE_MARKER, "").strip().lower()
+    if marker == "dotenv":
+        source = "dotenv"
+    elif marker == "shellenvironment":
+        source = "shellEnvironment"
+    else:
+        source = "shellEnvironment" if from_shell else "dotenv"
     return {
         "configured": bool(value),
         "length": len(value),
         "ascii": value.isascii(),
         "firstNonAsciiPosition": non_ascii[0] if non_ascii else None,
-        "source": "shellEnvironment" if from_shell else "dotenv",
+        "source": source,
     }
 
 
@@ -342,7 +354,7 @@ def _business_environment() -> None:
     print("[配置] DeepSeek 密钥判定: " + json.dumps(status, ensure_ascii=False), flush=True)
     if status["configured"] and not status["ascii"]:
         source = ("启动时的 shell 环境变量（优先级高于 .env）"
-                  if key_from_shell else ".env")
+                  if status["source"] == "shellEnvironment" else ".env")
         raise ValueError(
             "DEEPSEEK_API_KEY 含非 ASCII 字符，首个位置 %d；来源：%s。"
             "请修正后重启接入进程（若是 shell 环境变量，先 unset 再启动）。"
