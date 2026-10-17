@@ -152,6 +152,13 @@ def tail_failures(log_path: Path, wanted: int) -> None:
     end = min(len(lines), last + wanted)
     for line in lines[start:end]:
         print("  " + redact(line)[:400])
+    # 单独把异常类型摘出来：日志里栈很长，但真正需要的是最后那行 "XxxError: ..."
+    for line in reversed(lines[start:end]):
+        stripped = line.strip()
+        if stripped and not stripped.startswith(("File ", "    ", "Traceback", "~", "^")):
+            if ":" in stripped or stripped.endswith("Error"):
+                print("  >>> 异常行: " + redact(stripped)[:300])
+                break
 
 
 def exception_chain(exc: BaseException) -> list[str]:
