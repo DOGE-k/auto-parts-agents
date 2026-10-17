@@ -75,38 +75,57 @@ def key_facts(value: str) -> dict:
     }
 
 
-def process_env(pid: str, name: str) -> str | None:
+def process_env(pid: str, name: str) -> tuple[str | None, str]:
+    """返回 (值, 状态说明)。
+
+    注意：/proc/<pid>/environ 只反映 exec 时的环境块，python-dotenv 之后写入
+    os.environ 的值不会出现在这里。因此"读不到"不代表进程没加载 .env，
+    不能据此判断密钥对错——只能说明该变量是启动后由 .env 注入的。
+    """
     try:
         raw = (Path("/proc") / pid / "environ").read_bytes()
-    except (FileNotFoundError, PermissionError, ProcessLookupError):
-        return None
+    except FileNotFoundError:
+        return None, "进程不存在"
+    except PermissionError:
+        return None, "权限不足（不是同一用户，需要 sudo）"
+    except ProcessLookupError:
+        return None, "进程已退出"
     for item in raw.split(b"\0"):
         if item.startswith(name.encode() + b"="):
-            return os.fsdecode(item.split(b"=", 1)[1])
-    return None
+            return os.fsdecode(item.split(b"=", 1)[1]), "来自启动时的 shell 环境"
+    return None, "启动时环境里没有（由 .env 在运行时注入，无法从这里读到）"
 
 
 def wutong_processes() -> list[dict]:
-    text = run(["ps", "-eo", "pid,lstart,cmd"])
+    # 用 lstart 定位时间，用 args 取完整命令行（含 --config 路径），避免被截断
+    text = run(["ps", "-eo", "pid,user,lstart,args"])
     found = []
     for line in text.splitlines():
         if "wutong_runtime" not in line or "--role" not in line:
             continue
         parts = line.split()
-        if len(parts) < 9:
+        if len(parts) < 10:
             continue
-        pid = parts[0]
-        started = " ".join(parts[1:6])
+        pid, user = parts[0], parts[1]
+        started = " ".join(parts[2:7])
+        argv = parts[7:]
         role = ""
-        for index, token in enumerate(parts):
-            if token == "--role" and index + 1 < len(parts):
-                role = parts[index + 1]
+        config = ""
+        for index, token in enumerate(argv):
+            if token == "--role" and index + 1 < len(argv):
+                role = argv[index + 1]
+            if token == "--config" and index + 1 < len(argv):
+                config = argv[index + 1]
         try:
             start_dt = datetime.strptime(started, "%a %b %d %H:%M:%S %Y")
         except ValueError:
             start_dt = None
-        found.append({"pid": pid, "role": role, "started": started, "start_dt": start_dt})
+        found.append({"pid": pid, "user": user, "role": role, "config": config,
+                      "started": started, "start_dt": start_dt})
     return found
+
+
+
 
 
 def tcp_check(host: str, port: int, timeout: float = 4.0) -> str:
@@ -296,14 +315,25 @@ def main() -> int:
     if not processes:
         print("没有找到 wutong_runtime 进程（接入服务未运行）")
     for item in processes:
-        print(f"  {item['role']:<16} pid={item['pid']:<7} 启动于 {item['started']}")
-        running = process_env(item["pid"], "DEEPSEEK_API_KEY")
-        if running is None:
-            print("      进程环境: 读不到（可能不是同一用户）")
-        else:
-            print(f"      进程内密钥: {key_facts(running)} 与 .env 一致={running == file_key}")
-        if item["start_dt"] and env_path.is_file() and env_path.stat().st_mtime > item["start_dt"].timestamp():
-            print("      >>> .env 在该进程启动之后被修改过，进程内仍是旧值")
+        print(f"  {item['role']:<16} pid={item['pid']:<7} 用户={item.get('user', '?'):<8} 启动于 {item['started']}")
+        print(f"      配置: {item.get('config') or '<未解析到>'}")
+        for name in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "LLM_MODEL", "APP_ADAPTER_MODE"):
+            value, state = process_env(item["pid"], name)
+            if value is None:
+                print(f"      {name}: {state}")
+            elif name == "DEEPSEEK_API_KEY":
+                print(f"      {name}: {key_facts(value)} 与 .env 一致={value == file_key}（{state}）")
+            else:
+                expected = values.get(name)
+                flag = "" if expected is None or value == expected else f"  <<< 与 .env({expected}) 不一致"
+                print(f"      {name}: {value}{flag}（{state}）")
+        # 关键判据：进程启动时间 vs .env 修改时间
+        if item["start_dt"] and env_path.is_file():
+            delta = env_path.stat().st_mtime - item["start_dt"].timestamp()
+            if delta > 0:
+                print(f"      >>> .env 比该进程晚 {int(delta)} 秒被修改，进程内仍是用启动时的值")
+            else:
+                print(f"      >>> .env 早于该进程启动 {int(-delta)} 秒，进程加载的就是当前 .env")
 
     section("4. 最近一次技能失败日志")
     logs = root / "backend" / "data" / "wutong-runtime" / "logs"

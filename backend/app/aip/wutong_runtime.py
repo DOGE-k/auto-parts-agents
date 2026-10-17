@@ -305,17 +305,49 @@ def export_acs(config: RuntimeConfig) -> Path:
     return target
 
 
+def deepseek_key_status(*, from_shell: bool) -> dict:
+    """只报告密钥的编码判定，绝不返回值本身。
+
+    平台侧失败时只看到「技能执行失败」，根因往往在密钥编码；这里在启动阶段
+    就把判定写进角色日志，运维不必再去翻请求期异常。
+    """
+    import os
+
+    value = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    non_ascii = [index for index, char in enumerate(value) if ord(char) > 127]
+    return {
+        "configured": bool(value),
+        "length": len(value),
+        "ascii": value.isascii(),
+        "firstNonAsciiPosition": non_ascii[0] if non_ascii else None,
+        "source": "shellEnvironment" if from_shell else "dotenv",
+    }
+
+
 def _business_environment() -> None:
     import os
     from dotenv import load_dotenv
 
     project = Path(__file__).resolve().parents[3]
+    # load_dotenv(override=False) 让已存在的环境变量优先于 .env；
+    # 因此必须先记录启动时是否已有该变量，才能说清密钥到底来自哪里。
+    key_from_shell = "DEEPSEEK_API_KEY" in os.environ
     load_dotenv(project / ".env", override=False)
     load_dotenv(project / "backend" / ".env", override=False)
     if os.getenv("APP_ADAPTER_MODE", "").strip().lower() != "real":
         raise ValueError("The Wutong listener requires APP_ADAPTER_MODE=real")
     if os.getenv("MOCK_DEMO_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
         raise ValueError("Disable MOCK_DEMO_ENABLED for the Wutong listener")
+    status = deepseek_key_status(from_shell=key_from_shell)
+    print("[配置] DeepSeek 密钥判定: " + json.dumps(status, ensure_ascii=False), flush=True)
+    if status["configured"] and not status["ascii"]:
+        source = ("启动时的 shell 环境变量（优先级高于 .env）"
+                  if key_from_shell else ".env")
+        raise ValueError(
+            "DEEPSEEK_API_KEY 含非 ASCII 字符，首个位置 %d；来源：%s。"
+            "请修正后重启接入进程（若是 shell 环境变量，先 unset 再启动）。"
+            % (status["firstNonAsciiPosition"], source)
+        )
 
 
 def _partner_services(config: RuntimeConfig) -> dict:

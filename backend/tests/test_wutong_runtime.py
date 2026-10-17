@@ -25,6 +25,7 @@ from app.aip.leader_service import create_leader_aip_service, PARTNER_ROLES
 from app.aip.wutong_runtime import (
     ROLES, check_configuration, client_ssl_context, create_app, load_config,
     make_server_config, probe_role, LocalPeerTransport, deployment_acs, export_acs,
+    deepseek_key_status,
 )
 
 
@@ -300,3 +301,21 @@ def test_configuration_entry_import_does_not_load_business_database_or_model_set
         "assert 'app.services.coordinator' not in sys.modules; "
         "assert 'app.main' not in sys.modules"], capture_output=True, timeout=10)
     assert child.returncode == 0, child.stderr.decode(errors="replace")
+
+def test_deepseek_key_status_reports_encoding_without_exposing_value(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-abc123")
+    clean = deepseek_key_status(from_shell=True)
+    assert clean == {"configured": True, "length": 9, "ascii": True,
+                     "firstNonAsciiPosition": None, "source": "shellEnvironment"}
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-密钥")
+    dirty = deepseek_key_status(from_shell=False)
+    assert dirty["ascii"] is False
+    assert dirty["firstNonAsciiPosition"] == 3
+    assert dirty["source"] == "dotenv"
+    # 返回值里绝不能出现密钥内容
+    assert "密钥" not in json.dumps(dirty, ensure_ascii=False)
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    missing = deepseek_key_status(from_shell=False)
+    assert missing["configured"] is False and missing["length"] == 0
