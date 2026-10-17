@@ -104,6 +104,37 @@ check = subprocess.run([python, "-m", "app.aip.wutong_runtime", "--config", str(
                        cwd=root / "backend", check=False)
 if check.returncode:
     raise SystemExit("[失败] 配置或证书检查未通过；未启动任何新服务。")
+
+# 启动前判定 DeepSeek 密钥来源与编码。非 ASCII 会让每个技能在 httpx 编码请求头时失败，
+# 而平台只看到「技能执行失败」；这里提前拦下，并说明是 shell 环境变量还是 .env。
+from_shell = "DEEPSEEK_API_KEY" in os.environ
+for env_file in (root / ".env", root / "backend" / ".env"):
+    if not env_file.is_file():
+        continue
+    for line in env_file.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip().removeprefix("export ").strip() == "DEEPSEEK_API_KEY":
+            if not from_shell:
+                os.environ["DEEPSEEK_API_KEY"] = value.strip().strip('"').strip("'")
+            break
+key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+if not key:
+    print("[警告] 未读到 DEEPSEEK_API_KEY；协同问答会在调用模型时失败。", file=sys.stderr)
+else:
+    bad = next((i for i, ch in enumerate(key) if ord(ch) > 127), None)
+    source = "启动时的 shell 环境变量（优先级高于 .env）" if from_shell else ".env"
+    print("[密钥] 来源=" + ("shellEnvironment" if from_shell else "dotenv")
+          + " 长度=" + str(len(key)) + " ASCII=" + str(key.isascii())
+          + (" 首个非ASCII位置=" + str(bad) if bad is not None else ""), flush=True)
+    if bad is not None:
+        raise SystemExit(
+            "[失败] DEEPSEEK_API_KEY 含非 ASCII 字符（首个位置 " + str(bad) + "），来源：" + source
+            + "。\n       若来源是 shell 环境变量，请先 unset DEEPSEEK_API_KEY 再启动；"
+            + "若来源是 .env，请改成纯 ASCII 的 sk- 密钥。"
+        )
 settings = json.loads(config.read_text(encoding="utf-8"))
 existing = {}
 for role in ROLES:
