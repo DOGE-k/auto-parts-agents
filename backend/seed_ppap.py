@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import urlparse
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -321,10 +321,24 @@ def seed_case(api: SeedApi, case: str, label: str, elements: list[str], output_d
     return summarize_case(api, case, fields, task_id, output_dir)
 
 
+def default_label() -> str:
+    """Return the default seed label, never failing when tzdata is unavailable.
+
+    The IANA zone database is an OS or pip extra: minimal images and some CI
+    runners ship without it. A missing zone must not abort argument parsing, so
+    fall back to UTC while keeping the same YYYYMMDD shape callers expect.
+    """
+    try:
+        zone = ZoneInfo("Asia/Shanghai")
+    except ZoneInfoNotFoundError:
+        zone = timezone.utc
+    return datetime.now(zone).strftime("%Y%m%d")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="通过正常项目登录创建PPAP合成测试种子（不会覆盖已有任务）")
     parser.add_argument("--api-base", default="http://127.0.0.1:9000")
-    parser.add_argument("--label", default=datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d"))
+    parser.add_argument("--label", default=default_label())
     args = parser.parse_args(argv)
     api = None
     try:
