@@ -153,12 +153,18 @@ def tail_failures(log_path: Path, wanted: int) -> None:
     for line in lines[start:end]:
         print("  " + redact(line)[:400])
     # 单独把异常类型摘出来：日志里栈很长，但真正需要的是最后那行 "XxxError: ..."
-    for line in reversed(lines[start:end]):
+    # 注意要从失败行一直扫到文件末尾，不能只在打印窗口里找（窗口常常截断在栈中间）
+    for line in reversed(lines[last:]):
         stripped = line.strip()
-        if stripped and not stripped.startswith(("File ", "    ", "Traceback", "~", "^")):
-            if ":" in stripped or stripped.endswith("Error"):
-                print("  >>> 异常行: " + redact(stripped)[:300])
-                break
+        if not stripped:
+            continue
+        if stripped.startswith(("File ", "Traceback", "~", "^", "during handling", "The above")):
+            continue
+        if re.match(r"^[A-Za-z_][\w.]*(Error|Exception|Warning):", stripped) or "UnicodeEncodeError" in stripped:
+            print("  >>> 异常行: " + redact(stripped)[:300])
+            break
+    else:
+        print("  >>> 没有在日志里找到 'XxxError: ...' 行（可能日志被截断，或异常尚未落盘）")
 
 
 def exception_chain(exc: BaseException) -> list[str]:
