@@ -2611,3 +2611,13 @@ Leader 的两种用途证书现均有用户执行成功的公开输出。下一�
 根因复核：`backend/app/aip/aip_agent_service.py` 的 `_execute_skill` 对所有异常统一记录日志，并且只向平台回一句「技能执行失败，请检查服务日志」，截图中的失败文案正是这一句，所以平台侧看不到真实原因。此前用户提供的 Leader 日志已显示 `httpx` 编码 Authorization 头时抛 `UnicodeEncodeError: 'ascii' codec can't encode characters in position 7-9`，位置 7 起即密钥内容，说明服务器上生效的 `DEEPSEEK_API_KEY` 含非 ASCII 字符。Leader 与四个 Partner 共用同一份 `.env` 和同一个 `build_coordinator`，所以只要进入模型调用，任何节点都会以同样方式失败，截图中 DAG 展开的两个节点（生产跟单、报价）均为失败、汇总节点停在待执行，与该模式一致。
 
 本次新增只读诊断脚本 `deliverables/diagnose_deepseek_key.py`（只输出长度、ASCII 判定、非 ASCII 首次位置与布尔值，不打印密钥），并编写 `deliverables/叮当调用失败-定位与修复.md` 作为服务器侧修复步骤。本机用项目 `.env` 实跑该脚本：密钥 ASCII、长度 35、`sk-` 开头，`--live` 请求返回 HTTP 200，说明本机密钥可用，服务器密钥需在服务器上重新判定。本地 `backend/tests` 659 passed。修复仍需用户在服务器替换密钥、同步本次代码并重启接入进程；未读取或索取任何实际密钥。
+
+### 3.99 叮当失败根因定位为进程继承的 shell 环境变量（2026-10-17）
+
+用户在服务器上依次执行：`diagnose_deepseek_key.py --live` 返回密钥 ASCII、长度 35、`sk-`、HTTP 200；随后在**当前 SSH 会话**检查 `os.getenv("DEEPSEEK_API_KEY")` 返回长度 0。诊断第 4 节显示 `leader.log` 共 44 行、最后一次技能失败在第 13 行，栈为 `coordinator.py:740 ask → deepseek.py:56 chat_completion → http.py:61 request_json → httpx/_client.py:430 _merge_headers → _models.py:275 update → _models.py:156 __init__`，日志文件本身断在栈中间，异常类型行未落盘，因此当时无法据日志判定异常类型。
+
+关键推理与修复：旧版 `scripts/start_wutong.sh` 用 `subprocess.Popen(...)` **不传 env**，子进程原样继承启动 shell 的环境变量；而运行期 `load_dotenv(..., override=False)` 会让已存在的同名环境变量优先。14:08 那次启动所在 shell 带有旧的 `DEEPSEEK_API_KEY`（含非 ASCII），`.env` 虽已改成 ASCII 密钥（修改时间 01:25:04，早于进程启动），却始终未被采用，于是每次模型请求都在 httpx 编码 `Authorization` 头时失败，平台只显示固定文案「技能执行失败，请检查服务日志」。用户随后执行 `stop_wutong.sh` → `unset DEEPSEEK_API_KEY` → `start_wutong.sh`，五个角色本机 mTLS 检查全部通过，进程环境不再含该变量，`load_dotenv` 只能采用 `.env` 的值。
+
+本地同时做了三处加固并提交：`scripts/start_wutong.sh` 改为以 `.env` 为唯一密钥来源（显式写入子进程环境，shell 残留仅提示不再生效），并在起进程前判定来源与编码、非 ASCII 直接拒绝启动；`backend/app/aip/wutong_runtime.py` 在运行期打印 `[配置] DeepSeek 密钥判定`（含 source）；`backend/app/aip/aip_agent_service.py` 的失败文案附带异常类型与脱敏消息。启动脚本三种场景（无 shell 变量 / shell 有中文旧密钥 / shell 有另一 ASCII 密钥）均已用子进程实测，行为符合预期；`backend/tests` 660 passed。
+
+另一处实测更正：用户 16:55 的重启输出中没有 `[密钥] 来源=...` 一行，说明服务器上的 `scripts/start_wutong.sh` 仍是 `524e56f` 的版本，此前上传的 bundle 为更早一版，合并未到达含该预检的提交。服务器侧代码同步仍需按 `deliverables/服务器操作命令清单-20261017.md` 重做，本任务未登录服务器执行。
