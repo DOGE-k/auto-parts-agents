@@ -288,6 +288,10 @@ def main() -> int:
         print(".env 修改时间: " + datetime.fromtimestamp(env_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"))
 
     section("3. 运行中的接入进程")
+    # 进程环境在 sudo 或不同用户下不可读；先提示，避免误判成"读不到 = 没问题"
+    geteuid = getattr(os, "geteuid", None)  # Windows 上不存在，仅 Linux 服务器需要
+    if geteuid is not None and geteuid() != 0:
+        print(f"当前用户 uid={geteuid()}（非 root）；若进程属于其他用户，/proc/<pid>/environ 会读不到")
     processes = wutong_processes()
     if not processes:
         print("没有找到 wutong_runtime 进程（接入服务未运行）")
