@@ -162,7 +162,11 @@ class OpenMESUserSessionManager:
         self._base_url = base_url.strip().rstrip("/")
         self._ttl = ttl_seconds if ttl_seconds is not None else session_ttl_seconds()
         self._credentials_path = credentials_path
+        # 注入 login_fn 表示调用方自带凭据来源（测试用假登录、或上层自行
+        # 解析凭据），此时不得再要求磁盘上的 services/OpenMes/.env——该目录
+        # 被 .gitignore 排除，CI 检出后并不存在。
         self._login_fn: LoginFn = login_fn or _login_via_openmes
+        self._owns_credentials = login_fn is None
         self._time_fn = time_fn
         self._token = ""
         self._issued_at = 0.0
@@ -204,11 +208,15 @@ class OpenMESUserSessionManager:
             return await self._login_locked()
 
     async def _login_locked(self) -> str:
-        credentials = load_openmes_admin_credentials(self._credentials_path)
+        if self._owns_credentials:
+            credentials = load_openmes_admin_credentials(self._credentials_path)
+            username, password = credentials.username, credentials.password
+        else:
+            # 调用方注入了 login_fn，凭据由它自己掌握；这里只给出占位值，
+            # 绝不去读可能不存在的磁盘文件。
+            username = password = ""
         try:
-            token = await self._login_fn(
-                self._base_url, credentials.username, credentials.password
-            )
+            token = await self._login_fn(self._base_url, username, password)
         except IntegrationError as exc:
             # 远端认证/服务错误包装成明确的重登失败信息（不含凭据），
             # 让调用方与用户能区分"令牌过期且重登失败"和普通业务错误。
