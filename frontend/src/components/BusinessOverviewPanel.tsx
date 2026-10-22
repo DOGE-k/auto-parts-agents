@@ -77,29 +77,33 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
 
   return (
     <div className="overview-panel">
-      <section className="overview-kpis">
+      <section className="overview-kpis" aria-label="待办概览">
         <button className="kpi-card clickable" onClick={() => onNavigate("sales")}>
-          <span className="kpi-icon amber">✓</span><span className="kpi-label">报价待审批</span>
-          <strong>{quotationPending ?? "—"}</strong>
+          <span className="kpi-icon amber" aria-hidden="true">✓</span>
+          <span className="kpi-body"><span className="kpi-label">报价待审批</span><strong>{quotationPending ?? "—"}</strong></span>
+          <span className="kpi-arrow" aria-hidden="true">›</span>
         </button>
         <button className="kpi-card clickable" onClick={() => onNavigate("procurement")}>
-          <span className="kpi-icon amber">⇄</span><span className="kpi-label">方案待审批</span>
-          <strong>{planPending ?? "—"}</strong>
+          <span className="kpi-icon amber" aria-hidden="true">⇄</span>
+          <span className="kpi-body"><span className="kpi-label">方案待审批</span><strong>{planPending ?? "—"}</strong></span>
+          <span className="kpi-arrow" aria-hidden="true">›</span>
         </button>
         <button className="kpi-card clickable" onClick={() => onNavigate("quality")}>
-          <span className="kpi-icon red">⚠</span><span className="kpi-label">质量待办</span>
-          <strong>{hasProjectSession ? (qualityTodoCount ?? "—") : "未登录"}</strong>
+          <span className="kpi-icon red" aria-hidden="true">⚠</span>
+          <span className="kpi-body"><span className="kpi-label">质量待办</span><strong>{hasProjectSession ? (qualityTodoCount ?? "—") : "未登录"}</strong></span>
+          <span className="kpi-arrow" aria-hidden="true">›</span>
         </button>
         <button className="kpi-card clickable" onClick={() => onNavigate("quality")}>
-          <span className="kpi-icon purple">⌁</span><span className="kpi-label">缺料/风险事件</span>
-          <strong>{shortageEvents.length + riskEvents.length}</strong>
+          <span className="kpi-icon purple" aria-hidden="true">⌁</span>
+          <span className="kpi-body"><span className="kpi-label">缺料/风险事件</span><strong>{shortageEvents.length + riskEvents.length}</strong></span>
+          <span className="kpi-arrow" aria-hidden="true">›</span>
         </button>
       </section>
 
       {error && <div className="error-banner"><span>总览加载失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
 
-      <p className="field-hint">
-        待审批数为全部业务记录的全局口径（含历史模拟记录），不是当前单个订单的数量；逐条处理请进「审批与审计」。
+      <p className="overview-scope-note">
+        待审批数为全部业务记录的全局口径（含历史记录），不是当前单个订单的数量；逐条处理请进「审批与审计」。
       </p>
 
       <section className="panel">
@@ -149,8 +153,8 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
               {(runs ?? []).map((r) => (
                 <div className="run-row" key={r.run_id}>
                   <span className="badge blue-badge">{r.agent_type}</span>
-                  <span>{displaySystemText(agentRunTypeNames[r.operation] ?? r.operation)}</span>
-                  <code>{displaySystemText(r.result_summary).slice(0, 40)}</code>
+                  <span className="run-op">{displaySystemText(agentRunTypeNames[r.operation] ?? r.operation)}</span>
+                  <code title={r.result_summary}>{displaySystemText(r.result_summary)}</code>
                   <b className={r.result_status === "ok" ? "text-green" : "text-red"}>{r.result_status}</b>
                 </div>
               ))}
@@ -169,7 +173,7 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="例如：SAL-ORD-2026-00023 什么时候能做完？"
+              placeholder="例如：SAL-ORD-2026-00001 什么时候能做完？"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && question.trim()) onNavigateAssistant(question.trim());
               }}

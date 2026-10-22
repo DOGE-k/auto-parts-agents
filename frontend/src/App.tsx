@@ -253,7 +253,7 @@ function App() {
           </div>
           <div className="brand-text">
             <strong>制造运营智能体平台</strong>
-            <span>汽车零部件 · 四岗协同</span>
+            <span>汽车零部件工厂</span>
           </div>
         </div>
         <div className="sidebar-caption">工作空间</div>
