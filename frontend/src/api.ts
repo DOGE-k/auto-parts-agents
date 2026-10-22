@@ -172,8 +172,29 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+/**
+ * 生成幂等键。
+ *
+ * ``crypto.randomUUID`` 只在安全上下文（HTTPS 或 localhost）可用；本项目按
+ * http://<公网IP>:5173 部署时浏览器不会暴露它，直接调用会抛 TypeError 并让所有
+ * 写操作在发请求前就失败。这里优先用安全上下文的实现，否则退回
+ * ``crypto.getRandomValues``（非安全上下文也可用），再退回时间戳+随机数。
+ */
+function newIdempotencyKey(): string {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;   // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;   // variant 10
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `idem-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 export function writeHeaders(): HeadersInit {
-  const headers: Record<string, string> = { "Idempotency-Key": crypto.randomUUID() };
+  const headers: Record<string, string> = { "Idempotency-Key": newIdempotencyKey() };
   const writeToken = getRealWriteToken();
   if (writeToken) headers["X-Real-Write-Token"] = writeToken;
   return headers;
