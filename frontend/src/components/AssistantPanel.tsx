@@ -306,12 +306,12 @@ export default function AssistantPanel({
       <div className="panel-heading">
         <div>
           <h2>智能协同问答</h2>
-          <p>直接用一句话提问（如"SAL-ORD-2026-00023 什么时候能做完"），协调智能体会自己判断需要什么数据，动态调用报价/采购/跟单/质量四个智能体查询真实 ERP/MES 后回答，调用链全程留痕</p>
+          <p>直接用一句话提问（如"SAL-ORD-2026-00001 什么时候能做完"），协调智能体会自己判断需要什么数据，动态调用报价/采购/跟单/质量四个智能体查询真实 ERP/MES 后回答，调用链全程留痕</p>
         </div>
         <span className="badge blue-badge">动态协同 · 只读</span>
       </div>
       {!sessionId ? (
-        <p className="field-hint">新会话，尚未关联业务对象；提问时请带上订单/工单/物料编号（如 SAL-ORD-2026-00023），或直接说明你想做什么。切到其他模块再回来，聊天记录会保留。</p>
+        <p className="field-hint">新会话，尚未关联业务对象；提问时请带上订单/工单/物料编号（如 SAL-ORD-2026-00001），或直接说明你想做什么。切到其他模块再回来，聊天记录会保留。</p>
       ) : (
         <p className="field-hint">当前会话 {sessionId} · 上一轮的客户/物料/订单/工单/数量/交期会自动沿用，回答中会回显；点"新会话"可重新开始（页面当前工单/订单不再自动带入）。</p>
       )}
@@ -356,7 +356,7 @@ export default function AssistantPanel({
         <textarea
           value={assistantQuestion}
           onChange={(e) => setAssistantQuestion(e.target.value)}
-          placeholder="例如：SAL-ORD-2026-00023 什么时候能做完？/ 这单为什么还不能发运？/ BD-2401 现在 2000 件多少钱？"
+          placeholder="例如：SAL-ORD-2026-00001 什么时候能做完？/ 这单为什么还不能发运？/ BD-2401 现在 2000 件多少钱？"
           rows={2}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
