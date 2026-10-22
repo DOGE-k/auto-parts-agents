@@ -543,7 +543,9 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
             <span className={`ppap-state-dot ppap-state-${String(task.run_state).toLowerCase()}`} aria-hidden="true" />
             <span>{stateLabel(task.run_state)}</span>
             <small>{stateLabel(task.package_state)}</small>
-            <span className={`ppap-chip ${blocking ? "ppap-chip-block" : "ppap-chip-ok"}`}>{blocking ? `阻断 ${blocking}` : "无阻断"}</span>
+            {/* 未运行过检查时阻断数为 0 只代表"还没查"，不能显示成"无阻断"。 */}
+            {!task.checks_run ? <span className="ppap-chip ppap-chip-idle">尚未检查</span>
+              : <span className={`ppap-chip ${blocking ? "ppap-chip-block" : "ppap-chip-ok"}`}>{blocking ? `阻断 ${blocking}` : "无阻断"}</span>}
           </span>
         </button>;
       })}

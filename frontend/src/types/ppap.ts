@@ -11,6 +11,7 @@ export type PpapTask = {
   run_state: string; package_state: string; customer_state: string; template_id: string;
   template_version: string; template_source: string; business_object: PpapJson; coverage: PpapJson;
   input_snapshot_hash: string; state_note: string; open_issue_count?: number; blocking_issue_count?: number;
+  checks_run?: boolean; checked_at?: string;
 };
 export type PpapTaskFields = Pick<PpapTask, "customer_id" | "customer_name" | "part_no" | "part_name" |
   "part_side" | "drawing_version" | "engineering_change_level" | "submission_reason" | "submission_level" | "due_date">;

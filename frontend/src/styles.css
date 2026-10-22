@@ -2983,6 +2983,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .ppap-chip-real { background: #e9f7f3; color: var(--teal); border-color: #cbe8e2; }
 .ppap-chip-block { background: #fdecea; color: #a8352d; border-color: #f2cdc9; }
 .ppap-chip-ok { background: #eaf6f0; color: #2f7d5b; border-color: #cbe7d9; }
+.ppap-chip-idle { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
 .ppap-empty { display: grid; gap: 6px; padding: 32px 20px; text-align: center; background: var(--surface); border: 1px dashed var(--line); border-radius: var(--r-md); }
 .ppap-empty p { margin: 0; font-size: 13px; }
 .ppap-loading { margin: 0; padding: 12px 0; color: var(--muted); font-size: 13px; }

@@ -1121,6 +1121,10 @@ def list_tasks(
     for item in items:
         item["open_issue_count"] = open_issues.get(item["task_id"], 0)
         item["blocking_issue_count"] = blockers.get(item["task_id"], 0)
+        # 从未运行过检查时阻断数为 0 只代表"还没查"，不能显示成"无阻断"。
+        checks = (item.get("coverage") or {}).get("checks") or {}
+        item["checks_run"] = bool(checks.get("check_count"))
+        item["checked_at"] = (item.get("coverage") or {}).get("updated_at", "") if item["checks_run"] else ""
     return {
         "items": items,
         "total": total,
