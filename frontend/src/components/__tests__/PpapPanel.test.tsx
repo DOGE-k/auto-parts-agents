@@ -60,7 +60,9 @@ async function mount(logged = true, roles = ["quality_manager"]) {
   cleanups.push(() => { act(() => root.unmount()); container.remove(); });
   return { container, login };
 }
-const button = (container: HTMLElement, text: string) => Array.from(container.querySelectorAll("button")).find((candidate) => candidate.getAttribute("aria-label") === text || candidate.textContent === text)!;
+const button = (container: HTMLElement, text: string) => Array.from(container.querySelectorAll("button")).find((candidate) => candidate.getAttribute("aria-label") === text
+  || candidate.getAttribute("aria-label")?.startsWith(text) || candidate.textContent === text
+  || candidate.textContent?.startsWith(text))!;
 async function click(container: HTMLElement, text: string) { await act(async () => { button(container, text).click(); }); }
 function field(container: HTMLElement, label: string) {
   return Array.from(container.querySelectorAll("label")).find((node) => node.firstChild?.textContent?.trim().startsWith(label))!.querySelector("input,textarea,select") as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;

@@ -494,8 +494,12 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
     {!hasProjectSession ? <div className="ppap-notice"><span>编制、输入确认、审核和归档需要项目账号登录。当前查询权限由服务端身份校验决定。</span>
       <button className="button secondary" onClick={onLogin}>去登录</button></div> :
       !canWrite && <p className="muted">当前角色无质量管理权限，只可查询。</p>}
-    {error && <div className="error" role="alert">{displaySystemText(error)}</div>}
-    {notice && <div className="ppap-success" role="status">{displaySystemText(notice)}</div>}
+    {(error || notice) && <div className="ppap-toast-slot" aria-live="polite">
+      <div className={`ppap-toast ${error ? "ppap-toast-error" : "ppap-toast-ok"}`} role={error ? "alert" : "status"}>
+        <span>{displaySystemText(error || notice || "")}</span>
+        <button type="button" aria-label="关闭提示" onClick={() => { setError(""); setNotice(""); }}>×</button>
+      </div>
+    </div>}
     {showCreate && <form className="card ppap-card" onSubmit={(event) => {
       event.preventDefault();
       void perform(async () => {
@@ -510,23 +514,40 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
       <BaseFields fields={createFields} onChange={setCreateFields} disabled={writeDisabled} />
       <p className="muted">负责人及操作身份取自当前项目会话。左右件各自建立任务，不根据名称或列表顺序自动匹配。</p>
       <button className="button" disabled={writeDisabled}>确认启动任务</button></form>}
-    {(!detail || showTaskList) && <div className="ppap-task-picker-heading"><span>选择要编制的任务</span>
+    {(!detail || showTaskList) && <div className="ppap-task-picker-heading"><div><h3>选择要编制的任务</h3><p className="muted">按零件号或任务范围筛选；左右件各自独立成任务。</p></div>
       {detail && <button type="button" className="button secondary" disabled={taskNavigationDisabled} onClick={() => setShowTaskList(false)}>收起任务列表</button>}</div>}
     <div hidden={!!selectedId && !showTaskList} className="ppap-task-browser">
-    <div className="ppap-search"><label>按零件号查询<input value={filter} onChange={(e) => setFilter(e.target.value)} /></label>
-      <label>任务范围<select aria-label="任务模式筛选" value={modeFilter} disabled={taskNavigationDisabled} onChange={(e) => { setOffset(0); setModeFilter(e.target.value as PpapMode | ""); }}>
+    <div className="ppap-search" role="search">
+      <label className="ppap-search-field">按零件号查询<input placeholder="例如 BD-2401 / TEST-PPAP-…" value={filter} onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setOffset(0); setQuery(filter); } }} /></label>
+      <label className="ppap-search-field ppap-search-scope">任务范围<select aria-label="任务模式筛选" value={modeFilter} disabled={taskNavigationDisabled} onChange={(e) => { setOffset(0); setModeFilter(e.target.value as PpapMode | ""); }}>
         <option value="REAL">正式任务</option><option value="TEST">测试任务</option><option value="">全部任务</option></select></label>
-      <button className="button secondary" disabled={taskNavigationDisabled} onClick={() => { setOffset(0); setQuery(filter); }}>查询</button>
-      <button className="button secondary" disabled={taskNavigationDisabled || loading} onClick={() => void perform(async () => { await loadList(); }, "任务列表已刷新")}>刷新列表</button></div>
-    {loading && <p role="status">正在读取 PPAP 资料…</p>}
+      <div className="ppap-search-actions">
+        <button className="button" disabled={taskNavigationDisabled} onClick={() => { setOffset(0); setQuery(filter); }}>查询</button>
+        <button className="button secondary" disabled={taskNavigationDisabled || loading} onClick={() => void perform(async () => { await loadList(); }, "任务列表已刷新")}>{loading ? "读取中…" : "刷新列表"}</button>
+      </div>
+    </div>
+    {loading && <p className="ppap-loading" role="status">正在读取 PPAP 资料…</p>}
     {list && <div className="ppap-task-list">
-      {!list.items.length && <p className="muted">当前查询范围内没有 PPAP 任务。</p>}
-      {list.items.map((task) => <button key={task.task_id} className={`ppap-task-item ${selectedId === task.task_id ? "selected" : ""}`}
-        aria-pressed={selectedId === task.task_id} disabled={taskNavigationDisabled} onClick={() => { setSelectedId(task.task_id); setTab("prepare"); setShowTaskList(false); }}>
-        <strong>{task.part_no} · {SIDE_LABELS[task.part_side]}</strong><strong className={task.data_mode === "TEST" ? "ppap-danger" : ""}>{modeLabel(task.data_mode)}</strong><span>{task.part_name} · {task.customer_name}</span>
-        <span>{stateLabel(task.run_state)} / {stateLabel(task.package_state)} · 阻断 {task.blocking_issue_count ?? "待检查"}</span><small>{task.task_id}</small>
-      </button>)}
-      <div className="ppap-actions"><span className="muted">共 {list.total} 项；当前 {offset + (list.items.length ? 1 : 0)}–{offset + list.items.length}</span>
+      {!list.items.length && <div className="ppap-empty"><strong>当前查询范围内没有 PPAP 任务</strong><p className="muted">{modeFilter === "TEST" ? "测试任务需先运行种子脚本创建；也可切换「全部任务」查看正式任务。" : "可切换任务范围，或新建 PPAP 任务。"}</p></div>}
+      {list.items.map((task) => {
+        const blocking = task.blocking_issue_count;
+        return <button key={task.task_id} className={`ppap-task-item ${selectedId === task.task_id ? "selected" : ""}`}
+          aria-pressed={selectedId === task.task_id} disabled={taskNavigationDisabled} onClick={() => { setSelectedId(task.task_id); setTab("prepare"); setShowTaskList(false); }}>
+          <span className="ppap-task-item-main">
+            <span className="ppap-task-item-title"><strong>{task.part_no}</strong><span className="ppap-chip">{SIDE_LABELS[task.part_side]}</span>
+              <span className={`ppap-chip ${task.data_mode === "TEST" ? "ppap-chip-test" : "ppap-chip-real"}`}>{modeLabel(task.data_mode)}</span></span>
+            <span className="ppap-task-item-sub">{task.part_name} · {task.customer_name}</span>
+            <span className="ppap-task-item-id">{task.task_id}</span>
+          </span>
+          <span className="ppap-task-item-status">
+            <span className={`ppap-state-dot ppap-state-${String(task.run_state).toLowerCase()}`} aria-hidden="true" />
+            <span>{stateLabel(task.run_state)}</span>
+            <small>{stateLabel(task.package_state)}</small>
+            <span className={`ppap-chip ${blocking ? "ppap-chip-block" : "ppap-chip-ok"}`}>{blocking ? `阻断 ${blocking}` : "无阻断"}</span>
+          </span>
+        </button>;
+      })}
+      <div className="ppap-actions ppap-list-footer"><span className="muted">共 {list.total} 项；当前 {offset + (list.items.length ? 1 : 0)}–{offset + list.items.length}</span>
         <button className="button secondary" disabled={taskNavigationDisabled || offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>上一页</button>
         <button className="button secondary" disabled={taskNavigationDisabled || offset + list.items.length >= list.total} onClick={() => setOffset(offset + 20)}>下一页</button></div>
     </div>}
@@ -551,7 +572,16 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
             }
           }
         } else if (workflow?.next.navigation) navigateToMissing(workflow.next.navigation);
-        else if (workflow) setTab(workflow.next.stage);
+        else if (workflow) {
+          setTab(workflow.next.stage);
+          // 进入"确认要求"后必须把适用性表格滚到视野内，否则长页面上点击看起来毫无反应。
+          if (workflow.next.stage === "requirements") {
+            requestAnimationFrame(() => {
+              if (applicabilityRef.current instanceof HTMLDetailsElement) applicabilityRef.current.open = true;
+              applicabilityRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+            });
+          }
+        }
       }}>{inputNeedsReadback ? "返回核对已保存记录" : hasUnsavedInputs ? "返回未保存的录入" : workflow?.next.label}</button></div>
       <section className="ppap-stage-panel" aria-label="确认要求工作区" hidden={tab !== "requirements"}><div className="ppap-stage-intro"><h3>确认要求</h3><p>明确零件、图纸版本、提交原因，以及本次需要提交或留存哪些文件。</p></div>
         {navigationNote && <p className="ppap-notice" role="status">{navigationNote}</p>}
@@ -564,8 +594,19 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
             <button className="button" disabled={writeDisabled}>保存已确认关联</button></form>
         </details>
         <details ref={applicabilityRef} className="card ppap-card" open={!!workflow?.pendingRequirements}><summary>条目适用性确认（已确认 {detail.applicability.confirmed}/{detail.applicability.total} 项）</summary><p className="muted">建议值只作参考；请逐项选择并说明依据，不适用的条目必须填写依据。</p>
+          <div className="ppap-applicability-toolbar">
+            <span className="muted">本页已选择 <strong>{Object.values(decisions).filter((v) => v.requirement !== "").length}</strong> 项</span>
+            <div className="ppap-actions">
+              <button type="button" className="button secondary" disabled={writeDisabled}
+                onClick={() => setDecisions(Object.fromEntries(detail.elements.map((element) => [element.element_id,
+                  { requirement: element.suggested_requirement as PpapRequirement, basis: decisions[element.element_id]?.basis || `采用建议值 ${REQUIREMENT_LABELS[element.suggested_requirement] || ""}（仍需人工确认）` }])))
+                }>填入全部建议值</button>
+              <button type="button" className="button secondary" disabled={writeDisabled}
+                onClick={() => setDecisions({})}>清空本页选择</button>
+            </div>
+          </div>
           <div className="ppap-table-scroll"><table className="ppap-table"><thead><tr><th>条目 / 适用条件</th><th>适用性</th><th>依据</th><th>编制状态</th></tr></thead>
-            <tbody>{detail.elements.map((element) => <tr key={element.element_id}><td><strong>{element.title}</strong><small>{element.applicability_condition || element.notes}</small>
+            <tbody>{detail.elements.map((element) => <tr key={element.element_id} className={decisions[element.element_id]?.requirement ? "ppap-row-chosen" : ""}><td><strong>{element.title}</strong><small>{element.applicability_condition || element.notes}</small>
               <small>建议：{REQUIREMENT_LABELS[element.suggested_requirement] || "待确认"}</small></td><td>
               <select aria-label={`${element.title}适用性`} value={decisions[element.element_id]?.requirement || ""} disabled={writeDisabled}
                 onChange={(e) => setDecisions({ ...decisions, [element.element_id]: { ...decisions[element.element_id], requirement: e.target.value as PpapRequirement } })}>
@@ -573,11 +614,14 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
               <td><textarea aria-label={`${element.title}适用依据`} rows={2} value={decisions[element.element_id]?.basis || ""} disabled={writeDisabled}
                 onChange={(e) => setDecisions({ ...decisions, [element.element_id]: { ...decisions[element.element_id], basis: e.target.value } })} /></td>
               <td>{stateLabel(element.status)}<small>{element.status_reason}</small></td></tr>)}</tbody></table></div>
-          <button className="button" disabled={writeDisabled || !Object.values(decisions).some((v) => v.requirement !== "")} onClick={() => {
+          <div className="ppap-sticky-actions">
+            <span className="muted">已确认 {detail.applicability.confirmed}/{detail.applicability.total}；未确认条目会继续阻断批准。</span>
+          <button className="button" aria-label="确认当前选择（将提交本页已选择的适用性）" disabled={writeDisabled || !Object.values(decisions).some((v) => v.requirement !== "")} onClick={() => {
             const chosen = Object.entries(decisions).filter(([, value]) => value.requirement !== "").map(([element_id, value]) => ({ element_id, ...value }));
             if (chosen.some((v) => v.requirement === "not_applicable" && !v.basis.trim())) { setError("不适用的条目必须填写依据"); return; }
             void perform(() => confirmPpapApplicability(selectedId, chosen), "适用性已确认；尚未选择的条目仍待确认");
-          }}>确认当前选择</button>
+          }}>{busy ? "正在提交…" : `确认当前选择（${Object.values(decisions).filter((v) => v.requirement !== "").length} 项）`}</button>
+          </div>
         </details>
       </section>
       <section className="ppap-stage-panel" aria-label="准备资料工作区" hidden={tab !== "prepare"}><div className="ppap-stage-intro"><h3>准备资料</h3><p>选择资料类别补录，或引用已取得的原始文件；保存后再编制与检查。</p></div>
