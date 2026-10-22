@@ -106,30 +106,32 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .brand-mark {
   width: 40px;
   height: 40px;
-  border-radius: var(--r-md);
-  background: linear-gradient(135deg, #6ee0cc 0%, #2eb8a8 100%);
-  color: #0a3d36;
+  flex: 0 0 40px;
+  border-radius: 11px;
+  background: linear-gradient(150deg, #35d6c0 0%, #0f9d8f 52%, #0a6f66 100%);
+  color: #04332e;
   display: grid;
   place-items: center;
-  font-size: 18px;
-  font-weight: 800;
-  box-shadow: 0 4px 12px rgba(110, 224, 204, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  box-shadow: 0 4px 14px rgba(20, 190, 168, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-.brand-lockup strong {
+.brand-lockup a, .brand-lockup > div:last-child { min-width: 0; }
+.brand-text { display: grid; gap: 4px; min-width: 0; }
+.brand-text strong {
   display: block;
-  font-size: 16px;
+  font-size: 14px;
   color: #f0f7f5;
-  letter-spacing: -0.01em;
   font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
 }
 
-.brand-lockup span {
+.brand-text span {
   display: block;
   color: #6e8c8a;
   font-size: 11px;
-  margin-top: 3px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .sidebar-caption, .eyebrow {

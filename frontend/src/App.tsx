@@ -239,8 +239,22 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark">四</div>
-          <div><strong>四智协作</strong><span>汽车零部件工厂</span></div>
+          <div className="brand-mark" aria-hidden="true">
+            {/* 四个圆点由一个中心节点连接：报价/采购/跟单/质量四岗协同 */}
+            <svg viewBox="0 0 32 32" width="26" height="26" fill="none">
+              <path d="M16 16 L16 6 M16 16 L26 16 M16 16 L16 26 M16 16 L6 16"
+                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.55" />
+              <circle cx="16" cy="6" r="2.6" fill="currentColor" />
+              <circle cx="26" cy="16" r="2.6" fill="currentColor" />
+              <circle cx="16" cy="26" r="2.6" fill="currentColor" />
+              <circle cx="6" cy="16" r="2.6" fill="currentColor" />
+              <circle cx="16" cy="16" r="3.1" fill="currentColor" />
+            </svg>
+          </div>
+          <div className="brand-text">
+            <strong>制造运营智能体平台</strong>
+            <span>汽车零部件 · 四岗协同</span>
+          </div>
         </div>
         <div className="sidebar-caption">工作空间</div>
         <nav className="nav-list">
