@@ -2410,6 +2410,25 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .agent-run-detail > small { color: var(--muted); font-weight: 600; }
 .agent-run-detail code { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink-2); word-break: break-all; }
 .agent-run-error code { color: #c4453c; }
+/* 任务 8：运行详情结构化摘要卡 + 次级 JSON 折叠 */
+.agent-run-brief {
+  display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start;
+  padding: 8px 10px; background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+}
+.agent-run-brief > small { color: var(--muted); font-weight: 600; padding-top: 2px; }
+.agent-run-brief-result { margin: 0; font-size: 12.5px; color: var(--ink); line-height: 1.6; word-break: break-word; }
+.run-arg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.run-arg-list li { display: flex; gap: 10px; font-size: 11px; line-height: 1.6; min-width: 0; }
+.run-arg-name { flex: 0 0 auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-weight: 600; color: var(--teal-dark); }
+.run-arg-value { font-family: var(--mono); color: var(--ink-2); word-break: break-all; }
+.agent-run-raw > summary { cursor: pointer; font-size: 11px; color: var(--faint); user-select: none; }
+.agent-run-raw > summary:hover { color: var(--muted); }
+.agent-run-raw pre {
+  margin: 6px 0 0; padding: 8px 10px; max-height: 260px; overflow: auto;
+  font-family: var(--mono); font-size: 11px; line-height: 1.55; color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  white-space: pre-wrap; word-break: break-all;
+}
 .evidence-item {
   display: grid; grid-template-columns: 90px 120px 150px 1fr; gap: 10px;
   padding: 6px 8px; margin-top: 4px; background: var(--surface);

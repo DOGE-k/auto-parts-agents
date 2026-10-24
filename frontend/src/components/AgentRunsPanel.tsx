@@ -1,8 +1,11 @@
 // Agent 运行记录面板（阶段三：页面可查，持久化；阶段十 10.5 从 RealBusinessPage 抽出，状态自包含）
+// 前端优化清单任务 8：详情区改为结构化摘要卡（输入参数逐项 + 结果关键字段一句中文），
+// 完整 JSON 收进次级 <details> 折叠保留；提取复用 lib/result-summary（与任务 7 调用链同一套逻辑）。
 import { useState, useCallback } from "react";
 import { api, agentRunOperationNames, agentRunTypeNames } from "../api";
 import type { AgentRunSummary, AgentRunDetail, AgentRunEvidenceItem } from "../api";
 import { displaySystemText } from "../lib/system-labels";
+import { summarizeRunInput, summarizeRunResult } from "../lib/result-summary";
 
 export default function AgentRunsPanel() {
   const [agentRunsOpen, setAgentRunsOpen] = useState(false);
@@ -107,10 +110,39 @@ export default function AgentRunsPanel() {
                       {!agentRunDetail && <small>加载详情中...</small>}
                       {agentRunDetail && (
                         <>
-                          <div className="agent-run-input">
-                            <small>输入</small>
-                            <code>{displaySystemText(JSON.stringify(agentRunDetail.input?.args ?? []))}{displaySystemText(JSON.stringify(agentRunDetail.input?.kwargs ?? {}))}</code>
-                          </div>
+                          {(() => {
+                            const inputItems = summarizeRunInput(agentRunDetail.input);
+                            const resultBrief = summarizeRunResult(
+                              agentRunDetail.agent_type,
+                              agentRunDetail.operation,
+                              agentRunDetail.result,
+                            );
+                            return (
+                              <>
+                                <div className="agent-run-brief">
+                                  <small>输入参数</small>
+                                  {inputItems.length ? (
+                                    <ul className="run-arg-list">
+                                      {inputItems.map((item, idx) => (
+                                        <li key={idx}>
+                                          <span className="run-arg-name">{item.name}</span>
+                                          <span className="run-arg-value">{item.value}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="agent-run-brief-result">—</p>
+                                  )}
+                                </div>
+                                {resultBrief && (
+                                  <div className="agent-run-brief">
+                                    <small>结果摘要</small>
+                                    <p className="agent-run-brief-result">{resultBrief}</p>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                           {agentRunDetail.error && (
                             <div className="agent-run-error">
                               <small>错误</small>
@@ -141,6 +173,16 @@ export default function AgentRunsPanel() {
                           <div className="agent-run-times">
                             <small>开始 {agentRunDetail.started_at?.replace("T", " ").slice(0, 19) ?? "—"} · 结束 {agentRunDetail.finished_at?.replace("T", " ").slice(0, 19) ?? "—"}</small>
                           </div>
+                          <details className="agent-run-raw">
+                            <summary>完整 JSON 原文（输入 / 结果 / 错误）</summary>
+                            <pre>
+                              {JSON.stringify(
+                                { input: agentRunDetail.input, result: agentRunDetail.result, error: agentRunDetail.error },
+                                null,
+                                2,
+                              )}
+                            </pre>
+                          </details>
                         </>
                       )}
                     </div>
