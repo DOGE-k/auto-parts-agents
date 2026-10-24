@@ -3290,3 +3290,111 @@ td { border-top: 1px solid #EEF2F7; }
   font-variant-numeric: tabular-nums;
 }
 .overview-lists { display: grid; gap: 16px; margin-bottom: 16px; }
+
+/* ═══════ 可读性修复 2026-10-24 ═══════
+   核心问题：蓝色填充块挡住文字。原则：大面积用浅色留白+深字，
+   蓝色只在按钮和选中态上小面积使用，确保 WCAG AA 对比度。 */
+
+/* ── 侧栏导航：去掉光晕，实色选中，字色更白 ── */
+.nav-item.active {
+  box-shadow: none;
+  background: #2563eb;
+  color: #ffffff;
+}
+.nav-item.active .nav-icon { color: #ffffff; }
+.nav-item.active::before { display: none; }
+
+/* ── 步骤条：去掉蓝填充，改为白底深字+边框，当前步深蓝描边 ── */
+.step-number {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #CBD5E1;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.step-item.active .step-number {
+  background: #1E40AF;
+  color: #ffffff;
+  border-color: #1E40AF;
+}
+.step-item.current .step-number {
+  border-color: #2563EB;
+  color: #1E40AF;
+  box-shadow: inset 0 0 0 1px #93C5FD;
+  background: #EFF6FF;
+}
+.step-item span {
+  color: #334155;
+  font-size: 13px;
+}
+.step-item.active span { color: #1E40AF; font-weight: 600; }
+
+/* ── Andon 横幅：提高白字对比度，去掉低对比副标题 ── */
+.andon-banner {
+  background: linear-gradient(135deg, #1E2D4F 0%, #1B3A6B 100%);
+}
+.andon-banner .andon-sub { color: #C4D4E8; }
+.andon-stats .andon-stat span { color: #B8C8DD; }
+
+/* ── 徽标/状态：所有 badge 确保深底浅字或浅底深字 ── */
+.badge { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.badge.green { background: #DCFCE7; color: #166534; }
+.badge.blue-badge { background: #DBEAFE; color: #1E40AF; }
+.badge.amber-chip { background: #FEF3C7; color: #92400E; }
+.badge.red-badge { background: #FEE2E2; color: #991B1B; }
+
+/* ── KPI 卡片：去浅蓝遮罩，改白底深字 ── */
+.kpi-card { background: #ffffff; }
+.kpi-card .kpi-body strong { color: #0F172A; }
+.kpi-card .kpi-body .kpi-label { color: #64748B; }
+
+/* ── 面板标题：更清晰 ── */
+.panel-heading h2 { color: #1E293B; font-size: 15px; font-weight: 700; }
+.panel-heading p { color: #94A3B8; font-size: 11px; }
+
+/* ── 页头：标题更清晰 ── */
+.page-heading h1 { color: #0F172A; }
+.page-heading .eyebrow {
+  color: #1E40AF;
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+}
+
+/* ── AI 面板图纸青：更清晰的对比 ── */
+.assistant-panel { border-top: 3px solid #0891B2; }
+.assistant-panel .panel-heading h2 { color: #0E7490; }
+
+/* ── 表格：数字列更清晰 ── */
+td { color: #334155; }
+td strong { color: #0F172A; }
+
+/* ── 按钮主色：实色不渐变，白字更清晰 ── */
+.button.primary {
+  background: #2563EB;
+  color: #ffffff;
+  box-shadow: none;
+  font-weight: 600;
+}
+.button.primary:hover {
+  background: #1D4ED8;
+  box-shadow: none;
+}
+
+/* ── 品牌标：实色蓝底白图标，去渐变 ── */
+.brand-mark {
+  background: #2563EB;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+/* ── 来源标签 ── */
+.source-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.source-tag.erp { background: #DBEAFE; color: #1E40AF; }
+.source-tag.mes { background: #D1FAE5; color: #065F46; }
