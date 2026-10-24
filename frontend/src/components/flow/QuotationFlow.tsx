@@ -149,37 +149,43 @@ export function QuotationReviewPanel({
       <div className="kpi-grid">
         <div className="kpi-card">
           <span className="kpi-icon blue">¥</span>
-          <span className="kpi-label">报价单价</span>
-          <strong>
-            {quotation.currency} {Number(quotation.unit_price).toLocaleString()}
-          </strong>
+          <span className="kpi-body">
+            <span className="kpi-label">报价单价</span>
+            <strong>
+              {quotation.currency} {Number(quotation.unit_price).toLocaleString()}
+            </strong>
+          </span>
         </div>
         <div className="kpi-card">
           <span className="kpi-icon purple">Σ</span>
-          <span className="kpi-label">报价总额</span>
-          <strong>
-            {quotation.currency} {Number(quotation.total_price).toLocaleString()}
-          </strong>
+          <span className="kpi-body">
+            <span className="kpi-label">报价总额</span>
+            <strong>
+              {quotation.currency} {Number(quotation.total_price).toLocaleString()}
+            </strong>
+          </span>
         </div>
         <div className="kpi-card">
           <span className="kpi-icon amber">◷</span>
-          <span className="kpi-label">预计交期</span>
-          <strong
-            title={displaySystemText(quotation.delivery_estimate?.note)}
-          >
-            {quotation.delivery_estimate?.estimated_days != null
-              ? `${quotation.delivery_estimate.estimated_days} 天`
-              : "数据缺失"}
-          </strong>
-          {quotation.delivery_estimate?.basis === "missing" ? (
-            <small>需补录 ERP 交期数据</small>
-          ) : quotation.delivery_estimate?.basis === "mes_work_order_schedule" ? (
-            <small title={displaySystemText(quotation.delivery_estimate?.note)}>
-              MES 排程倒计时 · {displaySystemText(quotation.delivery_estimate.source)}
-            </small>
-          ) : quotation.delivery_estimate?.basis === "stock_available" ? (
-            <small>成品库存可直发</small>
-          ) : null}
+          <span className="kpi-body">
+            <span className="kpi-label">预计交期</span>
+            <strong
+              title={displaySystemText(quotation.delivery_estimate?.note)}
+            >
+              {quotation.delivery_estimate?.estimated_days != null
+                ? `${quotation.delivery_estimate.estimated_days} 天`
+                : "数据缺失"}
+            </strong>
+            {quotation.delivery_estimate?.basis === "missing" ? (
+              <small>需补录 ERP 交期数据</small>
+            ) : quotation.delivery_estimate?.basis === "mes_work_order_schedule" ? (
+              <small title={displaySystemText(quotation.delivery_estimate?.note)}>
+                MES 排程倒计时 · {displaySystemText(quotation.delivery_estimate.source)}
+              </small>
+            ) : quotation.delivery_estimate?.basis === "stock_available" ? (
+              <small>成品库存可直发</small>
+            ) : null}
+          </span>
         </div>
         <div className="kpi-card">
           <span
@@ -187,8 +193,10 @@ export function QuotationReviewPanel({
           >
             {quotation.stock_sufficient ? "✓" : "!"}
           </span>
-          <span className="kpi-label">库存状态</span>
-          <strong>{quotation.stock_sufficient ? "库存充足" : "需生产"}</strong>
+          <span className="kpi-body">
+            <span className="kpi-label">库存状态</span>
+            <strong>{quotation.stock_sufficient ? "库存充足" : "需生产"}</strong>
+          </span>
         </div>
       </div>
 

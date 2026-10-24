@@ -321,10 +321,6 @@ function App() {
           </div>
           <p className="sidebar-approver">
             当前项目用户：<b>{realIdentity ? `${realIdentity.actor_id}` : "未登录"}</b>
-            <br />
-            {isRealModule(page)
-              ? <>真实 ERP/MES 数据<br />Agent 辅助 · 草稿写入需审批</>
-              : <>场景回放仍是合成数据<br />生产跟单含真实 MES 完工数据</>}
           </p>
           <div className="version-tag">Runtime · 0.1.0</div>
         </div>

@@ -78,15 +78,15 @@ export type RealModuleKey =
   | "connection";   // 系统连接（数据连接 + 项目登录 + 高级联调）
 
 // 各模块页头文案（信息架构改版 §4.2/§4.3：顶部保留业务语境，项目身份压缩为一行摘要）
-const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subtitle: string }> = {
-  assistant: { eyebrow: "AI 协同", title: "AI 协同问答", subtitle: "用一句话提问，协调者自动调度报价/采购/跟单/质量四个智能体查询真实 ERP/MES；写操作停在人工审批。" },
-  overview: { eyebrow: "工作台", title: "业务总览", subtitle: "待审批、质量待办、风险事件与最近业务链；处理动作进入对应业务模块。" },
-  sales: { eyebrow: "业务协同", title: "销售与订单", subtitle: "报价分析 → 报价审批 → ERP 销售订单草稿；后续采购与生产在对应模块继续。" },
-  procurement: { eyebrow: "业务协同", title: "采购与缺料", subtitle: "采购分析 → 供应商方案审批 → PO 草稿；缺料事件会自动协同相关方。" },
-  production: { eyebrow: "业务协同", title: "生产跟单", subtitle: "工单下达/选择 → 跟单进度 + 质量记录 + 发运门禁；MES 完工数据为只读视图。" },
-  quality: { eyebrow: "业务协同", title: "质量中心", subtitle: "PPAP 编制与审核、跨工单质量问题处理；资料包审批与 NCR 处置分别留痕。" },
-  audit: { eyebrow: "记录与管理", title: "审批与审计", subtitle: "每次智能体调用的输入、结果与耗时全程留痕，可追溯。" },
-  connection: { eyebrow: "记录与管理", title: "系统连接", subtitle: "数据连接状态与项目登录会话；调试令牌收在高级联调设置里。" },
+const MODULE_META: Record<RealModuleKey, { title: string; subtitle: string }> = {
+  assistant: { title: "AI 协同问答", subtitle: "用一句话提问，协调者自动调度报价/采购/跟单/质量四个智能体查询真实 ERP/MES；写操作停在人工审批。" },
+  overview: { title: "业务总览", subtitle: "待审批、质量待办、风险事件与最近业务链；处理动作进入对应业务模块。" },
+  sales: { title: "销售与订单", subtitle: "报价分析 → 报价审批 → ERP 销售订单草稿；后续采购与生产在对应模块继续。" },
+  procurement: { title: "采购与缺料", subtitle: "采购分析 → 供应商方案审批 → PO 草稿；缺料事件会自动协同相关方。" },
+  production: { title: "生产跟单", subtitle: "工单下达/选择 → 跟单进度 + 质量记录 + 发运门禁；MES 完工数据为只读视图。" },
+  quality: { title: "质量中心", subtitle: "PPAP 编制与审核、跨工单质量问题处理；资料包审批与 NCR 处置分别留痕。" },
+  audit: { title: "审批与审计", subtitle: "每次智能体调用的输入、结果与耗时全程留痕，可追溯。" },
+  connection: { title: "系统连接", subtitle: "数据连接状态与项目登录会话；调试令牌收在高级联调设置里。" },
 };
 
 // 订单全流程 8 步（与后端审批链一致；各业务模块只展示自己的阶段）
@@ -922,7 +922,6 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     <div className={`page-content ${activeModule === "quality" && qualityView === "ppap" ? "ppap-focused" : ""}`}>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">真实系统业务链 · {MODULE_META[activeModule].eyebrow}</div>
           <h1>{MODULE_META[activeModule].title}</h1>
           <p>{MODULE_META[activeModule].subtitle}</p>
           <div className="real-identity-compact">
@@ -960,10 +959,6 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
               <button className="button ghost" onClick={() => onNavigate("connection")}>去系统连接</button>
             </div>
           )}
-        </div>
-        <div className="heading-badges">
-          <span className="badge green">真实数据连接</span>
-          <span className="badge blue-badge">Agent 辅助</span>
         </div>
       </div>
 
