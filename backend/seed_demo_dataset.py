@@ -240,6 +240,8 @@ class DemoCase:
     submit: bool
     report: tuple[int, int] | None  # (passed_qty, elapsed_minutes)
     issue: tuple[str, str, int, bool] | None  # (title, description, qty, close_after)
+    order_date: str = "2026-10-24"
+    done: bool = False  # 完工历史单：全部工序报满并置 DONE
 
 
 CASES = (
@@ -254,6 +256,38 @@ CASES = (
              ("制动盘前轮表面局部锈斑", "工序间周转存放 48 小时后出现局部锈斑，影响外观等级；判定返抛光处理，已全部返工完成并复检合格。", 8, True)),
     DemoCase("WO-2026-1024-04", "比亚迪汽车工业有限公司", "SK-3401", "转向节",
              450, 120, "2026-12-08", 3, True, None, None),
+    # 第二波：历史纵深（更早日期、多状态、含完工单）
+    DemoCase("WO-2026-0918-01", "上汽集团", "BD-2401", "制动盘-前轮",
+             800, 85, "2026-10-10", 3, True, None, None,
+             order_date="2026-09-18", done=True),
+    DemoCase("WO-2026-0922-01", "长城汽车股份有限公司", "CP-5601", "离合器片",
+             500, 96, "2026-10-16", 3, True, None, None,
+             order_date="2026-09-22", done=True),
+    DemoCase("WO-2026-0925-01", "比亚迪汽车工业有限公司", "TS-4501", "传动轴总成",
+             260, 350, "2026-11-05", 4, True, (120, 260), None,
+             order_date="2026-09-25"),
+    DemoCase("WO-2026-0928-01", "一汽解放汽车有限公司", "SK-3401", "转向节",
+             380, 120, "2026-11-12", 3, True, None, None,
+             order_date="2026-09-28", done=True),
+    DemoCase("WO-2026-1006-01", "重庆长安汽车股份有限公司", "BD-2402", "制动盘-后轮",
+             550, 78, "2026-11-25", 3, True, (200, 420), None,
+             order_date="2026-10-06"),
+    DemoCase("WO-2026-1012-01", "上汽集团", "CP-5601", "离合器片",
+             300, 96, "2026-11-30", 3, False, None, None,
+             order_date="2026-10-12"),
+    DemoCase("WO-2026-1015-01", "长城汽车股份有限公司", "BD-2401", "制动盘-前轮",
+             450, 85, "2026-12-12", 3, True, None, None,
+             order_date="2026-10-15"),
+    DemoCase("WO-2026-1018-01", "一汽解放汽车有限公司", "TS-4501", "传动轴总成",
+             150, 350, "2026-12-18", 4, False, None, None,
+             order_date="2026-10-18"),
+)
+
+# 历史质量问题（创建后回填过去时间戳，形成处置历史）
+HISTORY_ISSUES = (
+    ("WO-2026-0918-01", "制动盘前轮加工面划伤", "转运过程工位器具磕碰导致划伤，深度未超差但影响外观；全数返抛光处理并复检合格。", 6, 28),
+    ("WO-2026-0922-01", "离合器片铆接力批次波动", "铆接力监控曲线超出工艺窗口上限，隔离复检后判定合格，工艺参数已回调。", 3, 21),
+    ("WO-2026-0928-01", "转向节螺纹孔位置度偏移", "夹具定位销磨损导致位置度 0.08mm 超差，更换定位销后首件三坐标复检合格。", 4, 12),
 )
 
 
@@ -385,7 +419,7 @@ def erp_seed(erp: Erp, *, apply: bool) -> None:
                           companies[0]["name"] if companies else None)
         created = erp.create("Sales Order", {
             "customer": case.customer, "company": so_company,
-            "transaction_date": "2026-10-24",
+            "transaction_date": case.order_date,
             "delivery_date": case.delivery_date, "set_warehouse": stores,
             "items": [{"item_code": case.item_code, "qty": case.quantity,
                        "rate": case.unit_price, "uom": "Nos",
@@ -451,26 +485,34 @@ def mes_seed(mes: Mes, *, apply: bool) -> None:
             wo_id = int(created["id"])
             print(f"[建] 工单 {case.wo_no} → id={wo_id}")
 
-        if case.report is not None:
+        if case.report is not None or case.done:
             batches = mes.list_batches(wo_id)
             if batches:
                 print(f"[有] 报工 {case.wo_no}（批次 {len(batches)}）")
             elif apply:
-                passed, elapsed = case.report
                 batch = mes.create_batch(wo_id, case.quantity)
                 steps = batch.get("steps") or []
                 if not steps:
                     raise SeedError(f"批次无工艺步骤：{case.wo_no}（缺少工艺模板快照）")
-                step_id = int(steps[0]["id"])
-                mes.start_step(step_id)
-                mes.complete_step(step_id, passed, elapsed)
-                print(f"[建] 报工 {case.wo_no}：步骤1 通过 {passed} 件 / {elapsed} 分钟")
+                if case.done:
+                    for step in steps:
+                        step_id = int(step["id"])
+                        mes.start_step(step_id)
+                        mes.complete_step(step_id, case.quantity,
+                                          max(60, min(600, case.quantity)))
+                    print(f"[建] 完工 {case.wo_no}：{len(steps)} 道工序全部报满 {case.quantity} 件")
+                else:
+                    passed, elapsed = case.report
+                    step_id = int(steps[0]["id"])
+                    mes.start_step(step_id)
+                    mes.complete_step(step_id, passed, elapsed)
+                    print(f"[建] 报工 {case.wo_no}：步骤1 通过 {passed} 件 / {elapsed} 分钟")
             else:
                 print(f"[缺] 报工 {case.wo_no}")
 
         if case.issue is not None:
             title, description, qty, close_after = case.issue
-            if title in {i.get("title") for i in all_issue_titles}:
+            if title in all_issue_titles:
                 print(f"[有] 质量问题 {title}")
             elif apply:
                 issue = mes.create_issue(wo_id, title, description, qty)
@@ -484,26 +526,59 @@ def mes_seed(mes: Mes, *, apply: bool) -> None:
             else:
                 print(f"[缺] 质量问题 {title}")
 
+    print("-- 历史质量问题 --")
+    for wo_no, title, description, qty, days_ago in HISTORY_ISSUES:
+        if title in all_issue_titles:
+            print(f"[有] 历史问题 {title}")
+            continue
+        if not apply:
+            print(f"[缺] 历史问题 {title}")
+            continue
+        target = mes.find_work_order(wo_no)
+        if not target:
+            print(f"[跳] 历史问题 {title}：工单不存在")
+            continue
+        issue = mes.create_issue(int(target["id"]), title, description, qty)
+        issue_id = int(issue["id"])
+        mes.resolve_issue(issue_id, "已按处置流程返工/复检，关闭留档。")
+        mes.close_issue(issue_id)
+        sql = ("docker exec %s psql -U openmmes_user -d openmmes -c "
+               "\"update issues set reported_at = now() - interval '%d days', "
+               "acknowledged_at = now() - interval '%d days', "
+               "resolved_at = now() - interval '%d days', "
+               "closed_at = now() - interval '%d days' where id = %d;\"")
+        resolved_days = max(0, days_ago - 1)
+        command = sql % (PG_CONTAINER, days_ago, days_ago, resolved_days, resolved_days, issue_id)
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise SeedError(f"回填问题时间失败 {title}: {result.stderr[:200]}")
+        print(f"[建→闭] 历史问题 {title}（{days_ago} 天前）")
+
 
 def sync_work_order_progress(*, apply: bool) -> None:
     """把已报工工单的 produced_qty/status 同步为进行中（OpenMES 导入态默认 PENDING/0）。"""
     print("== 工单进度同步 ==")
     for case in CASES:
-        if case.report is None:
+        if case.report is None and not case.done:
             continue
-        passed = case.report[0]
+        if case.done:
+            status, qty = "DONE", case.quantity
+            extra = ", completed_at = now() - interval '2 days'"
+        else:
+            status, qty = "IN_PROGRESS", case.report[0]
+            extra = ""
         sql = ("docker exec %s psql -U openmmes_user -d openmmes -c "
-               "\"update work_orders set produced_qty=%d, status='IN_PROGRESS', "
+               "\"update work_orders set produced_qty=%d, status='%s'%s, "
                "updated_at=now() where order_no='%s' and deleted_at is null "
-               "and coalesce(produced_qty,0) < %d;\"")
-        command = sql % (PG_CONTAINER, passed, case.wo_no, passed)
+               "and status <> 'DONE';\"")
+        command = sql % (PG_CONTAINER, qty, status, extra, case.wo_no)
         if not apply:
-            print(f"[将同步] {case.wo_no} produced_qty={passed} status=IN_PROGRESS")
+            print(f"[将同步] {case.wo_no} produced_qty={qty} status={status}")
             continue
         result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             raise SeedError(f"同步工单进度失败 {case.wo_no}: {result.stderr[:200]}")
-        print(result.stdout.strip().splitlines()[-1])
+        print(f"[同步] {case.wo_no} -> {status} x{qty}")
 
 
 def main(argv: list[str] | None = None) -> int:
