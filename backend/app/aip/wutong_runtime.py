@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 import ipaddress
 import json
@@ -17,6 +17,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -74,6 +75,7 @@ class RuntimeConfig:
     client_cert: Path
     client_key: Path
     agents: dict[str, AgentEndpoint]
+    amp: Any = None
 
     def url(self, role: str) -> str:
         host = f"[{self.public_host}]" if ":" in self.public_host else self.public_host
@@ -109,11 +111,42 @@ def _absolute_path(value: Any, label: str) -> Path:
     return path
 
 
+def _amp_settings(value: Any) -> Any:
+    """解析可选的 amp 段；字段集固定，地址只允许 host:port 列表。"""
+    from app.aip.amp_reporter import AmpSettings
+
+    raw = _fields(value, {"kafkaBootstrap", "heartbeatIntervalSeconds", "reportAccess"}, "amp")
+    bootstrap = _string(raw["kafkaBootstrap"], "amp.kafkaBootstrap")
+    if any(c.isspace() for c in bootstrap) or not bootstrap.isascii():
+        raise ValueError("amp.kafkaBootstrap: ASCII host:port list without whitespace required")
+    endpoints = []
+    for part in bootstrap.split(","):
+        host, _, port_text = part.rpartition(":")
+        try:
+            port = int(port_text)
+        except ValueError:
+            raise ValueError(f"amp.kafkaBootstrap: invalid endpoint '{part}'") from None
+        if not host or not 1 <= port <= 65535:
+            raise ValueError(f"amp.kafkaBootstrap: invalid endpoint '{part}'")
+        endpoints.append(f"{host}:{port}")
+    interval = raw["heartbeatIntervalSeconds"]
+    if type(interval) is not int or not 5 <= interval <= 600:
+        raise ValueError("amp.heartbeatIntervalSeconds: integer from 5 to 600 required")
+    if type(raw["reportAccess"]) is not bool:
+        raise ValueError("amp.reportAccess: boolean required")
+    return AmpSettings(
+        kafka_bootstrap=",".join(endpoints),
+        heartbeat_interval_seconds=interval,
+        report_access=raw["reportAccess"],
+    )
+
+
 def load_config(path: str | Path) -> RuntimeConfig:
     path = Path(path).resolve()
-    data = _fields(json.loads(path.read_text(encoding="utf-8-sig")), {
-        "version", "bindHost", "publicHost", "trustBundle", "leaderClient", "agents",
-    }, "runtime")
+    required = {"version", "bindHost", "publicHost", "trustBundle", "leaderClient", "agents"}
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(data, dict) or not required.issubset(set(data)) or not set(data) <= required | {"amp"}:
+        raise ValueError("runtime: configuration fields do not match the runtime template")
     if type(data["version"]) is not int or data["version"] != 1:
         raise ValueError("Unsupported runtime configuration version")
     bind_host = _string(data["bindHost"], "bindHost")
@@ -166,6 +199,7 @@ def load_config(path: str | Path) -> RuntimeConfig:
         _absolute_path(data["trustBundle"], "trustBundle"),
         _absolute_path(client["certFile"], "leaderClient.certFile"),
         _absolute_path(client["keyFile"], "leaderClient.keyFile"), agents,
+        _amp_settings(data["amp"]) if "amp" in data else None,
     )
 
 
@@ -426,22 +460,73 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
     if service.aic != endpoint.aic:
         raise ValueError("Service identity differs from TLS listener configuration")
 
-    @asynccontextmanager
-    async def lifespan(app):
-        yield
-        await asyncio.gather(*(client.close() for client in outbound_clients.values()))
-        shutdown = getattr(service, "aclose", None)
-        if shutdown is not None:
-            await shutdown()
+    amp_reporter = None
+    _caller_aic: list[str | None] = []
+    if config.amp is not None:
+        from app.aip.amp_reporter import AmpKafkaReporter, extract_task_id
 
-    app = FastAPI(title=f"汽车零部件智能体 · {role}", docs_url=None, redoc_url=None,
-                  openapi_url=None, lifespan=lifespan)
-    app.add_middleware(AipPeerCertificateMiddleware)
+        amp_reporter = AmpKafkaReporter(config.amp)
+        if config.amp.report_access:
+            original_dispatch = service.dispatch_rpc
+
+            async def dispatch_rpc_with_amp(rpc_request):
+                started = time.monotonic()
+                caller = _caller_aic[0] if _caller_aic else None
+                try:
+                    response = await original_dispatch(rpc_request)
+                except Exception:
+                    await amp_reporter.report_access(
+                        aic=endpoint.aic, role=role,
+                        method=getattr(rpc_request, "method", None),
+                        path=endpoint.rpc_path, status_code=500,
+                        duration_ms=(time.monotonic() - started) * 1000,
+                        caller_aic=caller, task_id=extract_task_id(rpc_request),
+                    )
+                    raise
+                status_code = 200 if getattr(response, "error", None) is None else 500
+                await amp_reporter.report_access(
+                    aic=endpoint.aic, role=role,
+                    method=getattr(rpc_request, "method", None),
+                    path=endpoint.rpc_path, status_code=status_code,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    caller_aic=caller, task_id=extract_task_id(rpc_request, response),
+                )
+                return response
+
+            service.dispatch_rpc = dispatch_rpc_with_amp  # type: ignore[method-assign]
 
     async def authorize(request: Request, command) -> None:
         peer = get_request_peer_aic(request)
         if peer is None or ("*" not in endpoint.allowed_callers and peer not in endpoint.allowed_callers):
             raise HTTPException(status_code=403, detail="Caller AIC is not allowed for this role")
+        if amp_reporter is not None:
+            _caller_aic.clear()
+            _caller_aic.append(peer)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        amp_task = None
+        if amp_reporter is not None:
+            amp_task = asyncio.create_task(
+                amp_reporter.run_heartbeat(endpoint.aic), name="amp-heartbeat",
+            )
+        try:
+            yield
+        finally:
+            if amp_task is not None:
+                amp_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await amp_task
+            if amp_reporter is not None:
+                await amp_reporter.aclose()
+            await asyncio.gather(*(client.close() for client in outbound_clients.values()))
+            shutdown = getattr(service, "aclose", None)
+            if shutdown is not None:
+                await shutdown()
+
+    app = FastAPI(title=f"汽车零部件智能体 · {role}", docs_url=None, redoc_url=None,
+                  openapi_url=None, lifespan=lifespan)
+    app.add_middleware(AipPeerCertificateMiddleware)
 
     register_aip_agent_router(app, service, endpoint.rpc_path,
                              identity_binding_enabled=True, command_authorizer=authorize)
@@ -451,6 +536,7 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
         return {"status": "healthy", "role": role, "aic": endpoint.aic}
 
     app.state.wutong_service = service
+    app.state.amp_reporter = amp_reporter
     return app
 
 

@@ -22,7 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 # Install the official 2.2.0 SDK source first if it is not already installed;
 # the server's isolated CLI environment does not supply this application's SDK.
-wutong = ["acps-sdk==2.2.0"]
+# aiokafka powers AMP heartbeat/access reporting to the platform Kafka endpoint;
+# when absent, reporting disables itself and the AIP service is unaffected.
+wutong = ["acps-sdk==2.2.0", "aiokafka>=0.12,<0.13"]
 
 [tool.setuptools.packages.find]
 where = ["."]
