@@ -22,7 +22,7 @@ const statusLabel = (status: string): string => {
   return status;
 };
 
-export default function WorkOrdersTable() {
+export default function WorkOrdersTable({ onOpenRow }: { onOpenRow?: (row: WorkOrder) => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -78,7 +78,12 @@ export default function WorkOrdersTable() {
             </thead>
             <tbody>
               {orders.map((w) => (
-                <tr key={w.work_order_id}>
+                <tr
+                  key={w.work_order_id}
+                  className={onOpenRow ? "row-clickable" : ""}
+                  title={onOpenRow ? "点击打开该工单的跟单视图" : undefined}
+                  onClick={onOpenRow ? () => onOpenRow(w) : undefined}
+                >
                   <td><strong>{w.work_order_no}</strong></td>
                   <td>{w.customer_order_no || <span className="text-faint">未关联</span>}</td>
                   <td>{w.product_name || w.product_id || "—"}</td>

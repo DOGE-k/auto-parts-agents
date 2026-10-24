@@ -687,6 +687,22 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     }
   }, [notify, onNavigate]);
 
+  // ERP 销售订单行点击（总览/销售模块表格）：按订单号反查平台报价并载入流程；
+  // 历史直建订单（无报价）如实提示，不伪造关联。
+  const openSalesOrderView = useCallback(async (order: { order_id: string }) => {
+    try {
+      const quotations = await api<Quotation[]>("/real-orders/quotations");
+      const matched = quotations.find((q) => q.erp_draft_id?.trim() === order.order_id);
+      if (matched) {
+        await openQuotationView(matched.quotation_id);
+        return;
+      }
+      notify(`订单 ${order.order_id} 未关联平台报价流程（历史直建订单）；生产进度请到「生产跟单」选择对应工单查看`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "反查订单关联报价失败");
+    }
+  }, [notify, openQuotationView]);
+
   // 发运门禁阻塞行的"去处理"入口（2026-10-02 用户反馈）：报价审批 ✗ → 直达该订单的报价审批
   const linkedErpOrderNo = workOrders.find((wo) => String(wo.work_order_id) === String(workOrderId))?.customer_order_no?.trim() ?? "";
   const goQuotationApprovalForCurrentWorkOrder = useCallback(async () => {
@@ -985,6 +1001,10 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
             onNavigateAssistant={(question) => onAskQuestion?.(question)}
             onNavigate={onNavigate}
             onOpenEvent={(event) => void goToEventTarget(event)}
+            onOpenWorkOrder={(wo) => void openWorkOrderTracking(String(wo.work_order_id), String(wo.work_order_no ?? ""), {
+              note: `已打开工单 ${wo.work_order_no ?? wo.work_order_id} 的跟单视图`,
+            })}
+            onOpenSalesOrder={(o) => void openSalesOrderView(o)}
           />
         </ErrorBoundary>
       )}
@@ -1127,7 +1147,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
 
           {/* 采购与缺料：步骤 4-6（交接文档 §8.3：无报价/方案对象时显示明确空态，
               提供待审批方案入口；"采购链路已完成"必须由已批准方案证明） */}
-          {activeModule === "sales" && <SalesOrdersTable />}
+          {activeModule === "sales" && <SalesOrdersTable onOpenRow={(o) => void openSalesOrderView(o)} />}
 
           {activeModule === "procurement" && (
             <>

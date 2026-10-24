@@ -5,7 +5,7 @@ import { agentRunOperationNames, agentRunTypeNames, api, collaborationEventStatu
 import { displaySystemText } from "../lib/system-labels";
 import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
-import SalesOrdersTable from "./SalesOrdersTable";
+import SalesOrdersTable, { type SalesOrderRow } from "./SalesOrdersTable";
 import WorkOrdersTable from "./WorkOrdersTable";
 
 type Props = {
@@ -15,6 +15,9 @@ type Props = {
   onNavigate: (module: "sales" | "procurement" | "production" | "quality" | "audit") => void;
   /** 评审复检：需要处理的行携带事件编号定位打开对应对象，而不是只切模块 */
   onOpenEvent?: (event: CollaborationEvent) => void;
+  /** 表格行点击：工单行打开跟单视图，订单行载入关联报价流程（ERP↔MES 链路演示） */
+  onOpenWorkOrder?: (row: { work_order_id: string | number; work_order_no?: string | null }) => void;
+  onOpenSalesOrder?: (row: SalesOrderRow) => void;
 };
 
 type RunRow = {
@@ -26,7 +29,7 @@ type RunRow = {
   started_at?: string;
 };
 
-export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCount, onNavigateAssistant, onNavigate, onOpenEvent }: Props) {
+export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCount, onNavigateAssistant, onNavigate, onOpenEvent, onOpenWorkOrder, onOpenSalesOrder }: Props) {
   const [quotationPending, setQuotationPending] = useState<number | null>(null);
   const [planPending, setPlanPending] = useState<number | null>(null);
   const [events, setEvents] = useState<CollaborationEvent[] | null>(null);
@@ -158,8 +161,8 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
       </section>
 
       <div className="overview-lists">
-        <SalesOrdersTable />
-        <WorkOrdersTable />
+        <SalesOrdersTable onOpenRow={onOpenSalesOrder} />
+        <WorkOrdersTable onOpenRow={onOpenWorkOrder} />
       </div>
 
       <div className="overview-columns">

@@ -3398,3 +3398,9 @@ td strong { color: #0F172A; }
 }
 .source-tag.erp { background: #DBEAFE; color: #1E40AF; }
 .source-tag.mes { background: #D1FAE5; color: #065F46; }
+
+/* ===== 表格行可点击（前端优化清单任务2）：订单/工单行点击打开详情 ===== */
+tr.row-clickable { cursor: pointer; }
+tr.row-clickable:hover td { background: #e8f0fe; }
+tr.row-clickable td:first-child strong { color: var(--teal-dark, #1d4ed8); }
+tr.row-clickable td:first-child { position: relative; }

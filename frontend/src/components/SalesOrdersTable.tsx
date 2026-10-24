@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { displaySystemText } from "../lib/system-labels";
 
-type SalesOrderRow = {
+export type SalesOrderRow = {
   order_id: string;
   customer_name: string;
   transaction_date: string;
@@ -31,7 +31,7 @@ const statusLabel = (status: string): string => {
   return status;
 };
 
-export default function SalesOrdersTable() {
+export default function SalesOrdersTable({ onOpenRow }: { onOpenRow?: (row: SalesOrderRow) => void } = {}) {
   const [orders, setOrders] = useState<SalesOrderRow[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -87,7 +87,12 @@ export default function SalesOrdersTable() {
             </thead>
             <tbody>
               {orders.map((o) => (
-                <tr key={o.order_id}>
+                <tr
+                  key={o.order_id}
+                  className={onOpenRow ? "row-clickable" : ""}
+                  title={onOpenRow ? "点击载入该订单关联的报价流程" : undefined}
+                  onClick={onOpenRow ? () => onOpenRow(o) : undefined}
+                >
                   <td><strong>{o.order_id}</strong></td>
                   <td>{o.customer_name || "—"}</td>
                   <td>{o.transaction_date || "—"}</td>
