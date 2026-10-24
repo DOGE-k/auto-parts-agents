@@ -9,8 +9,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
 import { displaySystemText } from "../lib/system-labels";
+import AssistantCallChain from "./AssistantCallChain";
 import {
-  agentRunTypeNames,
   askAssistant,
   askAssistantStream,
   AssistantStreamExecError,
@@ -399,17 +399,7 @@ export default function AssistantPanel({
           <div className="assistant-result">
             <div className="assistant-chain">
               <small>协调智能体工作中，已完成 {streamSteps.length} 次智能体调用…</small>
-              {streamSteps.map((step) => (
-                <div key={step.seq} className={`assistant-step ${step.status}`}>
-                  <span className="assistant-step-seq">{step.seq}</span>
-                  <span className="assistant-step-callee">{displaySystemText(agentRunTypeNames[step.callee] ?? step.callee)}</span>
-                  <code className="assistant-step-skill">{step.skill_id}</code>
-                  <code className="assistant-step-args">{displaySystemText(JSON.stringify(step.arguments))}</code>
-                  <span className="assistant-step-status">
-                    {step.status === "ok" ? "✓" : "✗"} {step.elapsed_ms}ms
-                  </span>
-                </div>
-              ))}
+              <AssistantCallChain steps={streamSteps} live />
             </div>
           </div>
         )}
@@ -656,17 +646,9 @@ export default function AssistantPanel({
                 )}
                 ，点击展开）
               </summary>
-              {(assistantAnswer.call_chain ?? []).map((step) => (
-                <div key={step.seq} className={`assistant-step ${step.status}`}>
-                  <span className="assistant-step-seq">{step.seq}</span>
-                  <span className="assistant-step-callee">{displaySystemText(agentRunTypeNames[step.callee] ?? step.callee)}</span>
-                  <code className="assistant-step-skill">{step.skill_id}</code>
-                  <code className="assistant-step-args">{displaySystemText(JSON.stringify(step.arguments))}</code>
-                  <span className="assistant-step-status">
-                    {step.status === "ok" ? "✓" : "✗"} {step.elapsed_ms}ms
-                  </span>
-                </div>
-              ))}
+              {(assistantAnswer.call_chain ?? []).length > 0 && (
+                <AssistantCallChain steps={assistantAnswer.call_chain as AssistantCallStep[]} />
+              )}
             </details>
             <p className="field-hint">数据来源：{displaySystemText(assistantAnswer.authority)}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
           </div>
