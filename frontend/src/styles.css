@@ -3140,3 +3140,153 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .ppap-tabs { margin-bottom: 14px; }
 @media (max-width: 680px) { .ppap-form-grid, .ppap-task-item { grid-template-columns: 1fr; } .ppap-card { padding: 14px; } }
 @container (max-width: 620px) { .ppap-form-grid, .ppap-task-item { grid-template-columns: 1fr; } }
+
+/* ═══════ Craft Pass 2026-10-24 · 工程图纸 × Andon 信号灯 ═══════
+   设计立场：从精密零部件制造的语汇取形——工艺路线序号（OP-10…）、
+   图纸发丝线、Andon 信号色；AI 协同面用「图纸青」与业务面区分。
+   层级靠 1px 规则线而不是阴影；胆量只花在总览 Andon 横幅一个记忆点上。 */
+
+:root {
+  --display: 'Chakra Petch', 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  --print-cyan: #0B6E8C;          /* 图纸青：AI 协同面专用 */
+  --print-cyan-wash: #E9F4F7;
+  --ink-navy: #16233B;            /* 油墨藏青 */
+  --hairline: #E3E8F0;
+}
+
+/* ── 模块进入：唯一的一次动效（尊重 reduced-motion） ── */
+@keyframes moduleIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.page-content { animation: moduleIn 0.18s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .page-content { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}
+
+/* ── 页头：标题承担版面个性，eyebrow 降为一枚小信号签 ── */
+.page-heading h1 {
+  font-family: var(--display);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink-navy);
+}
+.page-heading .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--print-cyan);
+  background: var(--print-cyan-wash);
+  border: 1px solid #CFE5EC;
+  border-radius: 4px;
+  padding: 2px 8px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.page-heading .eyebrow::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 1px;
+  background: var(--print-cyan);
+}
+
+/* ── 层级：面板改发丝线，无阴影（浮层才允许投影） ── */
+.panel {
+  box-shadow: none;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+.panel:hover { box-shadow: none; }
+
+/* ── 工序号步骤条：工程序列编号 ── */
+.stepper { gap: 8px; }
+.step-number {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  min-width: 46px;
+  padding: 3px 6px;
+  text-align: center;
+}
+.step-item.active .step-number {
+  background: var(--teal);
+  border-color: var(--teal-dark);
+  color: #fff;
+}
+.step-item.current .step-number {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+  box-shadow: inset 0 0 0 1px var(--teal);
+}
+
+/* ── Andon 横幅：全站唯一的记忆点（图纸网格 + 油墨藏青） ── */
+.andon-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 100% 26px,
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 26px 100%,
+    linear-gradient(135deg, #14213D 0%, #1B2E52 58%, #21406E 100%);
+  color: #fff;
+  padding: 22px 26px 20px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.andon-banner h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.andon-banner .andon-sub {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: #A9BCD8;
+}
+.andon-stats { display: flex; gap: 26px; flex-wrap: wrap; }
+.andon-stat { display: grid; gap: 3px; }
+.andon-stat b {
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.andon-stat span { font-size: 11.5px; color: #A9BCD8; }
+.andon-stat.g b { color: #4ADE80; }
+.andon-stat.a b { color: #FBBF24; }
+.andon-stat.r b { color: #F87171; }
+
+/* ── AI 协同面：图纸青专属语言 ── */
+.assistant-panel { border-top: 3px solid var(--print-cyan); }
+.assistant-panel .panel-heading h2 { color: var(--print-cyan); }
+
+/* ── 表格：工程图纸的发丝线（去全大写表头） ── */
+th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: #F8FAFC;
+  border-bottom: 1px solid var(--hairline);
+}
+td { border-top: 1px solid #EEF2F7; }
+
+/* ── 数字用工程字体（统计/金额/单号） ── */
+.kpi-card strong, .card-value, .stat-value, td b, .andon-stat b {
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+}
+.overview-lists { display: grid; gap: 16px; margin-bottom: 16px; }

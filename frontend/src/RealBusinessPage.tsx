@@ -91,14 +91,14 @@ const MODULE_META: Record<RealModuleKey, { eyebrow: string; title: string; subti
 
 // 订单全流程 8 步（与后端审批链一致；各业务模块只展示自己的阶段）
 const FULL_ORDER_STEPS = [
-  { n: 1, label: "报价分析" },
-  { n: 2, label: "报价审批" },
-  { n: 3, label: "ERP 草稿" },
-  { n: 4, label: "采购分析" },
-  { n: 5, label: "方案审批" },
-  { n: 6, label: "PO 草稿" },
-  { n: 7, label: "跟单质量" },
-  { n: 8, label: "发运门禁" },
+  { n: 1, code: "OP-10", label: "报价分析" },
+  { n: 2, code: "OP-20", label: "报价审批" },
+  { n: 3, code: "OP-30", label: "ERP 草稿" },
+  { n: 4, code: "OP-40", label: "采购分析" },
+  { n: 5, code: "OP-50", label: "方案审批" },
+  { n: 6, code: "OP-60", label: "PO 草稿" },
+  { n: 7, code: "OP-70", label: "跟单质量" },
+  { n: 8, code: "OP-80", label: "发运门禁" },
 ];
 
 // ========== 页面组件 ==========
@@ -1036,7 +1036,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                     key={s.n}
                     className={`step-item ${displayStep >= s.n ? "active" : ""} ${step === s.n ? "current" : ""}`}
                   >
-                    <div className="step-number">{s.n}</div>
+                    <div className="step-number">{s.code}</div>
                     <span>{s.label}</span>
                   </div>
                 ))}
