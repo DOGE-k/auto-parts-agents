@@ -1,0 +1,265 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Industrial Manufacturing Design System — Overrides
+   Grounded in automotive parts manufacturing: steel, precision, Andon signals
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Remove generic blue gradients from buttons */
+.button.primary {
+  background: var(--teal);
+  color: #ffffff;
+  border-color: var(--teal-dark);
+  box-shadow: none;
+}
+.button.primary:hover:not(:disabled) {
+  background: var(--teal-dark);
+  box-shadow: none;
+}
+
+.button.danger {
+  background: var(--orange);
+  color: #ffffff;
+  border-color: #CC6409;
+  box-shadow: none;
+}
+.button.danger:hover:not(:disabled) {
+  background: #CC6409;
+  box-shadow: none;
+}
+
+/* Remove gradients from brand mark */
+.brand-mark {
+  background: var(--teal) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+/* Replace shadows with hairlines on panels */
+.panel:hover {
+  box-shadow: none;
+}
+
+/* Remove ALL-CAPS from labels - keep natural case */
+.live-tag {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Page headings: remove eyebrow ALL-CAPS pattern */
+.page-heading .eyebrow {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.page-heading .eyebrow::before {
+  display: none;
+}
+
+/* Andon banner: industrial dark steel with signal colors */
+.andon-banner {
+  background: linear-gradient(135deg, #1A2332 0%, #242F41 100%) !important;
+  box-shadow: none;
+}
+
+/* KPI cards: white backgrounds, no blue washes */
+.kpi-card {
+  background: var(--surface);
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+/* Navigation active state: solid teal, no glow */
+.nav-item.active {
+  background: var(--teal);
+  color: #ffffff;
+  box-shadow: none;
+}
+.nav-item.active .nav-icon {
+  color: #ffffff;
+}
+.nav-item.active::before {
+  display: none;
+}
+
+/* Status badges: use manufacturing colors */
+.badge.green {
+  background: var(--green-light);
+  color: var(--green);
+}
+.badge.amber-chip {
+  background: var(--orange-light);
+  color: var(--orange);
+}
+
+/* Tables: remove ALL-CAPS headers */
+th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+/* Process sequence numbers: engineering format (OP-10, OP-20) */
+.step-number {
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.step-item.active .step-number {
+  background: var(--teal);
+  color: #ffffff;
+  border-color: var(--teal);
+}
+
+.step-item.current .step-number {
+  background: var(--teal-light);
+  color: var(--teal-dark);
+  border-color: var(--teal);
+  box-shadow: none;
+}
+
+/* Remove unnecessary decorative elements */
+.nav-group-caption {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Sidebar: flat steel gray */
+.sidebar {
+  background: var(--sidebar-bg);
+  box-shadow: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Overview Andon stats: use signal colors */
+.andon-stat.g b { color: var(--green); }
+.andon-stat.a b { color: var(--orange); }
+.andon-stat.r b { color: #DC2626; }
+
+/* Alert colors: use safety orange for critical */
+.approval-card,
+.attention-row {
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+/* Form sections: minimal, hairline separation */
+.form-section + .form-section {
+  border-top: 1px solid var(--line);
+}
+
+/* Remove blue tinted backgrounds */
+.assistant-panel {
+  border-top: 2px solid var(--teal);
+}
+
+.ncr-result.ok,
+.quality-impact-block,
+.proposal-exec-result.ok {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+/* PPAP cards: hairline borders, no shadows */
+.ppap-card,
+.ppap-task-item {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.ppap-task-item:hover:not(:disabled) {
+  box-shadow: none;
+  border-color: var(--teal);
+}
+
+.ppap-task-item.selected {
+  box-shadow: none;
+  border-color: var(--teal);
+  background: var(--teal-light);
+}
+
+/* Connection status: use signal colors */
+.connection.real-mode {
+  color: var(--green);
+}
+
+.mode-indicator.real-mode {
+  color: var(--green);
+}
+
+/* Error states: use safety orange */
+.ncr-result.error,
+.proposal-exec-result.error,
+.ppap-save-error {
+  background: var(--orange-light);
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+/* Remove generic middle-dot separators - use natural spacing */
+.breadcrumbs b {
+  margin: 0 8px;
+}
+
+/* Scenario cards: remove colored backgrounds, use borders */
+.scenario-card {
+  background: var(--surface);
+  border: 2px solid var(--line);
+  box-shadow: none;
+}
+
+.scenario-card:hover {
+  border-color: var(--teal);
+  box-shadow: none;
+}
+
+/* Quality signals: green for pass, orange for attention */
+.gate-check.on,
+.ncr-check-status.ready,
+.check-pass {
+  color: var(--green);
+}
+
+.ncr-check-status.blocked,
+.check-fail {
+  color: var(--orange);
+}
+
+/* Agent pills: subtle backgrounds, clear text */
+.agent-pill {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+/* Process engineering: tabular numbers for metrics */
+.kpi-card strong,
+.card-value,
+.stat-value,
+.andon-stat b {
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Remove rounded card uniformity - vary by hierarchy */
+.panel {
+  border-radius: var(--r-md);
+}
+
+.kpi-card {
+  border-radius: var(--r-sm);
+}
+
+.scenario-card,
+.approval-card {
+  border-radius: var(--r-lg);
+}
