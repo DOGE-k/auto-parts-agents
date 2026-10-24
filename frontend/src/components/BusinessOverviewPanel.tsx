@@ -7,6 +7,7 @@ import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
 import SalesOrdersTable, { type SalesOrderRow } from "./SalesOrdersTable";
 import WorkOrdersTable from "./WorkOrdersTable";
+import AgentRunsTrend from "./AgentRunsTrend";
 
 type Props = {
   hasProjectSession: boolean;
@@ -116,11 +117,6 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
           <span className="kpi-body"><span className="kpi-label">质量待办</span><strong>{hasProjectSession ? (qualityTodoCount ?? "—") : "未登录"}</strong></span>
           <span className="kpi-arrow" aria-hidden="true">›</span>
         </button>
-        <button className="kpi-card clickable" onClick={() => onNavigate("quality")}>
-          <span className="kpi-icon purple" aria-hidden="true">⌁</span>
-          <span className="kpi-body"><span className="kpi-label">缺料/风险事件</span><strong>{shortageEvents.length + riskEvents.length}</strong></span>
-          <span className="kpi-arrow" aria-hidden="true">›</span>
-        </button>
       </section>
 
       {error && <div className="error-banner"><span>总览加载失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
@@ -190,28 +186,31 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
           )}
         </section>
 
-        <section className="panel overview-ask">
-          <div className="panel-heading">
-            <div>
-              <h2>AI 协同入口</h2>
-              <p>一句话查订单、缺料、交期、质量；写操作仍停在人工审批。</p>
+        <div className="overview-side">
+          <section className="panel overview-ask">
+            <div className="panel-heading">
+              <div>
+                <h2>AI 协同入口</h2>
+                <p>一句话查订单、缺料、交期、质量；写操作仍停在人工审批。</p>
+              </div>
             </div>
-          </div>
-          <div className="overview-ask-row">
-            <input
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="例如：SAL-ORD-2026-00001 什么时候能做完？"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && question.trim()) onNavigateAssistant(question.trim());
-              }}
-            />
-            <button className="button primary" disabled={!question.trim()} onClick={() => onNavigateAssistant(question.trim())}>
-              去提问 →
-            </button>
-          </div>
-          <p className="field-hint">问题会带到「AI 协同问答」，确认后再发送。</p>
-        </section>
+            <div className="overview-ask-row">
+              <input
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder="例如：SAL-ORD-2026-00001 什么时候能做完？"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && question.trim()) onNavigateAssistant(question.trim());
+                }}
+              />
+              <button className="button primary" disabled={!question.trim()} onClick={() => onNavigateAssistant(question.trim())}>
+                去提问 →
+              </button>
+            </div>
+            <p className="field-hint">问题会带到「AI 协同问答」，确认后再发送。</p>
+          </section>
+          <AgentRunsTrend />
+        </div>
       </div>
     </div>
   );

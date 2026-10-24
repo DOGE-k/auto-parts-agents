@@ -2899,7 +2899,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 
 /* 业务总览 */
 .overview-panel { display: grid; gap: 16px; }
-.overview-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.overview-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 @media (max-width: 1180px) { .overview-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .overview-kpis { grid-template-columns: 1fr; } }
 .overview-columns { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -3443,3 +3443,11 @@ tr.row-clickable td:first-child { position: relative; }
 .app-shell.sidebar-collapsed .version-tag { display: none; }
 .app-shell.sidebar-collapsed .sidebar-toggle { margin-left: 0; }
 .app-shell.sidebar-collapsed .nav-item { justify-content: center; padding: 11px 0; gap: 0; }
+
+/* ===== 总览右列堆叠 + 近 7 日调用趋势（前端优化清单任务4） ===== */
+.overview-side { display: grid; gap: 16px; align-content: start; }
+.trend-chart { width: 100%; height: auto; display: block; }
+.trend-bar { fill: #2563eb; opacity: 0.85; }
+.trend-bar.today { fill: #1d4ed8; opacity: 1; }
+.trend-count { font: 600 9px var(--mono); fill: #1e40af; }
+.trend-label { font: 500 9px var(--mono); fill: #64748b; }
