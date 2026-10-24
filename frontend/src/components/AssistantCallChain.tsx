@@ -4,6 +4,7 @@
 import { agentRunTypeNames } from "../api";
 import type { AssistantCallStep } from "../api";
 import { displaySystemText } from "../lib/system-labels";
+import { summarizeSkillResult } from "../lib/result-summary";
 
 // 技能中文名（与后端 coordinator.py 技能注册一一对应；未登记的 skill_id 原样显示，不编造翻译）
 const skillNames: Record<string, string> = {
@@ -44,7 +45,12 @@ export default function AssistantCallChain({ steps, live }: { steps: AssistantCa
         const calleeName = displaySystemText(agentRunTypeNames[step.callee] ?? step.callee);
         const callerName = displaySystemText(agentRunTypeNames[step.caller] ?? step.caller);
         const argsText = JSON.stringify(step.arguments ?? {});
-        const summary = displaySystemText(step.result_summary ?? "");
+        const rawSummary = step.result_summary ?? "";
+        // 任务 7：成功步骤按 skill_id 提取关键字段转一句中文；失败步骤/提取不到的
+        // 技能保留 JSON 原文（完整原文同样在悬停提示里）。
+        const readable =
+          step.status === "ok" ? summarizeSkillResult(step.skill_id, rawSummary) : null;
+        const summary = readable ?? displaySystemText(rawSummary);
         return (
           <div
             key={step.seq}

@@ -88,7 +88,7 @@ describe("BusinessOverviewPanel 业务总览", () => {
     const text = panel.container.textContent ?? "";
     expect(text).toContain("报价待审批");
     expect(text).toContain("方案待审批");
-    expect(text).toContain("缺料/风险事件");
+    expect(text).toContain("缺料/风险信号");
   });
 
   it("未完成事件进入需要处理列表，已完成事件不出现", async () => {
