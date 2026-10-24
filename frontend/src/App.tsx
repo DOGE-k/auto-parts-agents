@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { api, agentNames, Approval, Case, Event, eventNames, Project, writeHeaders } from "./api";
 import RealBusinessPage, { type RealModuleKey } from "./RealBusinessPage";
+import { NavIcon } from "./components/icons";
 import type { RealIdentity } from "./api";
 import { displaySystemText } from "./lib/system-labels";
 
@@ -21,35 +22,36 @@ const REAL_MODULES: RealModuleKey[] = [
 const isRealModule = (page: PageKey): page is RealModuleKey => (REAL_MODULES as string[]).includes(page);
 
 // 真实业务导航按工厂业务模块分组（信息架构改版 §4.1；默认入口为 AI 协同问答）
+// icon 为 icons.tsx 里的线性图标名（任务3：替代 Unicode 字符图标）
 const realNavGroups: { caption: string; items: { key: RealModuleKey; label: string; icon: string }[] }[] = [
-  { caption: "工作台", items: [{ key: "overview", label: "业务总览", icon: "▦" }] },
+  { caption: "工作台", items: [{ key: "overview", label: "业务总览", icon: "overview" }] },
   {
     caption: "业务协同",
     items: [
-      { key: "assistant", label: "AI 协同问答", icon: "◆" },
-      { key: "sales", label: "销售与订单", icon: "◈" },
-      { key: "procurement", label: "采购与缺料", icon: "⇄" },
-      { key: "production", label: "生产跟单", icon: "▤" },
-      { key: "quality", label: "质量中心", icon: "⚠" },
+      { key: "assistant", label: "AI 协同问答", icon: "assistant" },
+      { key: "sales", label: "销售与订单", icon: "sales" },
+      { key: "procurement", label: "采购与缺料", icon: "procurement" },
+      { key: "production", label: "生产跟单", icon: "production" },
+      { key: "quality", label: "质量中心", icon: "quality" },
     ],
   },
   {
     caption: "记录与管理",
     items: [
-      { key: "audit", label: "审批与审计", icon: "⌁" },
-      { key: "connection", label: "系统连接", icon: "⚙" },
+      { key: "audit", label: "审批与审计", icon: "audit" },
+      { key: "connection", label: "系统连接", icon: "connection" },
     ],
   },
 ];
 
 // Mock 模拟导航（合成数据；真实模式下整组隐藏，不与真实业务混在一组）
 const mockNavItems: { key: PageKey; label: string; icon: string }[] = [
-  { key: "scenarios", label: "场景与回放", icon: "◫" },
-  { key: "dashboard", label: "协同驾驶舱", icon: "▦" },
-  { key: "agents", label: "Agent 工作台", icon: "◉" },
-  { key: "plans", label: "方案对比", icon: "⇄" },
-  { key: "approvals", label: "人工审批箱", icon: "✓" },
-  { key: "mock-audit", label: "审计与追溯", icon: "⌁" },
+  { key: "scenarios", label: "场景与回放", icon: "scenarios" },
+  { key: "dashboard", label: "协同驾驶舱", icon: "dashboard" },
+  { key: "agents", label: "Agent 工作台", icon: "agents" },
+  { key: "plans", label: "方案对比", icon: "plans" },
+  { key: "approvals", label: "人工审批箱", icon: "approvals" },
+  { key: "mock-audit", label: "审计与追溯", icon: "mock-audit" },
 ];
 
 const pageLabels = Object.fromEntries([
@@ -76,6 +78,16 @@ function App() {
   const [connStatus, setConnStatus] = useState<{ erpnext: string; openmes: string } | null>(null);
   // 业务总览"去提问"带来的一条待发送问题（填入问答输入框后即消费）
   const [pendingQuestion, setPendingQuestion] = useState("");
+  // 侧栏折叠（前端优化清单任务3）：64px 图标栏，状态持久化
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("sidebar-collapsed") === "1"; } catch { return false; }
+  });
+  const toggleSidebar = () => {
+    setSidebarCollapsed((current) => {
+      try { window.localStorage.setItem("sidebar-collapsed", current ? "0" : "1"); } catch { /* 隐私模式忽略 */ }
+      return !current;
+    });
+  };
   // Real mode is the safe initial state while the runtime surface is loading;
   // do not briefly expose Mock navigation during that request.
   const mockDemoEnabled = runtimeSurface?.mock_demo_enabled ?? false;
@@ -236,7 +248,7 @@ function App() {
   const currentApprovals = useMemo(() => approvals.filter((item) => item.project_id === projectId), [approvals, projectId]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
@@ -255,6 +267,15 @@ function App() {
             <strong>制造运营智能体平台</strong>
             <span>汽车零部件工厂</span>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+            aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+            onClick={toggleSidebar}
+          >
+            <NavIcon name={sidebarCollapsed ? "chevron-right" : "chevron-left"} size={16} />
+          </button>
         </div>
         <div className="sidebar-caption">工作空间</div>
         <nav className="nav-list">
@@ -262,8 +283,14 @@ function App() {
             <div className="nav-group" key={group.caption}>
               <div className="nav-group-caption">{group.caption}</div>
               {group.items.map((item) => (
-                <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
-                  <span className="nav-icon">{item.icon}</span>{item.label}
+                <button
+                  key={item.key}
+                  className={`nav-item ${page === item.key ? "active" : ""}`}
+                  title={sidebarCollapsed ? item.label : undefined}
+                  onClick={() => setPage(item.key)}
+                >
+                  <span className="nav-icon"><NavIcon name={item.icon} /></span>
+                  <span className="nav-label">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -272,8 +299,14 @@ function App() {
             <div className="nav-group">
               <div className="nav-group-caption mock">Mock 模拟（合成数据）</div>
               {mockNavItems.map((item) => (
-                <button key={item.key} className={`nav-item ${page === item.key ? "active" : ""}`} onClick={() => setPage(item.key)}>
-                  <span className="nav-icon">{item.icon}</span>{item.label}
+                <button
+                  key={item.key}
+                  className={`nav-item ${page === item.key ? "active" : ""}`}
+                  title={sidebarCollapsed ? item.label : undefined}
+                  onClick={() => setPage(item.key)}
+                >
+                  <span className="nav-icon"><NavIcon name={item.icon} /></span>
+                  <span className="nav-label">{item.label}</span>
                   <span className="nav-mock-badge">Mock</span>
                   {item.key === "approvals" && currentApprovals.length > 0 && <span className="nav-count">{currentApprovals.length}</span>}
                 </button>
@@ -284,7 +317,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className={`mode-indicator ${isRealModule(page) && connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "real-mode" : ""}`}>
             <i />
-            {connectionText}
+            <span className="nav-label">{connectionText}</span>
           </div>
           <p className="sidebar-approver">
             当前项目用户：<b>{realIdentity ? `${realIdentity.actor_id}` : "未登录"}</b>
