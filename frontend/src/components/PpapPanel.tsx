@@ -168,6 +168,13 @@ export default function PpapPanel({ hasProjectSession, actorId = "", roles, onLo
     return () => { alive = false; };
   }, [offset, query, modeFilter, hasProjectSession]);
 
+  // 成功类提示 4 秒后自动消失（错误提示不自动关，避免用户错过失败原因）
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   const loadDetail = useCallback(async (taskId: string) => {
     compareRequest.current += 1; setCompareLoading(false);
     const [result, inputs, evidencePlan, history, impact, gaps] = await Promise.all([getPpapTask(taskId), getPpapInputs(taskId), getPpapEvidencePlan(taskId), getPpapRuns(taskId), getPpapChangeImpact(taskId), getPpapMissingItems(taskId)]);
