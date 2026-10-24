@@ -37,49 +37,65 @@ export function QuotationInputStep({
           <p>选择客户、物料和数量，系统从 ERP 读取真实数据生成报价方案</p>
         </div>
       </div>
-      <div className="form-grid">
-        <div className="form-group">
-          <label>客户 (来自 ERP 系统)</label>
-          <select
-            value={selectedCustomer}
-            onChange={(e) => onSelectCustomer(e.target.value)}
-          >
-            {customers.map((c) => (
-              <option key={c.customer_id} value={c.customer_id}>
-                {c.customer_name}
-              </option>
-            ))}
-          </select>
+      {/* 表单分区（前端优化清单任务6）：客户 / 产品与数量 / 交期与提交 */}
+      <div className="form-sections">
+        <div className="form-section">
+          <div className="form-section-title">客户</div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>客户 (来自 ERP 系统)</label>
+              <select
+                value={selectedCustomer}
+                onChange={(e) => onSelectCustomer(e.target.value)}
+              >
+                {customers.map((c) => (
+                  <option key={c.customer_id} value={c.customer_id}>
+                    {c.customer_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
-        <div className="form-group">
-          <label>物料 (来自 ERP 系统)</label>
-          <select
-            value={selectedItem}
-            onChange={(e) => onSelectItem(e.target.value)}
-          >
-            {items.map((i) => (
-              <option key={i.item_code} value={i.item_code}>
-                {i.item_name} ({i.item_code})
-              </option>
-            ))}
-          </select>
+        <div className="form-section">
+          <div className="form-section-title">产品与数量</div>
+          <div className="form-grid">
+            <div className="form-group span-2">
+              <label>物料 (来自 ERP 系统)</label>
+              <select
+                value={selectedItem}
+                onChange={(e) => onSelectItem(e.target.value)}
+              >
+                {items.map((i) => (
+                  <option key={i.item_code} value={i.item_code}>
+                    {i.item_name} ({i.item_code})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>数量</label>
+              <input
+                type="number"
+                value={quantity}
+                onChange={(e) => onQuantityChange(Number(e.target.value))}
+                min={1}
+              />
+            </div>
+          </div>
         </div>
-        <div className="form-group">
-          <label>数量</label>
-          <input
-            type="number"
-            value={quantity}
-            onChange={(e) => onQuantityChange(Number(e.target.value))}
-            min={1}
-          />
-        </div>
-        <div className="form-group">
-          <label>客户要求交期（必填）</label>
-          <input
-            type="date"
-            value={deliveryDate}
-            onChange={(e) => onDeliveryDateChange(e.target.value)}
-          />
+        <div className="form-section">
+          <div className="form-section-title">交期与提交</div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>客户要求交期（必填）</label>
+              <input
+                type="date"
+                value={deliveryDate}
+                onChange={(e) => onDeliveryDateChange(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
       </div>
       <div className="form-actions">
@@ -90,6 +106,9 @@ export function QuotationInputStep({
         >
           {loading ? "分析中..." : "生成报价方案 →"}
         </button>
+        {!deliveryDate && (
+          <span className="form-action-hint">填写客户要求交期后即可生成报价</span>
+        )}
       </div>
     </section>
   );
