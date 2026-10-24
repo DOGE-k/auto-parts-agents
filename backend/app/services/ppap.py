@@ -152,8 +152,10 @@ COMPILATION_ENGINE_VERSION = "ppap-compile-2026.10.14-2"
 
 
 def _gen_id(prefix: str) -> str:
+    # 后缀 12 位 hex（48bit）：测试套件同秒可产生数百个 id，6 位（24bit）
+    # 在 CI 高密度批次下会撞 ppap_* 表主键（唯一约束见 PpapElementRow）。
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"{prefix}-{stamp}-{uuid4().hex[:6]}"
+    return f"{prefix}-{stamp}-{uuid4().hex[:12]}"
 
 
 def _now() -> datetime:
