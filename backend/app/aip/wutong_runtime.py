@@ -504,7 +504,7 @@ def make_server_config(config: RuntimeConfig, role: str, app):
         http=AipPeerCertH11Protocol, ws="none", proxy_headers=False,
         ssl_certfile=str(endpoint.cert_file), ssl_keyfile=str(endpoint.key_file),
         ssl_ca_certs=str(config.trust_bundle), ssl_cert_reqs=ssl.CERT_REQUIRED,
-        ssl_version=ssl.PROTOCOL_TLS_SERVER, access_log=False, lifespan="on",
+        ssl_version=ssl.PROTOCOL_TLS_SERVER, access_log=True, lifespan="on",
     )
     uv_config.load()
     uv_config.ssl.minimum_version = ssl.TLSVersion.TLSv1_2
