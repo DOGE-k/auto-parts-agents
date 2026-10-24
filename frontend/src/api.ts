@@ -410,14 +410,44 @@ export type AgentRunDetail = AgentRunSummary & {
 
 export const agentRunTypeNames: Record<string, string> = {
   coordinator: "协调智能体",
-  quotation: "报价 Agent",
-  procurement: "采购 Agent",
-  tracking: "跟单 Agent",
-  quality: "质量文档 Agent",
+  quotation: "报价智能体",
+  procurement: "采购智能体",
+  tracking: "跟单智能体",
+  quality: "质量智能体",
   shipping: "发运门禁",
   approval: "人工审批",
   erp_write: "ERP 草稿写入",
   linkage: "ERP↔MES 关联",
+};
+
+// 运行操作名（real_agent_runs.operation）。同一 operation 在不同岗位语义不同
+// （quotation:analyze=报价分析、procurement:analyze=采购分析），因此先按
+// "agent_type:operation" 精确匹配，再退回通用名，未命中保留原值。
+export const agentRunOperationNames: Record<string, string> = {
+  "coordinator:ask": "协同问答",
+  "quotation:analyze": "报价分析",
+  "quotation:assess_cost_impact": "加急成本评估",
+  "quotation:find_by_erp_order": "按订单查报价",
+  "procurement:analyze": "采购分析",
+  "procurement:find_by_quotation": "按报价查方案",
+  "procurement:assess_combination": "组合方案评估",
+  "procurement:dispatch_work_order": "下达工单",
+  "tracking:track": "生产跟踪",
+  "tracking:assess_delivery_impact": "交付影响评估",
+  "tracking:find_by_no": "按工单号查询",
+  "tracking:report_production": "生产完工上报",
+  "quality:package": "质量资料包",
+  "quality:resolve_issue": "质量问题处置",
+  "quality:closure_check": "闭环检查",
+  "quality:close_issue": "关闭质量问题",
+  "quality:assess_impact": "质量影响评估",
+  "quality:register_quality_issue": "质量问题登记",
+  "shipping:gate_check": "发运门禁检查",
+  "approval:approve_quotation": "报价审批",
+  "approval:approve_procurement": "方案审批",
+  "erp_write:create_so_draft": "生成销售订单草稿",
+  "erp_write:create_po_draft": "生成 PO 草稿",
+  "linkage:mes_link": "ERP↔MES 关联",
 };
 
 // 协调智能体（动态协同问答）

@@ -1,7 +1,7 @@
 // 业务总览（信息架构改版 §4.4：第二入口，按优先级给"需要处理"，不在首页展开长流程）。
 // 数据全部来自真实端点：报价/方案审批状态、协同事件、质量待办、Agent 运行记录。
 import { useCallback, useEffect, useState } from "react";
-import { agentRunTypeNames, api, getCollaborationEvents } from "../api";
+import { agentRunOperationNames, agentRunTypeNames, api, collaborationEventStatusLabels, collaborationEventTypeLabels, getCollaborationEvents } from "../api";
 import { displaySystemText } from "../lib/system-labels";
 import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
@@ -143,8 +143,8 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
             {attention.map((e) => (
               <div className="attention-row" key={e.event_id}>
                 <code>{e.event_id}</code>
-                <span className="badge type-badge">{e.event_type}</span>
-                <span className="attention-meta">{e.status} · {e.payload?.work_order_no ? `工单 ${e.payload.work_order_no}` : e.payload?.quotation_id ? `报价 ${e.payload.quotation_id}` : "—"}</span>
+                <span className="badge type-badge">{collaborationEventTypeLabels[e.event_type] ?? e.event_type}</span>
+                <span className="attention-meta">{collaborationEventStatusLabels[e.status] ?? e.status} · {e.payload?.work_order_no ? `工单 ${e.payload.work_order_no}` : e.payload?.quotation_id ? `报价 ${e.payload.quotation_id}` : "—"}</span>
                 <button
                   className="button ghost"
                   onClick={() => (onOpenEvent ? onOpenEvent(e) : onNavigate(attentionTarget[e.event_type] ?? "quality"))}
@@ -177,10 +177,10 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
             <div className="run-list">
               {(runs ?? []).map((r) => (
                 <div className="run-row" key={r.run_id}>
-                  <span className="badge blue-badge">{r.agent_type}</span>
-                  <span className="run-op">{displaySystemText(agentRunTypeNames[r.operation] ?? r.operation)}</span>
+                  <span className="badge blue-badge">{agentRunTypeNames[r.agent_type] ?? r.agent_type}</span>
+                  <span className="run-op">{agentRunOperationNames[`${r.agent_type}:${r.operation}`] ?? agentRunOperationNames[r.operation] ?? displaySystemText(r.operation)}</span>
                   <code title={r.result_summary}>{displaySystemText(r.result_summary)}</code>
-                  <b className={r.result_status === "ok" ? "text-green" : "text-red"}>{r.result_status}</b>
+                  <b className={r.result_status === "ok" ? "text-green" : "text-red"}>{displaySystemText(r.result_status)}</b>
                 </div>
               ))}
             </div>

@@ -1,6 +1,6 @@
 // Agent 运行记录面板（阶段三：页面可查，持久化；阶段十 10.5 从 RealBusinessPage 抽出，状态自包含）
 import { useState, useCallback } from "react";
-import { api, agentRunTypeNames } from "../api";
+import { api, agentRunOperationNames, agentRunTypeNames } from "../api";
 import type { AgentRunSummary, AgentRunDetail, AgentRunEvidenceItem } from "../api";
 import { displaySystemText } from "../lib/system-labels";
 
@@ -98,7 +98,7 @@ export default function AgentRunsPanel() {
                     </span>
                     <span className="agent-run-id">{run.run_id}</span>
                     <span className="agent-run-type">{displaySystemText(agentRunTypeNames[run.agent_type] ?? run.agent_type)}</span>
-                    <span className="agent-run-op">{displaySystemText(run.operation)}</span>
+                    <span className="agent-run-op">{agentRunOperationNames[`${run.agent_type}:${run.operation}`] ?? agentRunOperationNames[run.operation] ?? displaySystemText(run.operation)}</span>
                     <span className="agent-run-summary">{displaySystemText(run.result_summary || "—")}</span>
                     <span className="agent-run-time">{run.started_at?.replace("T", " ").slice(0, 19) ?? ""}</span>
                   </button>
