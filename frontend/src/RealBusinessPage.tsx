@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import QualityTodoPanel from "./components/QualityTodoPanel";
+import SalesOrdersTable from "./components/SalesOrdersTable";
 import PpapPanel from "./components/PpapPanel";
 import CollaborationEventsPanel from "./components/CollaborationEventsPanel";
 import AgentRunsPanel from "./components/AgentRunsPanel";
@@ -1126,6 +1127,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
 
           {/* 采购与缺料：步骤 4-6（交接文档 §8.3：无报价/方案对象时显示明确空态，
               提供待审批方案入口；"采购链路已完成"必须由已批准方案证明） */}
+          {activeModule === "sales" && <SalesOrdersTable />}
+
           {activeModule === "procurement" && (
             <>
               {renderFlowToolbar()}

@@ -5,6 +5,8 @@ import { agentRunTypeNames, api, getCollaborationEvents } from "../api";
 import { displaySystemText } from "../lib/system-labels";
 import type { CollaborationEvent } from "../api";
 import type { ProcurementPlan, Quotation } from "../types/realBusiness";
+import SalesOrdersTable from "./SalesOrdersTable";
+import WorkOrdersTable from "./WorkOrdersTable";
 
 type Props = {
   hasProjectSession: boolean;
@@ -136,6 +138,11 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
           </div>
         )}
       </section>
+
+      <div className="overview-lists">
+        <SalesOrdersTable />
+        <WorkOrdersTable />
+      </div>
 
       <div className="overview-columns">
         <section className="panel">
