@@ -290,6 +290,28 @@ export default function AssistantPanel({
   useEffect(() => {
     if (!assistantLoading && !abortedRun && !pendingAnswer) return;
     const timer = window.setInterval(() => {
+      // 页面不可见时浏览器会把定时器节流到分钟级：隐藏态无需节奏，
+      // 一次触发直接放完全部并切换，回到前台即见完整结果。
+      if (document.hidden) {
+        const rT = reasoningTargetRef.current;
+        if (rT.text && reasoningShownRef.current < rT.text.length) {
+          reasoningShownRef.current = rT.text.length;
+          setLiveReasoning({ round: rT.round, text: rT.text });
+        }
+        const t = typeTargetRef.current;
+        if (t.text && typeShownRef.current < t.text.length) {
+          typeShownRef.current = t.text.length;
+          setStreamAnswer({ round: t.round, text: t.text });
+        }
+        if (pendingAnswer) {
+          setAssistantAnswer(pendingAnswer);
+          setPendingAnswer(null);
+          setStreamTimeline([]);
+          setStreamAnswer(null);
+          setLiveReasoning(null);
+        }
+        return;
+      }
       const rTarget = reasoningTargetRef.current;
       const rRemaining = rTarget.text.length - reasoningShownRef.current;
       if (rRemaining > 0) {
