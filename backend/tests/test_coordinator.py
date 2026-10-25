@@ -336,5 +336,64 @@ class RealSkillWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["found"])
 
 
+class ReasoningPassthroughTests(unittest.IsolatedAsyncioTestCase):
+    """harness 改造步骤 A：思考过程透传 + reasoning_content 不回传污染对话。"""
+
+    async def test_reasoning_rounds_passed_through_and_stripped_from_messages(self):
+        llm = _FakeLLM([
+            {"choices": [{"message": {
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "用户要工单进度，先查跟踪技能。",
+                "tool_calls": [_tool_call("c1", "tracking__track_real", '{"work_order_id": "9"}')],
+            }}]},
+            {"choices": [{"message": {
+                "role": "assistant",
+                "content": "工单 9 完成 90%。",
+                "reasoning_content": "工具返回了完成率，直接总结。",
+            }}]},
+        ])
+
+        async def fake_invoker(agent_type, skill_id, inputs):
+            return {"work_order_no": "WO-9", "completion_rate": 90.0, "authority": "OpenMES"}
+
+        received: list[dict] = []
+        coordinator = BusinessCoordinator(llm, skill_invoker=fake_invoker)
+        try:
+            result = await coordinator.ask(
+                "工单 9 进度？",
+                on_reasoning=lambda r: received.append(dict(r)),
+            )
+        finally:
+            await coordinator.aclose()
+
+        # 每轮思考各回调一次，结果里完整保留
+        self.assertEqual([r["round"] for r in received], [1, 2])
+        self.assertEqual(
+            [r["text"] for r in result["reasoning_rounds"]],
+            ["用户要工单进度，先查跟踪技能。", "工具返回了完成率，直接总结。"],
+        )
+        # 回传给 LLM 的对话不得包含 reasoning_content（DeepSeek API 约定）
+        for call in llm.calls[1:]:
+            for msg in call["messages"]:
+                self.assertNotIn("reasoning_content", msg)
+        # 剥离后工具轮消息仍保留 tool_calls 本体（不影响下一轮推理）
+        assistant_tool_msg = [
+            m for m in llm.calls[1]["messages"] if m.get("role") == "assistant"
+        ][-1]
+        self.assertTrue(assistant_tool_msg.get("tool_calls"))
+
+    async def test_no_reasoning_field_yields_empty_rounds(self):
+        llm = _FakeLLM([
+            {"choices": [{"message": {"role": "assistant", "content": "直接回答。"}}]},
+        ])
+        coordinator = BusinessCoordinator(llm, skill_invoker=None)
+        try:
+            result = await coordinator.ask("你好")
+        finally:
+            await coordinator.aclose()
+        self.assertEqual(result["reasoning_rounds"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

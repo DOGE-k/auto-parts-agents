@@ -47,7 +47,7 @@
 
 ## 4. 实施步骤（每步一个 commit，含测试与文档更新）
 
-### ☐ 步骤 A：后端思考透传 + 修复回传污染（纯后端）
+### ☑ 步骤 A：后端思考透传 + 修复回传污染（纯后端）——完成
 
 - `coordinator.py`：
   - `ask()` 加参数 `on_reasoning: Callable[[dict], None] | None = None`；
@@ -104,3 +104,4 @@
 ## 6. 进度日志
 
 - 2026-10-25 创建文档；完成全部前置探测（模型 reasoning_content / 流式格式 / 存储层路径），设计已与用户确认（交错时间轴、工具轮非逐字、思考整段、最终轮打字机、历史链路恢复）。下一步：步骤 A。
+- 2026-10-25 步骤 A 完成：`coordinator.ask()` 加 `on_reasoning` 回调与 `result["reasoning_rounds"]`（每轮 + 空回答恢复路径的思考都采集）；回传 messages 前剥离 `reasoning_content`（修复既有 API 约定污染）；`assistant_session._finish()` 确定性路径补 `reasoning_rounds` 默认值。新增 `ReasoningPassthroughTests` 2 例（透传+剥离验证、无思考字段时空数组）。后端 686 passed（基线 684+2）。

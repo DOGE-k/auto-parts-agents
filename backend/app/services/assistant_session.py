@@ -356,6 +356,7 @@ async def handle_ask(
         # （2026-10-01 页面走查实测：确定性回答缺 call_chain 会让
         # AssistantPanel 的 call_chain.map() 崩溃降级）。
         result.setdefault("call_chain", [])
+        result.setdefault("reasoning_rounds", [])
         result.setdefault("rounds", 0)
         result.setdefault("tool_count", 0)
         result.setdefault("coordination_run_id", "")

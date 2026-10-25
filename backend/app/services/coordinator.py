@@ -622,11 +622,14 @@ class BusinessCoordinator:
         context: dict[str, Any] | None = None,
         on_step: Callable[[dict[str, Any]], None] | None = None,
         run_meta: dict[str, Any] | None = None,
+        on_reasoning: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
 
         on_step（可选）：每完成一次工具调用即回调当前调用链步骤（SSE 流式
         端点用它把"协调者正在查什么"实时推给前端；同步端点不传，行为不变）。
+        on_reasoning（可选）：每轮 LLM 返回后回调该轮思考过程原文（deepseek-flash
+        混合推理模型的 reasoning_content；为空则不回调）。真实原文透传，不改写。
         run_meta（可选）：session_id/business_task_id，用于会话关联与保留期。
         """
         if not question.strip():
@@ -647,6 +650,7 @@ class BusinessCoordinator:
 
         call_chain: list[dict[str, Any]] = []
         collected_results: list[tuple[str, dict[str, Any]]] = []
+        reasoning_rounds: list[dict[str, Any]] = []
         final_answer = ""
         rounds = 0
         active_tools = _active_tools()
@@ -670,12 +674,23 @@ class BusinessCoordinator:
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls") or []
 
+            # 思考过程（deepseek-flash 混合推理）：真实原文透传给流式端点并
+            # 随结果返回/落库；按 DeepSeek API 约定，reasoning_content 不得
+            # 回传进后续请求（下面 append 的副本已剥离）。
+            reasoning_text = (message.get("reasoning_content") or "").strip()
+            if reasoning_text:
+                reasoning_rounds.append({"round": rounds, "text": reasoning_text})
+                if on_reasoning is not None:
+                    on_reasoning(reasoning_rounds[-1])
+
             if not tool_calls:
                 final_answer = (message.get("content") or "").strip()
                 break
 
-            # 先把 assistant 的 tool_calls 消息原样回填进对话
-            messages.append(message)
+            # 先把 assistant 的 tool_calls 消息回填进对话（剥离 reasoning_content）
+            messages.append(
+                {k: v for k, v in message.items() if k != "reasoning_content"}
+            )
 
             for call in tool_calls:
                 function = call.get("function", {})
@@ -739,8 +754,14 @@ class BusinessCoordinator:
                 "content": "请基于以上工具返回的真实数据，用中文直接给出最终回答；不要调用任何工具。",
             })
             response = await self._deepseek.chat_completion(messages, max_tokens=4096)
-            final_answer = (response["choices"][0]["message"].get("content") or "").strip()
+            recovery_message = response["choices"][0]["message"]
+            final_answer = (recovery_message.get("content") or "").strip()
             recovered = bool(final_answer)
+            recovery_reasoning = (recovery_message.get("reasoning_content") or "").strip()
+            if recovery_reasoning:
+                reasoning_rounds.append({"round": rounds + 1, "text": recovery_reasoning})
+                if on_reasoning is not None:
+                    on_reasoning(reasoning_rounds[-1])
 
         # 方案化协同：把真实工具结果中的方案数据原样汇集为结构化 proposal_options
         # （不做任何二次计算；前端据此渲染方案对比卡片）
@@ -750,6 +771,7 @@ class BusinessCoordinator:
             "question": question.strip(),
             "answer": final_answer,
             "call_chain": call_chain,
+            "reasoning_rounds": reasoning_rounds,
             "rounds": rounds,
             "tool_count": len(call_chain),
             "context": context,
