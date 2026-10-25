@@ -88,20 +88,17 @@ function StepCard({ step }: { step: AssistantCallStep }) {
 
 export default function AssistantTimeline({
   items,
-  live = false,
 }: {
   items: TimelineItem[];
-  live?: boolean;
 }) {
   if (!items.length) return null;
   return (
-    <div className={`assistant-timeline${live ? " live" : ""}`}>
+    <div className="assistant-timeline">
       {items.map((item, i) =>
         item.kind === "reasoning" ? (
-          <details key={`r-${item.round}-${i}`} open={live} className="assistant-thinking-round timeline-thinking">
+          <details key={`r-${item.round}-${i}`} className="assistant-thinking-round timeline-thinking">
             <summary>
-              {live && <span className="assistant-thinking-dot" aria-hidden="true" />}
-              思考过程 · 第 {item.round} 轮
+              思考过程 · 第 {item.round} 轮 · {item.text.length} 字（点击展开）
             </summary>
             <p>{item.text}</p>
           </details>

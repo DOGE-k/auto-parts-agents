@@ -173,6 +173,8 @@ export default function AssistantPanel({
   const submitAssistantQuestion = useCallback(async () => {
     const q = assistantQuestion.trim();
     if (!q || assistantLoading) return;
+    // 立即清空输入：提交瞬间就收走问题文本（不等整轮跑完），避免"还挂在输入框"的迟滞感
+    setAssistantQuestion("");
     setAssistantLoading(true);
     setAbortedRun(false);
     abortedRef.current = false;
@@ -250,13 +252,14 @@ export default function AssistantPanel({
         sessionStorage.setItem(SESSION_STORAGE_KEY, result.session_id);
         setSessionId(result.session_id);
       }
-      if (typeTargetRef.current.text) {
-        // 打字机还有余量：暂存权威结果，节拍器追平后由它切换（保持逐字观感）
-        setPendingAnswer(result);
-      } else {
-        // 无流式增量（同步回退/极短回答）：直接展示完整答案
-        setAssistantAnswer(result);
+      // 统一走节拍器：有流式增量则放完余量再切换；无增量（同步回退/传输层
+      // 失败回退，首个 SSE 偶发触发）把完整答案交给节拍器从头逐字放出——
+      // 内容是真实结果原文，只是控制展示节奏，保证任何成功回答都有打字机。
+      if (!typeTargetRef.current.text && result.answer) {
+        typeTargetRef.current = { round: result.rounds || 1, text: result.answer };
+        typeShownRef.current = 0;
       }
+      setPendingAnswer(result);
       notify("协调智能体已回答");
     } catch (e) {
       onError(displaySystemText(e instanceof Error ? e.message : "协调智能体调用失败"));
@@ -267,13 +270,18 @@ export default function AssistantPanel({
       abortRef.current = null;
       setSuppressPageContext(false);
       setAssistantLoading(false);
-      setAssistantQuestion("");
     }
   }, [assistantQuestion, assistantAnswer, assistantLoading, currentErpDraftId, currentWorkOrderId, sessionId, suppressPageContext, notify, onError]);
 
   // harness 步骤 E：手动停止（AbortSignal 已通到 fetch；中断后保留部分执行）
   const stopAssistant = useCallback(() => {
     abortRef.current?.abort();
+  }, []);
+
+  // 历史会话下拉：点新会话/选中会话后立即收起（原生 details 不会自动关）
+  const sessionsRef = useRef<HTMLDetailsElement>(null);
+  const closeSessionsDropdown = useCallback(() => {
+    if (sessionsRef.current) sessionsRef.current.open = false;
   }, []);
 
   // 打字机节拍器：40ms 一拍，按剩余量比例放出（大答案 ≤ 约 4 秒追平），
@@ -317,10 +325,11 @@ export default function AssistantPanel({
     setAssistantAnswer(null);
     setHistory([]);
     setAssistantQuestion("");
+    closeSessionsDropdown();
     // 新会话首轮屏蔽页面上下文（工单/订单不再自动带入，见 submitAssistantQuestion）
     setSuppressPageContext(true);
     notify("已开始新会话（页面当前工单/订单不再自动带入，业务对象重新积累）");
-  }, [notify]);
+  }, [notify, closeSessionsDropdown]);
 
   // 历史会话：展开时拉取列表；选中某个会话即恢复其完整消息（数据仍在业务库保留期内）
   const loadSessions = useCallback(async () => {
@@ -347,13 +356,14 @@ export default function AssistantPanel({
       setAssistantAnswer(null);
       setAssistantQuestion("");
       setSuppressPageContext(false);
+      closeSessionsDropdown();
       notify(`已切回历史会话 ${targetSessionId}（${messages.length} 条消息）`);
     } catch (e) {
       onError(displaySystemText(e instanceof Error ? e.message : "历史会话消息加载失败"));
     } finally {
       setSwitchingSession(false);
     }
-  }, [sessionId, switchingSession, notify, onError]);
+  }, [sessionId, switchingSession, notify, onError, closeSessionsDropdown]);
 
   // 业务总览"去提问"预填：填入输入框待用户确认，不自动发送
   useEffect(() => {
@@ -425,7 +435,7 @@ export default function AssistantPanel({
             ＋ 新会话
           </button>
           {/* 历史会话切换器：保留期内的旧对话可随时切回查看 */}
-          <details className="assistant-sessions chat-sessions">
+          <details className="assistant-sessions chat-sessions" ref={sessionsRef}>
             <summary
               onClick={() => {
                 // 展开时按需加载一次（sessions===null 为未加载标记；折叠再点不会重复请求）
@@ -520,14 +530,17 @@ export default function AssistantPanel({
               <small>
                 协调智能体工作中 · 已完成 {streamTimeline.filter((x) => x.kind === "step").length} 次智能体调用…
               </small>
-              <AssistantTimeline items={streamTimeline} live />
-              {/* 实时思考块：当前轮思考分片匀速流出（该轮完成后收起，完整文本进时间轴） */}
+              <AssistantTimeline items={streamTimeline} />
+              {/* 实时思考块：默认折叠只显示状态行（呼吸点+已生成字数），
+                  点击展开才看原文——长推理不再刷屏；该轮完成后收起，完整文本进时间轴 */}
               {liveReasoning && (
                 <div className="assistant-timeline live">
-                  <details className="assistant-thinking-round timeline-thinking" open>
+                  <details className="assistant-thinking-round timeline-thinking live-thinking">
                     <summary>
                       <span className="assistant-thinking-dot" aria-hidden="true" />
-                      思考过程 · 第 {liveReasoning.round} 轮
+                      正在思考 · 第 {liveReasoning.round} 轮
+                      {liveReasoning.text.length > 0 ? ` · 已生成 ${liveReasoning.text.length} 字` : ""}
+                      <small>（点击展开原文）</small>
                     </summary>
                     <p>{liveReasoning.text}</p>
                   </details>

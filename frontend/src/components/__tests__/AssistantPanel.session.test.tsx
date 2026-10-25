@@ -85,6 +85,17 @@ async function flush(times = 6): Promise<void> {
   }
 }
 
+/** harness 步骤 F 后答案经 40ms 节拍器逐字放出：等完成态答案出现再断言。 */
+async function waitForAnswer(panel: { container: HTMLElement }, timeoutMs = 6000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    if (panel.container.querySelector(".assistant-result .assistant-answer:not(.typing)")) return;
+  }
+}
+
 describe("AssistantPanel 会话化渲染（P0 回归）", () => {
   const cleanups: Array<() => void> = [];
 
@@ -115,6 +126,7 @@ describe("AssistantPanel 会话化渲染（P0 回归）", () => {
     });
     await typeAndSubmit(panel, "数量改成 3000");
     await flush();
+    await waitForAnswer(panel);
     expect(askAssistantMock).toHaveBeenCalled();
     expect(panel.container.textContent).toContain("已按新数量 3000");
     expect(panel.container.textContent).toContain("需要重新确认");
@@ -144,6 +156,7 @@ describe("AssistantPanel 会话化渲染（P0 回归）", () => {
     });
     await typeAndSubmit(panel, "BD-2401 500 件多少钱？");
     await flush();
+    await waitForAnswer(panel);
     expect(panel.container.textContent).toContain("需要补充信息");
     expect(panel.container.textContent).toContain("customer_id");
     expect(panel.container.textContent).toContain("quotation.analyze_real");
@@ -169,6 +182,7 @@ describe("AssistantPanel 会话化渲染（P0 回归）", () => {
     });
     await typeAndSubmit(panel, "选第二个方案");
     await flush();
+    await waitForAnswer(panel);
     expect(panel.container.textContent).toContain("当前沿用订单=SAL-ORD-2026-00023");
     expect(panel.container.textContent).toContain("OPT-2");
     expect(panel.container.textContent).not.toContain("模块暂时不可用");
@@ -211,8 +225,10 @@ describe("AssistantPanel 连续聊天与页面上下文（交接文档回归）"
       .mockResolvedValueOnce(answer("第二轮回答：质量门禁通过。", "ASST-ROUNDTEST01"));
     await typeAndSubmit(panel, "工单 9 进度怎么样？");
     await flush();
+    await waitForAnswer(panel);
     await typeAndSubmit(panel, "那质量门禁呢？");
     await flush();
+    await waitForAnswer(panel);
     const text = panel.container.textContent ?? "";
     expect(text).toContain("第一轮回答：工单 9 进度 0%。");
     expect(text).toContain("第二轮回答：质量门禁通过。");
@@ -229,6 +245,7 @@ describe("AssistantPanel 连续聊天与页面上下文（交接文档回归）"
     askAssistantMock.mockResolvedValue(answer("ok", "ASST-CTXTEST0001"));
     await typeAndSubmit(panel, "为什么还不能发运？");
     await flush();
+    await waitForAnswer(panel);
     const call = askAssistantMock.mock.calls[0];
     expect(call[1]).toMatchObject({ 当前流程MES工单id: "9" });
   });
@@ -249,6 +266,7 @@ describe("AssistantPanel 连续聊天与页面上下文（交接文档回归）"
     // 新会话首轮提问（不带编号）
     await typeAndSubmit(panel, "质量不过关怎么办？");
     await flush();
+    await waitForAnswer(panel);
     // 页面上下文未被注入：后端收到空 context，不会命中工单 9
     const call = askAssistantMock.mock.calls[0];
     expect(call[1]).toEqual({});
@@ -257,6 +275,7 @@ describe("AssistantPanel 连续聊天与页面上下文（交接文档回归）"
     askAssistantMock.mockResolvedValueOnce(answer("ok2", "ASST-NEWSESS0001"));
     await typeAndSubmit(panel, "那工单 9 呢？");
     await flush();
+    await waitForAnswer(panel);
     const secondCall = askAssistantMock.mock.calls[1];
     expect(secondCall[1]).toMatchObject({ 当前流程MES工单id: "9" });
   });

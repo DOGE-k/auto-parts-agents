@@ -81,6 +81,16 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
   return Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes(text));
 }
 
+/** harness 步骤 F 后答案经 40ms 节拍器逐字放出：等完成态答案出现再断言。 */
+async function waitForAnswer(panel: { container: HTMLElement }, timeoutMs = 6000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    if (panel.container.querySelector(".assistant-result .assistant-answer:not(.typing)")) return;
+  }
+}
 describe("AssistantPanel 问答跳转定位", () => {
   it("调用链带 work_order_id 时显示'查看该工单跟单'并携带对象编号", async () => {
     const onNavigate = vi.fn();
@@ -99,6 +109,7 @@ describe("AssistantPanel 问答跳转定位", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    await waitForAnswer(panel);
     const button = findButton(panel.container, "查看该工单跟单");
     expect(button).toBeTruthy();
     act(() => {
@@ -136,6 +147,7 @@ describe("AssistantPanel 问答跳转定位", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    await waitForAnswer(panel);
     const button = findButton(panel.container, "打开该方案审批");
     expect(button).toBeTruthy();
     act(() => {

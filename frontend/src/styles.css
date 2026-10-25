@@ -2521,6 +2521,8 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 }
 .assistant-timeline.live .timeline-thinking > summary { color: var(--teal-dark); }
 .timeline-thinking p { margin: 4px 0 2px; font-size: 12px; line-height: 1.7; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.timeline-thinking.live-thinking > summary { color: var(--teal-dark); }
+.timeline-thinking.live-thinking > summary small { color: var(--faint); font-weight: 400; margin-left: 4px; font-size: 10px; }
 .timeline-step-card { border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--surface); }
 .timeline-step-card.error { background: rgba(196, 69, 60, 0.05); }
 .timeline-step-row {
@@ -2585,6 +2587,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .chat-header-actions { display: flex; align-items: center; gap: 8px; }
 .assistant-panel.chat .assistant-sessions { border: 0; padding: 0; background: transparent; margin: 0; }
 .chat-new-session { font-size: 12px; padding: 4px 10px; }
+.chat-sessions { position: relative; }
 .chat-sessions { position: relative; }
 .chat-sessions > summary {
   cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
