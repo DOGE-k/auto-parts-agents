@@ -2182,6 +2182,7 @@ async def real_order_assistant_ask_stream(body: dict):
                 on_step=lambda step: queue.put_nowait(("step", step)),
                 on_reasoning=lambda r: queue.put_nowait(("reasoning", r)),
                 on_answer_delta=lambda d: queue.put_nowait(("answer_delta", d)),
+                on_reasoning_delta=lambda d: queue.put_nowait(("reasoning_delta", d)),
             )
             queue.put_nowait(("done", result))
         except IntegrationNotConfigured as exc:

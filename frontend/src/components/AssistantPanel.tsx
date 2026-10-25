@@ -91,6 +91,10 @@ export default function AssistantPanel({
   // 到达事件只累积进目标缓冲，由下方节拍器匀速放出，显示速度与到达速度解耦。
   const typeTargetRef = useRef<{ round: number; text: string }>({ round: 0, text: "" });
   const typeShownRef = useRef(0);
+  // 思考流式（同节拍器）：思考分片实时累积匀速放出，填补工具轮结束到答案开始间的静默
+  const [liveReasoning, setLiveReasoning] = useState<{ round: number; text: string } | null>(null);
+  const reasoningTargetRef = useRef<{ round: number; text: string }>({ round: 0, text: "" });
+  const reasoningShownRef = useRef(0);
   // harness 步骤 E：手动停止后保留已收到的思考与调用（如实展示部分执行）
   const [abortedRun, setAbortedRun] = useState(false);
   const abortedRef = useRef(false);
@@ -185,8 +189,11 @@ export default function AssistantPanel({
     setSkippedPageContext(suppressPageContext);
     setStreamTimeline([]);
     setStreamAnswer(null);
+    setLiveReasoning(null);
     typeTargetRef.current = { round: 0, text: "" };
     typeShownRef.current = 0;
+    reasoningTargetRef.current = { round: 0, text: "" };
+    reasoningShownRef.current = 0;
     onError("");
     const abort = new AbortController();
     abortRef.current = abort;
@@ -202,7 +209,20 @@ export default function AssistantPanel({
         // （同步重试必然同样失败），传输层失败（网络异常/端点不可用/流中断）回退
         // 同步端点；用户手动停止（AbortError）保留已收到的部分、不回退。
         result = await askAssistantStream(q, context, {
-          onReasoning: (r) => setStreamTimeline((prev) => [...prev, { kind: "reasoning", round: r.round, text: r.text }]),
+          onReasoning: (r) => {
+            setStreamTimeline((prev) => [...prev, { kind: "reasoning", round: r.round, text: r.text }]);
+            // 该轮思考已完整进入时间轴，收起实时思考块
+            setLiveReasoning((live) => (live && live.round === r.round ? null : live));
+          },
+          onReasoningDelta: (d) => {
+            const t = reasoningTargetRef.current;
+            if (t.round === d.round) {
+              t.text += d.text;
+            } else {
+              reasoningTargetRef.current = { round: d.round, text: d.text };
+              reasoningShownRef.current = 0;
+            }
+          },
           onStep: (step) => setStreamTimeline((prev) => [...prev, { kind: "step", step }]),
           onAnswerDelta: (d) => {
             const t = typeTargetRef.current;
@@ -258,9 +278,17 @@ export default function AssistantPanel({
 
   // 打字机节拍器：40ms 一拍，按剩余量比例放出（大答案 ≤ 约 4 秒追平），
   // 与 SSE 到达速度解耦；done 后不打断——余量放完再切换到权威答案；停止后放完余量。
+  // 思考流式共用同一节拍：live 思考块随分片匀速生长。
   useEffect(() => {
     if (!assistantLoading && !abortedRun && !pendingAnswer) return;
     const timer = window.setInterval(() => {
+      const rTarget = reasoningTargetRef.current;
+      const rRemaining = rTarget.text.length - reasoningShownRef.current;
+      if (rRemaining > 0) {
+        const step = Math.max(1, Math.ceil(rRemaining / 60));
+        reasoningShownRef.current = Math.min(rTarget.text.length, reasoningShownRef.current + step);
+        setLiveReasoning({ round: rTarget.round, text: rTarget.text.slice(0, reasoningShownRef.current) });
+      }
       const target = typeTargetRef.current;
       const remaining = target.text.length - typeShownRef.current;
       if (remaining > 0) {
@@ -274,6 +302,7 @@ export default function AssistantPanel({
         setPendingAnswer(null);
         setStreamTimeline([]);
         setStreamAnswer(null);
+        setLiveReasoning(null);
       }
     }, 40);
     return () => window.clearInterval(timer);
@@ -373,7 +402,7 @@ export default function AssistantPanel({
   useEffect(() => {
     const box = messagesBoxRef.current;
     if (box) box.scrollTop = box.scrollHeight;
-  }, [assistantAnswer, streamTimeline.length, streamAnswer?.text, history.length, assistantLoading]);
+  }, [assistantAnswer, streamTimeline.length, streamAnswer?.text, liveReasoning?.text, history.length, assistantLoading]);
 
   // 空会话欢迎态：无历史且无进行中/已完成回答时展示（DeepSeek 式首页）
   const chatEmpty = history.length === 0 && !assistantAnswer && !assistantLoading && !abortedRun && !pendingAnswer;
@@ -490,6 +519,18 @@ export default function AssistantPanel({
                 协调智能体工作中 · 已完成 {streamTimeline.filter((x) => x.kind === "step").length} 次智能体调用…
               </small>
               <AssistantTimeline items={streamTimeline} live />
+              {/* 实时思考块：当前轮思考分片匀速流出（该轮完成后收起，完整文本进时间轴） */}
+              {liveReasoning && (
+                <div className="assistant-timeline live">
+                  <details className="assistant-thinking-round timeline-thinking" open>
+                    <summary>
+                      <span className="assistant-thinking-dot" aria-hidden="true" />
+                      思考过程 · 第 {liveReasoning.round} 轮
+                    </summary>
+                    <p>{liveReasoning.text}</p>
+                  </details>
+                </div>
+              )}
               {streamAnswer && (
                 <div
                   className="assistant-answer md-body typing"

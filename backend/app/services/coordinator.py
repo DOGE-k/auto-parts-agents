@@ -623,10 +623,11 @@ class BusinessCoordinator:
         tools: list[dict[str, Any]] | None,
         on_answer_delta: Callable[[dict[str, Any]], None] | None,
         round_no: int,
+        on_reasoning_delta: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """一轮 LLM 调用：客户端支持流式则流式（答案片段经 on_answer_delta
-        增量透传），否则回退非流式（测试注入的假客户端大多只有非流式方法）。
-        两种路径返回结构完全一致。"""
+        """一轮 LLM 调用：客户端支持流式则流式（答案/思考片段分别经
+        on_answer_delta / on_reasoning_delta 增量透传，带轮次号），否则回退
+        非流式（测试注入的假客户端大多只有非流式方法）。两种路径返回结构完全一致。"""
         stream_fn = getattr(self._deepseek, "chat_completion_stream", None)
         if stream_fn is None:
             return await self._deepseek.chat_completion(
@@ -636,6 +637,8 @@ class BusinessCoordinator:
         def _delta(kind: str, fragment: str) -> None:
             if kind == "content" and on_answer_delta is not None:
                 on_answer_delta({"round": round_no, "text": fragment})
+            elif kind == "reasoning" and on_reasoning_delta is not None:
+                on_reasoning_delta({"round": round_no, "text": fragment})
 
         return await stream_fn(
             messages, tools=tools, max_tokens=4096, on_delta=_delta
@@ -649,6 +652,7 @@ class BusinessCoordinator:
         run_meta: dict[str, Any] | None = None,
         on_reasoning: Callable[[dict[str, Any]], None] | None = None,
         on_answer_delta: Callable[[dict[str, Any]], None] | None = None,
+        on_reasoning_delta: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
 
@@ -659,6 +663,8 @@ class BusinessCoordinator:
         on_answer_delta（可选）：答案文本增量回调 {"round": n, "text": 片段}——
         打字机效果用。工具轮若偶发带正文，片段照推（带轮次号），前端按轮次
         重置缓冲即可；最终以 done 事件的完整 answer 为准。
+        on_reasoning_delta（可选）：思考文本增量回调（同上结构）——思考阶段
+        逐字流式，填补工具轮结束到最终答案开始之间的静默期。
         run_meta（可选）：session_id/business_task_id，用于会话关联与保留期。
         """
         if not question.strip():
@@ -702,6 +708,7 @@ class BusinessCoordinator:
                 tools=tool_specs,
                 on_answer_delta=on_answer_delta,
                 round_no=rounds,
+                on_reasoning_delta=on_reasoning_delta,
             )
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls") or []
@@ -788,7 +795,8 @@ class BusinessCoordinator:
                 "content": "请基于以上工具返回的真实数据，用中文直接给出最终回答；不要调用任何工具。",
             })
             response = await self._llm_round(
-                messages, tools=None, on_answer_delta=on_answer_delta, round_no=rounds + 1
+                messages, tools=None, on_answer_delta=on_answer_delta, round_no=rounds + 1,
+                on_reasoning_delta=on_reasoning_delta,
             )
             recovery_message = response["choices"][0]["message"]
             final_answer = (recovery_message.get("content") or "").strip()

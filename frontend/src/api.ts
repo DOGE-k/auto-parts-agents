@@ -1098,7 +1098,7 @@ export async function takeoverCollaborationEvent(eventId: string, note = ""): Pr
 export async function askAssistantStream(
   question: string,
   context: Record<string, unknown> = {},
-  options: { onStep?: (step: AssistantCallStep) => void; onReasoning?: (r: { round: number; text: string }) => void; onAnswerDelta?: (d: { round: number; text: string }) => void; signal?: AbortSignal; sessionId?: string | null } = {},
+  options: { onStep?: (step: AssistantCallStep) => void; onReasoning?: (r: { round: number; text: string }) => void; onAnswerDelta?: (d: { round: number; text: string }) => void; onReasoningDelta?: (d: { round: number; text: string }) => void; signal?: AbortSignal; sessionId?: string | null } = {},
 ): Promise<AssistantAnswer> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const sessionToken = getRealSessionToken();
@@ -1136,6 +1136,8 @@ export async function askAssistantStream(
         options.onReasoning?.(JSON.parse(ev.data) as { round: number; text: string });
       } else if (ev.event === "answer_delta") {
         options.onAnswerDelta?.(JSON.parse(ev.data) as { round: number; text: string });
+      } else if (ev.event === "reasoning_delta") {
+        options.onReasoningDelta?.(JSON.parse(ev.data) as { round: number; text: string });
       } else if (ev.event === "done") {
         final = JSON.parse(ev.data) as AssistantAnswer;
       } else if (ev.event === "error") {

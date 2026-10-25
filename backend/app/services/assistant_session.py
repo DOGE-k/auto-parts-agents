@@ -304,12 +304,14 @@ async def handle_ask(
     on_step=None,
     on_reasoning=None,
     on_answer_delta=None,
+    on_reasoning_delta=None,
 ) -> dict[str, Any]:
     """协同问答主入口：确定性层（会话/上下文/槽位/指令）+ 协调者兜底。
 
     coordinator_factory：仅在实际需要 LLM 协同时才调用的惰性构造器；
     DeepSeek 未配置时确定性路径（追问/数量变更/方案选择）仍可用。
-    on_step/on_reasoning/on_answer_delta：透传给协调者（SSE 流式端点用）。
+    on_step/on_reasoning/on_answer_delta/on_reasoning_delta：透传给协调者
+    （SSE 流式端点用；同步端点不传）。
     """
     question = (question or "").strip()
     if not question:
@@ -502,6 +504,7 @@ async def handle_ask(
             on_step=on_step,
             on_reasoning=on_reasoning,
             on_answer_delta=on_answer_delta,
+            on_reasoning_delta=on_reasoning_delta,
             run_meta={
                 "session_id": session_row.session_id,
                 "business_task_id": task.task_id,
