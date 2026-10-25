@@ -87,6 +87,10 @@ export default function AssistantPanel({
   const [streamTimeline, setStreamTimeline] = useState<TimelineItem[]>([]);
   // harness 步骤 D：答案打字机缓冲（按轮次重置；done 后被权威 answer 取代）
   const [streamAnswer, setStreamAnswer] = useState<{ round: number; text: string } | null>(null);
+  // 步骤 F 修复：模型端 delta 到达极快（468 片段/2s）会一次冲出，观感不是打字机——
+  // 到达事件只累积进目标缓冲，由下方节拍器匀速放出，显示速度与到达速度解耦。
+  const typeTargetRef = useRef<{ round: number; text: string }>({ round: 0, text: "" });
+  const typeShownRef = useRef(0);
   // harness 步骤 E：手动停止后保留已收到的思考与调用（如实展示部分执行）
   const [abortedRun, setAbortedRun] = useState(false);
   const abortedRef = useRef(false);
@@ -179,6 +183,8 @@ export default function AssistantPanel({
     setSkippedPageContext(suppressPageContext);
     setStreamTimeline([]);
     setStreamAnswer(null);
+    typeTargetRef.current = { round: 0, text: "" };
+    typeShownRef.current = 0;
     onError("");
     const abort = new AbortController();
     abortRef.current = abort;
@@ -196,10 +202,15 @@ export default function AssistantPanel({
         result = await askAssistantStream(q, context, {
           onReasoning: (r) => setStreamTimeline((prev) => [...prev, { kind: "reasoning", round: r.round, text: r.text }]),
           onStep: (step) => setStreamTimeline((prev) => [...prev, { kind: "step", step }]),
-          onAnswerDelta: (d) =>
-            setStreamAnswer((prev) =>
-              prev && prev.round === d.round ? { round: d.round, text: prev.text + d.text } : { round: d.round, text: d.text },
-            ),
+          onAnswerDelta: (d) => {
+            const t = typeTargetRef.current;
+            if (t.round === d.round) {
+              t.text += d.text;
+            } else {
+              typeTargetRef.current = { round: d.round, text: d.text };
+              typeShownRef.current = 0;
+            }
+          },
           signal: abort.signal,
           sessionId,
         });
@@ -238,6 +249,22 @@ export default function AssistantPanel({
   const stopAssistant = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  // 打字机节拍器：40ms 一拍，按剩余量比例放出（大答案 ≤ 约 4 秒追平），
+  // 与 SSE 到达速度解耦；停止后继续放完已收到的余量。
+  useEffect(() => {
+    if (!assistantLoading && !abortedRun) return;
+    const timer = window.setInterval(() => {
+      const target = typeTargetRef.current;
+      if (!target.text) return;
+      const remaining = target.text.length - typeShownRef.current;
+      if (remaining <= 0) return;
+      const step = Math.max(1, Math.ceil(remaining / 90));
+      typeShownRef.current = Math.min(target.text.length, typeShownRef.current + step);
+      setStreamAnswer({ round: target.round, text: target.text.slice(0, typeShownRef.current) });
+    }, 40);
+    return () => window.clearInterval(timer);
+  }, [assistantLoading, abortedRun]);
 
   const startNewSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
