@@ -15,6 +15,7 @@ export default function AgentRunsPanel() {
   const [agentTypeFilter, setAgentTypeFilter] = useState("");
   const [expandedRunId, setExpandedRunId] = useState("");
   const [agentRunDetail, setAgentRunDetail] = useState<AgentRunDetail | null>(null);
+  const [lastRefresh, setLastRefresh] = useState("");
 
   // 查询 Agent 运行记录（持久化在数据库中，服务重启后仍可查）
   const loadAgentRuns = useCallback(async (agentType: string) => {
@@ -24,6 +25,7 @@ export default function AgentRunsPanel() {
       const query = agentType ? `?agent_type=${encodeURIComponent(agentType)}&limit=30` : "?limit=30";
       const runs = await api<AgentRunSummary[]>(`/real-orders/agent-runs${query}`);
       setAgentRuns(runs);
+      setLastRefresh(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
     } catch (e) {
       setAgentRunsError(e instanceof Error ? e.message : "Agent 运行记录查询失败");
     } finally {
@@ -82,10 +84,14 @@ export default function AgentRunsPanel() {
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
-            <button className="button ghost" onClick={() => void loadAgentRuns(agentTypeFilter)}>
-              刷新
+            <button
+              className="button ghost"
+              disabled={agentRunsLoading}
+              onClick={() => void loadAgentRuns(agentTypeFilter)}
+            >
+              {agentRunsLoading ? "刷新中…" : "刷新"}
             </button>
-            {agentRunsLoading && <small>加载中...</small>}
+            {lastRefresh && !agentRunsLoading && <small className="refresh-stamp">最近刷新 {lastRefresh}</small>}
           </div>
           {agentRunsError && <p className="field-hint">{displaySystemText(agentRunsError)}</p>}
           {!agentRunsLoading && !agentRunsError && agentRuns.length === 0 && (

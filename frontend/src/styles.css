@@ -247,8 +247,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 
 .version-tag {
-  font: 500 10px var(--mono);
-  color: #4e6260;
+  /* 11px + 亮一档的灰：修 taste-skill 量测的 10px 过小与 2.4:1 对比度 FAIL */
+  font: 500 11px var(--mono);
+  color: #8fa3b8;
   letter-spacing: 0.02em;
 }
 
@@ -3726,3 +3727,6 @@ tr.row-clickable td:first-child { position: relative; }
 @media (max-width: 900px) { .form-group.span-2 { grid-column: auto; } }
 .form-actions { display: flex; align-items: center; gap: 14px; }
 .form-action-hint { font-size: 12px; color: var(--faint); }
+
+/* 刷新反馈：最近刷新时间戳（与加载态一起让刷新按钮"看得到效果"） */
+.refresh-stamp { color: var(--faint); font-size: 11px; font-family: var(--mono); white-space: nowrap; }

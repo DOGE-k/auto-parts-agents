@@ -4,6 +4,8 @@ import RealBusinessPage, { type RealModuleKey } from "./RealBusinessPage";
 import { NavIcon } from "./components/icons";
 import type { RealIdentity } from "./api";
 import { displaySystemText } from "./lib/system-labels";
+// 版本号单一来源：frontend/package.json（发布改版本只需改一处）
+import pkg from "../package.json";
 
 type PageKey =
   | RealModuleKey
@@ -322,7 +324,7 @@ function App() {
           <p className="sidebar-approver">
             当前项目用户：<b>{realIdentity ? `${realIdentity.actor_id}` : "未登录"}</b>
           </p>
-          <div className="version-tag">Runtime · 0.1.0</div>
+          <div className="version-tag">Runtime · {pkg.version}</div>
         </div>
       </aside>
 

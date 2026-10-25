@@ -14,8 +14,11 @@ export default function PendingApprovalsPanel({ onOpenQuotation, onOpenPlan }: P
   const [quotations, setQuotations] = useState<Quotation[] | null>(null);
   const [plans, setPlans] = useState<ProcurementPlan[] | null>(null);
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState("");
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [qs, ps] = await Promise.all([
         api<Quotation[]>("/real-orders/quotations"),
@@ -24,8 +27,11 @@ export default function PendingApprovalsPanel({ onOpenQuotation, onOpenPlan }: P
       setQuotations(qs);
       setPlans(ps);
       setError("");
+      setLastRefresh(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "待审批数据加载失败");
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
@@ -45,7 +51,10 @@ export default function PendingApprovalsPanel({ onOpenQuotation, onOpenPlan }: P
         </div>
         <div className="panel-heading-actions">
           <span className="badge amber-chip">{pendingQuotations.length + pendingPlans.length} 项待处理</span>
-          <button className="button ghost" onClick={() => void load()}>↻ 刷新</button>
+          {lastRefresh && <small className="refresh-stamp">最近刷新 {lastRefresh}</small>}
+          <button className="button ghost" disabled={refreshing} onClick={() => void load()}>
+            {refreshing ? "刷新中…" : "↻ 刷新"}
+          </button>
         </div>
       </div>
       {error && <div className="error-banner"><span>加载失败</span> {displaySystemText(error)}<button onClick={() => setError("")}>×</button></div>}
