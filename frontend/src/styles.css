@@ -2570,10 +2570,16 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .assistant-panel.chat {
   border: 0; background: transparent; box-shadow: none; margin-top: 0;
   display: flex; flex-direction: column;
-  height: calc(100vh - 150px); min-height: 460px;
+  height: calc(100vh - 150px); min-height: 460px; min-width: 0; max-width: 100%;
 }
 /* 遗留 craft-pass 给 .assistant-panel 的描边在聊天态取消 */
 .assistant-panel.chat { border-top: 0 !important; }
+/* 溢出防护：flex 子项允许收缩到内容宽以下，长表格/长单号在各自盒子内滚动或换行 */
+.chat-column { min-width: 0; }
+.assistant-msg { min-width: 0; }
+.assistant-msg-body { min-width: 0; }
+.assistant-answer { overflow-wrap: anywhere; }
+.assistant-timeline-caption { word-break: break-all; }
 .chat-header {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap;
@@ -2615,8 +2621,8 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 }
 /* 消息区：占满剩余高度、内部滚动 */
 .assistant-messages.chat-messages {
-  flex: 1 1 auto; max-height: none; min-height: 120px; overflow-y: auto;
-  padding: 14px 2px 8px; margin-top: 4px; gap: 14px; overscroll-behavior: contain;
+  flex: 1 1 auto; max-height: none; min-height: 120px; overflow-y: auto; overflow-x: hidden;
+  padding: 14px 2px 8px; margin-top: 4px; gap: 14px; overscroll-behavior: contain; min-width: 0;
 }
 /* 用户消息：右侧气泡、无角色标签 */
 .assistant-msg.user {
@@ -2811,10 +2817,12 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 }
 
 /* ===== 协调者回答的轻量 Markdown 渲染 ===== */
-.md-body { line-height: 1.7; }
+.md-body { line-height: 1.7; overflow-wrap: anywhere; }
 .md-body .md-heading { font-weight: 700; color: var(--ink); margin-top: 4px; }
 .md-body .md-gap { height: 6px; }
-.md-body .md-table { border-collapse: collapse; margin: 6px 0; font-size: 12px; width: 100%; }
+/* 表格内滚动：列多/单元格长（单号、日期）时不再撑破聊天列（display:block +
+   overflow-x 是标准响应式表格手法，单元格保持正常换行） */
+.md-body .md-table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12px; width: 100%; }
 .md-body .md-table td { border: 1px solid var(--line); padding: 4px 8px; }
 .md-body .md-table tr:first-child td { background: var(--surface-2); font-weight: 600; }
 
