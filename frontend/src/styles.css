@@ -2482,6 +2482,34 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
   cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
 }
 .assistant-fold[open] > summary { margin-bottom: 8px; }
+/* harness 步骤 B：思考过程块（deepseek-flash reasoning_content 原文） */
+.assistant-thinking {
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 6px 10px; background: var(--surface);
+}
+.assistant-thinking > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
+}
+.assistant-thinking[open] > summary { margin-bottom: 6px; }
+.assistant-thinking-round { padding: 4px 0; }
+.assistant-thinking-round + .assistant-thinking-round { border-top: 1px dashed var(--line-soft); margin-top: 4px; padding-top: 8px; }
+.assistant-thinking-round small { color: var(--faint); font-family: var(--mono); font-size: 10px; }
+.assistant-thinking-round p {
+  margin: 3px 0 0; font-size: 12px; line-height: 1.7; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-word;
+}
+.assistant-thinking.live .assistant-thinking-round { border: 0; padding: 2px 0; }
+.assistant-thinking.live > .assistant-thinking-round > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--teal-dark); user-select: none;
+  display: flex; align-items: center; gap: 7px;
+}
+.assistant-thinking-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--teal);
+  animation: thinking-pulse 1.1s var(--ease) infinite;
+}
+@keyframes thinking-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .assistant-thinking-dot { animation: none; }
+}
 /* 历史会话切换器（2026-10-02：保留期内的旧对话可切回查看） */
 .assistant-sessions {
   border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 6px 10px; margin-top: 8px; background: var(--surface);

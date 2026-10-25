@@ -2180,6 +2180,7 @@ async def real_order_assistant_ask_stream(body: dict):
                 session_id=session_id,
                 page_context=context,
                 on_step=lambda step: queue.put_nowait(("step", step)),
+                on_reasoning=lambda r: queue.put_nowait(("reasoning", r)),
             )
             queue.put_nowait(("done", result))
         except IntegrationNotConfigured as exc:

@@ -10,6 +10,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
 import { displaySystemText } from "../lib/system-labels";
 import AssistantCallChain from "./AssistantCallChain";
+import AssistantThinking from "./AssistantThinking";
 import {
   askAssistant,
   askAssistantStream,
@@ -84,6 +85,8 @@ export default function AssistantPanel({
   const [switchingSession, setSwitchingSession] = useState(false);
   // 流式问答（阶段十 SSE）：等待期间逐条收到的调用链步骤（点亮"协调者正在查什么"）
   const [streamSteps, setStreamSteps] = useState<AssistantCallStep[]>([]);
+  // harness 步骤 B：等待期间逐轮收到的思考过程（deepseek-flash reasoning_content）
+  const [streamReasoning, setStreamReasoning] = useState<{ round: number; text: string }[]>([]);
   // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
   const [proposalExec, setProposalExec] = useState<{
     option_id: string;
@@ -169,6 +172,7 @@ export default function AssistantPanel({
     setAssistantAnswer(null);
     setSkippedPageContext(suppressPageContext);
     setStreamSteps([]);
+    setStreamReasoning([]);
     onError("");
     try {
       const context: Record<string, unknown> = {};
@@ -182,6 +186,7 @@ export default function AssistantPanel({
         // 传输层失败（网络异常/端点不可用/流中断）回退同步端点。
         result = await askAssistantStream(q, context, {
           onStep: (step) => setStreamSteps((prev) => [...prev, step]),
+          onReasoning: (r) => setStreamReasoning((prev) => [...prev, r]),
           sessionId,
         });
       } catch (streamErr) {
@@ -201,6 +206,7 @@ export default function AssistantPanel({
       setSuppressPageContext(false);
       setAssistantLoading(false);
       setStreamSteps([]);
+      setStreamReasoning([]);
       setAssistantQuestion("");
     }
   }, [assistantQuestion, assistantAnswer, assistantLoading, currentErpDraftId, currentWorkOrderId, sessionId, suppressPageContext, notify, onError]);
@@ -394,12 +400,17 @@ export default function AssistantPanel({
             </div>
           )
         ))}
-        {/* 流式进行中（阶段十 SSE）：调用链逐步点亮，替代原来的长时间无反馈等待 */}
-        {assistantLoading && streamSteps.length > 0 && (
+        {/* 流式进行中（阶段十 SSE）：思考过程逐轮滑出 + 调用链逐步点亮 */}
+        {assistantLoading && (streamReasoning.length > 0 || streamSteps.length > 0) && (
           <div className="assistant-result">
             <div className="assistant-chain">
-              <small>协调智能体工作中，已完成 {streamSteps.length} 次智能体调用…</small>
-              <AssistantCallChain steps={streamSteps} live />
+              <AssistantThinking rounds={streamReasoning} live />
+              {streamSteps.length > 0 && (
+                <>
+                  <small>协调智能体工作中，已完成 {streamSteps.length} 次智能体调用…</small>
+                  <AssistantCallChain steps={streamSteps} live />
+                </>
+              )}
             </div>
           </div>
         )}
@@ -412,6 +423,10 @@ export default function AssistantPanel({
             {/* P0：上下文沿用回显（用户可纠正） */}
             {assistantAnswer.applied_context && (
               <div className="assistant-context-echo">{displaySystemText(assistantAnswer.applied_context)}</div>
+            )}
+            {/* harness 步骤 B：思考过程折叠保留（真实推理原文） */}
+            {(assistantAnswer.reasoning_rounds ?? []).length > 0 && (
+              <AssistantThinking rounds={assistantAnswer.reasoning_rounds!} />
             )}
             {/* P0：槽位追问（缺什么/为什么/补充后调用哪个智能体） */}
             {assistantAnswer.needs_input && (assistantAnswer.missing_slots?.length ?? 0) > 0 && (

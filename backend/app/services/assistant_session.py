@@ -302,11 +302,13 @@ async def handle_ask(
     session_id: str | None = None,
     page_context: dict[str, Any] | None = None,
     on_step=None,
+    on_reasoning=None,
 ) -> dict[str, Any]:
     """协同问答主入口：确定性层（会话/上下文/槽位/指令）+ 协调者兜底。
 
     coordinator_factory：仅在实际需要 LLM 协同时才调用的惰性构造器；
     DeepSeek 未配置时确定性路径（追问/数量变更/方案选择）仍可用。
+    on_step/on_reasoning：透传给协调者（SSE 流式端点用；同步端点不传）。
     """
     question = (question or "").strip()
     if not question:
@@ -497,6 +499,7 @@ async def handle_ask(
             question,
             context=ask_context,
             on_step=on_step,
+            on_reasoning=on_reasoning,
             run_meta={
                 "session_id": session_row.session_id,
                 "business_task_id": task.task_id,
@@ -526,6 +529,7 @@ async def handle_ask(
 
     coordinator_extras = {
         "call_chain": coordinator_result.get("call_chain") or [],
+        "reasoning_rounds": coordinator_result.get("reasoning_rounds") or [],
         "rounds": coordinator_result.get("rounds", 0),
         "tool_count": coordinator_result.get("tool_count", 0),
         "coordination_run_id": coordinator_result.get("coordination_run_id", ""),

@@ -83,7 +83,9 @@ class AssistantSessionListTests(unittest.IsolatedAsyncioTestCase):
                 ))
             db.commit()
 
-        result = await real_order_assistant_sessions(limit=20)
+        # limit=50（端点上限）：会话列表是全库口径，组合运行时其他用例遗留的
+        # 会话会占坑，limit=20 时新建会话可能被挤出列表（脆弱性随遗留数变化）。
+        result = await real_order_assistant_sessions(limit=50)
         listed = {s["session_id"]: s for s in result["sessions"]}
         for sid, _ in ids:
             self.assertIn(sid, listed)

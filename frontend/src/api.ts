@@ -499,6 +499,9 @@ export type AssistantAnswer = {
   coordination_run_id: string;
   authority: string;
   context: Record<string, unknown>;
+  // harness 改造：协调者每轮思考过程原文（deepseek-flash reasoning_content；
+  // 确定性回答没有思考，恒为空数组）
+  reasoning_rounds?: { round: number; text: string }[];
   proposal_options?: ProposalOptions | null;
   session_id?: string;
   business_task_id?: string;
@@ -1089,7 +1092,7 @@ export async function takeoverCollaborationEvent(eventId: string, note = ""): Pr
 export async function askAssistantStream(
   question: string,
   context: Record<string, unknown> = {},
-  options: { onStep?: (step: AssistantCallStep) => void; signal?: AbortSignal; sessionId?: string | null } = {},
+  options: { onStep?: (step: AssistantCallStep) => void; onReasoning?: (r: { round: number; text: string }) => void; signal?: AbortSignal; sessionId?: string | null } = {},
 ): Promise<AssistantAnswer> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const sessionToken = getRealSessionToken();
@@ -1123,6 +1126,8 @@ export async function askAssistantStream(
     for (const ev of parser.feed(decoder.decode(value, { stream: true }))) {
       if (ev.event === "step") {
         options.onStep?.(JSON.parse(ev.data) as AssistantCallStep);
+      } else if (ev.event === "reasoning") {
+        options.onReasoning?.(JSON.parse(ev.data) as { round: number; text: string });
       } else if (ev.event === "done") {
         final = JSON.parse(ev.data) as AssistantAnswer;
       } else if (ev.event === "error") {

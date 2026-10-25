@@ -85,15 +85,19 @@ class OnStepCallbackTests(unittest.IsolatedAsyncioTestCase):
 class _FakeStreamCoordinator:
     """流式端点测试用假协调者：回调两步后返回固定结果。"""
 
-    def __init__(self, steps: list[dict], result: dict, error: Exception | None = None):
+    def __init__(self, steps: list[dict], result: dict, error: Exception | None = None, reasoning: list[dict] | None = None):
         self._steps = steps
         self._result = result
         self._error = error
+        self._reasoning = reasoning or []
         self.closed = False
 
-    async def ask(self, question, context, on_step=None, run_meta=None):
+    async def ask(self, question, context, on_step=None, run_meta=None, on_reasoning=None):
         if self._error is not None:
             raise self._error
+        if on_reasoning is not None:
+            for r in self._reasoning:
+                on_reasoning(r)
         if on_step is not None:
             for step in self._steps:
                 on_step(step)
@@ -160,6 +164,37 @@ class AssistantStreamEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[2][1]["coordination_run_id"], "RUN-COORD-TEST")
         # 协调者已正常关闭
         self.assertTrue(fake.closed)
+
+    async def test_stream_emits_reasoning_events_before_done(self):
+        # harness 步骤 B：每轮思考过程以 reasoning 事件推送（真实原文透传）
+        steps = [{"seq": 1, "callee": "tracking", "skill_id": "tracking.track_real", "status": "ok", "elapsed_ms": 20}]
+        fake = _FakeStreamCoordinator(
+            steps,
+            {
+                "question": "测试问题",
+                "answer": "完成率 90%。",
+                "call_chain": steps,
+                "reasoning_rounds": [
+                    {"round": 1, "text": "先查工单进度。"},
+                    {"round": 2, "text": "总结完成率。"},
+                ],
+                "rounds": 2,
+                "tool_count": 1,
+                "coordination_run_id": "RUN-COORD-R",
+            },
+            reasoning=[{"round": 1, "text": "先查工单进度。"}, {"round": 2, "text": "总结完成率。"}],
+        )
+        with patch.object(coord_module, "build_coordinator", return_value=fake):
+            status, raw, _ = await self._collect({"question": "测试问题"})
+
+        self.assertEqual(status, 200)
+        events = _parse_sse(raw)
+        self.assertEqual(
+            [kind for kind, _ in events],
+            ["reasoning", "reasoning", "step", "done"],
+        )
+        self.assertEqual(events[0][1], {"round": 1, "text": "先查工单进度。"})
+        self.assertEqual(events[3][1]["reasoning_rounds"][1]["text"], "总结完成率。")
 
     async def test_stream_emits_error_event_when_coordinator_fails(self):
         fake = _FakeStreamCoordinator([], {}, error=IntegrationError("OpenMES 不可达"))

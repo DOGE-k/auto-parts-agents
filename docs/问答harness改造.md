@@ -57,7 +57,7 @@
 - 测试：`tests/test_coordinator.py` 加用例——① 假 DeepSeek 客户端返回带 reasoning_content 的多轮响应 → on_reasoning 每轮被调、result.reasoning_rounds 正确；② 断言回传给 chat_completion 的 messages 不含 reasoning_content 键。
 - 验收：`backend` pytest 全绿（基线 684+）；此步不部署也不影响现网（无人消费新字段）。
 
-### ☐ 步骤 B：SSE reasoning 事件 + 前端思考块（最小可用）
+### ☑ 步骤 B：SSE reasoning 事件 + 前端思考块（最小可用）——完成
 
 - `assistant_session.py` `handle_ask` 加 `on_reasoning` 参数透传给 coordinator；
 - `main.py` 流式端点：`on_reasoning=lambda r: queue.put_nowait(("reasoning", r))`；
@@ -105,3 +105,4 @@
 
 - 2026-10-25 创建文档；完成全部前置探测（模型 reasoning_content / 流式格式 / 存储层路径），设计已与用户确认（交错时间轴、工具轮非逐字、思考整段、最终轮打字机、历史链路恢复）。下一步：步骤 A。
 - 2026-10-25 步骤 A 完成：`coordinator.ask()` 加 `on_reasoning` 回调与 `result["reasoning_rounds"]`（每轮 + 空回答恢复路径的思考都采集）；回传 messages 前剥离 `reasoning_content`（修复既有 API 约定污染）；`assistant_session._finish()` 确定性路径补 `reasoning_rounds` 默认值。新增 `ReasoningPassthroughTests` 2 例（透传+剥离验证、无思考字段时空数组）。后端 686 passed（基线 684+2）。
+- 2026-10-25 步骤 B 完成：`handle_ask` 透传 `on_reasoning`；SSE 端点新增 `reasoning` 事件；`coordinator_extras` 补带 `reasoning_rounds`（done 事件含完整思考）；前端 `api.ts` 解析 reasoning 事件 + `AssistantAnswer.reasoning_rounds` 类型；新增 `AssistantThinking.tsx`（live 态逐轮滑出+呼吸点动画、完成态折叠保留），AssistantPanel 等待区与完成区接线；顺手修复 `test_lists_sessions_most_recent_first_without_messages` 的 limit=20 脆弱性（组合运行遗留会话挤掉新建会话，改用端点上限 50）。后端 687 passed（+1 reasoning 事件用例）、前端 vitest 163 passed、build 通过。
