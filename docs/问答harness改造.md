@@ -85,7 +85,7 @@
 - 测试：`test_coordinator.py` 假流式客户端用例（分片 tool_calls 拼装正确性 + answer_delta 序列）；`test_assistant_stream.py` answer_delta 事件用例。
 - 验收：服务器实测打字机效果；网络中断回退同步端点仍可用。
 
-### ☐ 步骤 E：交错时间轴 UI + 调用卡展开 + Stop 按钮（纯前端）
+### ☑ 步骤 E：交错时间轴 UI + 调用卡展开 + Stop 按钮（纯前端+step.round）——完成
 
 - 等待区/完成区重构为统一时间轴组件：思考块（完成后自动折叠）→ 调用卡 → …；调用卡点击展开实参逐项 + 结果摘要 + 原始 JSON（次级 details，复用任务 8 模式）；
 - 完成后调用链不再沉底 `<details>`，保留在时间轴（思考折叠、调用卡常显）；
@@ -109,3 +109,4 @@
 - 2026-10-25 步骤 B 服务器验证通过（`31ea6c1`）：实测提问后思考块折叠显示「思考过程（3 轮）」，展开为模型真实推理原文（第 1-3 轮英文原文，与调用链 2 次调用对应），已截图。
 - 2026-10-25 步骤 C 完成：`sessions/{id}/messages` 端点按 `session_id` 关联查 `real_agent_runs`（coordinator:ask），贪心就近配对（run.started_at ≤ 助手消息 created_at）把 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附到对应助手消息；确定性回答无运行、自然不附带。前端 `AssistantHistoryMessage` 扩展可选字段，历史助手消息渲染折叠思考块与调用链（复用 AssistantThinking/AssistantCallChain）。新增端点配对用例 1 例。后端 688、前端 163 passed、build 通过。服务器验证：刷新页面后旧轮次带思考块与调用链（已截图）。
 - 2026-10-25 步骤 D 完成：`JsonHttpClient.stream_sse`（POST+SSE 增量读、错误语义与 request_json 一致）；`DeepSeekClient.chat_completion_stream`（content/reasoning 增量回调 + tool_calls 分片按 index 拼装，返回与非流式同构）；`coordinator._llm_round` 统一两处 LLM 调用——客户端有 stream 方法走流式（答案片段经 `on_answer_delta` 带轮次号透传），否则回退非流式（测试假客户端自动走老路径）；SSE 端点新增 `answer_delta` 事件；前端打字机缓冲（按轮次重置，done 后以权威 answer 覆盖，防丢字）+ 打字光标动画。新增 `test_deepseek_stream.py` 2 例（分片拼装/增量回调顺序）+ 协调者流式轮次标注 1 例。后端 691、前端 163 passed、build 通过。服务器验证（`6a4d936`）：SSE 实测一问产生 3×reasoning + 5×step + **415×answer_delta** + done；浏览器采样打字机缓冲 6s 时 203 字 → 7s 时 561 字逐字增长，完成后被权威答案替换（注意：验证用问题需经协调者——确定性追问路径无 LLM、只有 done 事件，属正常）。已截图。
+- 2026-10-25 步骤 E 完成：① 后端 call_chain 步骤加 `round` 字段（交错排序依据，兼容旧记录缺省）；② 新增 `AssistantTimeline.tsx`（buildTimeline 把 reasoning_rounds 与带 round 的 call_chain 按轮交错；StepCard 可展开卡：行内=序号/岗位pill/技能/状态/耗时，展开=可读摘要+实参逐项+返回截断 JSON 原文）；③ AssistantPanel 重构：加载态/完成态/历史态统一走时间轴（完成后调用链不再沉底折叠，思考折叠、调用卡常显）；确定性回答无时间轴时保留「确定性处理（未调用大模型）」标注；④ Stop 按钮（AbortController→fetch signal，中断后保留已收到的思考与调用并如实标注「部分执行」，不触发同步回退——修复时注意 finally 读的是闭包旧值，用 ref 判定）。assistant-chain 底部旧折叠删除；AssistantThinking/AssistantCallChain 在面板中不再直接引用（组件保留）。后端 691、前端 163 passed、build 通过。

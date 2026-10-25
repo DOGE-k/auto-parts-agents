@@ -766,6 +766,8 @@ class BusinessCoordinator:
                     "result_summary": _summarize_result(step_result),
                     "status": "error" if step_result.get("error") else "ok",
                     "elapsed_ms": elapsed_ms,
+                    # harness 步骤 E：所属推理轮次（前端思考/调用交错时间轴的排序依据）
+                    "round": rounds,
                 })
                 if on_step is not None:
                     on_step(call_chain[-1])

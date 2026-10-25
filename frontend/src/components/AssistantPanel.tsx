@@ -9,8 +9,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { formatAssistantAnswer } from "../lib/markdown";
 import { displaySystemText } from "../lib/system-labels";
-import AssistantCallChain from "./AssistantCallChain";
-import AssistantThinking from "./AssistantThinking";
+import AssistantTimeline, { buildTimeline } from "./AssistantTimeline";
+import type { TimelineItem } from "./AssistantTimeline";
 import {
   askAssistant,
   askAssistantStream,
@@ -83,12 +83,14 @@ export default function AssistantPanel({
   const [sessions, setSessions] = useState<AssistantSessionSummary[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [switchingSession, setSwitchingSession] = useState(false);
-  // 流式问答（阶段十 SSE）：等待期间逐条收到的调用链步骤（点亮"协调者正在查什么"）
-  const [streamSteps, setStreamSteps] = useState<AssistantCallStep[]>([]);
-  // harness 步骤 B：等待期间逐轮收到的思考过程（deepseek-flash reasoning_content）
-  const [streamReasoning, setStreamReasoning] = useState<{ round: number; text: string }[]>([]);
+  // harness 步骤 E：流式事件按到达顺序进统一时间轴（思考块/调用卡交错点亮）
+  const [streamTimeline, setStreamTimeline] = useState<TimelineItem[]>([]);
   // harness 步骤 D：答案打字机缓冲（按轮次重置；done 后被权威 answer 取代）
   const [streamAnswer, setStreamAnswer] = useState<{ round: number; text: string } | null>(null);
+  // harness 步骤 E：手动停止后保留已收到的思考与调用（如实展示部分执行）
+  const [abortedRun, setAbortedRun] = useState(false);
+  const abortedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
   const [proposalExec, setProposalExec] = useState<{
     option_id: string;
@@ -162,6 +164,8 @@ export default function AssistantPanel({
     const q = assistantQuestion.trim();
     if (!q || assistantLoading) return;
     setAssistantLoading(true);
+    setAbortedRun(false);
+    abortedRef.current = false;
     // 上一轮问答对沉入历史消息列表（输入框保留在底部，不清空旧问题）
     setHistory((prev) => {
       const next = [...prev];
@@ -173,10 +177,11 @@ export default function AssistantPanel({
     });
     setAssistantAnswer(null);
     setSkippedPageContext(suppressPageContext);
-    setStreamSteps([]);
-    setStreamReasoning([]);
+    setStreamTimeline([]);
     setStreamAnswer(null);
     onError("");
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
       const context: Record<string, unknown> = {};
       if (!suppressPageContext) {
@@ -185,18 +190,26 @@ export default function AssistantPanel({
       }
       let result: AssistantAnswer;
       try {
-        // 流式优先（SSE）：调用链逐步点亮；协调者执行失败不回退（同步重试必然同样失败），
-        // 传输层失败（网络异常/端点不可用/流中断）回退同步端点。
+        // 流式优先（SSE）：思考/调用交错点亮 + 答案打字机；协调者执行失败不回退
+        // （同步重试必然同样失败），传输层失败（网络异常/端点不可用/流中断）回退
+        // 同步端点；用户手动停止（AbortError）保留已收到的部分、不回退。
         result = await askAssistantStream(q, context, {
-          onStep: (step) => setStreamSteps((prev) => [...prev, step]),
-          onReasoning: (r) => setStreamReasoning((prev) => [...prev, r]),
+          onReasoning: (r) => setStreamTimeline((prev) => [...prev, { kind: "reasoning", round: r.round, text: r.text }]),
+          onStep: (step) => setStreamTimeline((prev) => [...prev, { kind: "step", step }]),
           onAnswerDelta: (d) =>
             setStreamAnswer((prev) =>
               prev && prev.round === d.round ? { round: d.round, text: prev.text + d.text } : { round: d.round, text: d.text },
             ),
+          signal: abort.signal,
           sessionId,
         });
       } catch (streamErr) {
+        if (streamErr instanceof DOMException && streamErr.name === "AbortError") {
+          abortedRef.current = true;
+          setAbortedRun(true);
+          notify("已停止本轮问答（保留已完成的思考与智能体调用）");
+          return;
+        }
         if (streamErr instanceof AssistantStreamExecError) throw streamErr;
         result = await askAssistant(q, context, sessionId);
       }
@@ -210,14 +223,21 @@ export default function AssistantPanel({
       onError(displaySystemText(e instanceof Error ? e.message : "协调智能体调用失败"));
     } finally {
       // 新会话首问结束后恢复正常页面上下文策略（交接文档 §4.2）
+      abortRef.current = null;
       setSuppressPageContext(false);
       setAssistantLoading(false);
-      setStreamSteps([]);
-      setStreamReasoning([]);
-      setStreamAnswer(null);
+      if (!abortedRef.current) {
+        setStreamTimeline([]);
+        setStreamAnswer(null);
+      }
       setAssistantQuestion("");
     }
   }, [assistantQuestion, assistantAnswer, assistantLoading, currentErpDraftId, currentWorkOrderId, sessionId, suppressPageContext, notify, onError]);
+
+  // harness 步骤 E：手动停止（AbortSignal 已通到 fetch；中断后保留部分执行）
+  const stopAssistant = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const startNewSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -313,7 +333,7 @@ export default function AssistantPanel({
   useEffect(() => {
     const box = messagesBoxRef.current;
     if (box) box.scrollTop = box.scrollHeight;
-  }, [assistantAnswer, streamSteps.length, history.length, assistantLoading]);
+  }, [assistantAnswer, streamTimeline.length, streamAnswer?.text, history.length, assistantLoading]);
 
   return (
     <section className="panel assistant-panel">
@@ -386,6 +406,11 @@ export default function AssistantPanel({
         >
           {assistantLoading ? "协调智能体处理中..." : "提问 →"}
         </button>
+        {assistantLoading && (
+          <button className="button ghost" onClick={stopAssistant} title="停止本轮问答，保留已完成的思考与智能体调用">
+            ■ 停止
+          </button>
+        )}
         <button className="button ghost" onClick={startNewSession} disabled={assistantLoading} title="清空当前会话上下文，重新开始一个业务任务（页面当前工单/订单不再自动带入）">
           新会话
         </button>
@@ -402,36 +427,57 @@ export default function AssistantPanel({
             <div key={`a-${m.id}-${i}`} className="assistant-msg assistant">
               <span className="assistant-msg-role">协调智能体</span>
               <div className="assistant-msg-body">
-                {/* harness 步骤 C：历史轮次同样保留思考与调用链（折叠态，可回溯） */}
-                {(m.reasoning_rounds ?? []).length > 0 && <AssistantThinking rounds={m.reasoning_rounds!} />}
+                {/* harness 步骤 E：历史轮次同样渲染交错时间轴（旧记录无 round 时按原序展示） */}
+                {(() => {
+                  const items = buildTimeline(
+                    m.reasoning_rounds ?? [],
+                    (m.call_chain ?? []) as AssistantCallStep[],
+                  );
+                  if (!items.length) return null;
+                  return (
+                    <details className="assistant-fold assistant-timeline-history">
+                      <summary>
+                        执行时间轴（{items.filter((x) => x.kind === "step").length} 次智能体调用
+                        {m.coordination_run_id ? ` · 记录 ${m.coordination_run_id}` : ""}，点击展开）
+                      </summary>
+                      <AssistantTimeline items={items} />
+                    </details>
+                  );
+                })()}
                 <div
                   className="md-body"
                   dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(m.content)) }}
                 />
-                {(m.call_chain ?? []).length > 0 && (
-                  <details className="assistant-fold assistant-chain-details">
-                    <summary>调用链（{(m.call_chain ?? []).length} 次智能体调用{m.coordination_run_id ? ` · 记录 ${m.coordination_run_id}` : ""}，点击展开）</summary>
-                    <AssistantCallChain steps={m.call_chain as AssistantCallStep[]} />
-                  </details>
-                )}
               </div>
             </div>
           )
         ))}
-        {/* 流式进行中（阶段十 SSE）：思考过程逐轮滑出 + 调用链逐步点亮 + 答案打字机 */}
-        {assistantLoading && (streamReasoning.length > 0 || streamSteps.length > 0 || streamAnswer) && (
+        {/* 流式进行中（harness）：思考/调用按真实顺序交错点亮 + 答案打字机 */}
+        {assistantLoading && streamTimeline.length > 0 && (
           <div className="assistant-result">
             <div className="assistant-chain">
-              <AssistantThinking rounds={streamReasoning} live />
-              {streamSteps.length > 0 && (
-                <>
-                  <small>协调智能体工作中，已完成 {streamSteps.length} 次智能体调用…</small>
-                  <AssistantCallChain steps={streamSteps} live />
-                </>
-              )}
+              <small>
+                协调智能体工作中 · 已完成 {streamTimeline.filter((x) => x.kind === "step").length} 次智能体调用…
+              </small>
+              <AssistantTimeline items={streamTimeline} live />
               {streamAnswer && (
                 <div
                   className="assistant-answer md-body typing"
+                  dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(streamAnswer.text)) }}
+                />
+              )}
+            </div>
+          </div>
+        )}
+        {/* 手动停止：保留已收到的思考与调用，如实标注未完成 */}
+        {!assistantLoading && abortedRun && streamTimeline.length > 0 && (
+          <div className="assistant-result">
+            <div className="assistant-chain">
+              <small>本轮问答已手动停止 · 以下是停止前已完成的思考与智能体调用（部分执行，无最终答案）</small>
+              <AssistantTimeline items={streamTimeline} />
+              {streamAnswer && (
+                <div
+                  className="assistant-answer md-body"
                   dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(streamAnswer.text)) }}
                 />
               )}
@@ -448,10 +494,36 @@ export default function AssistantPanel({
             {assistantAnswer.applied_context && (
               <div className="assistant-context-echo">{displaySystemText(assistantAnswer.applied_context)}</div>
             )}
-            {/* harness 步骤 B：思考过程折叠保留（真实推理原文） */}
-            {(assistantAnswer.reasoning_rounds ?? []).length > 0 && (
-              <AssistantThinking rounds={assistantAnswer.reasoning_rounds!} />
-            )}
+            {/* harness 步骤 E：思考与调用交错时间轴（真实推理原文 + 可展开调用卡）。
+                确定性回答（数量变更/方案选择/追问）没有时间轴，但如实标注未走大模型。 */}
+            {(() => {
+              const items = buildTimeline(
+                assistantAnswer.reasoning_rounds ?? [],
+                (assistantAnswer.call_chain ?? []) as AssistantCallStep[],
+              );
+              if (items.length) {
+                return (
+                  <div className="assistant-timeline-wrap">
+                    <small className="assistant-timeline-caption">
+                      执行时间轴 · {assistantAnswer.tool_count ?? 0} 次智能体调用 · {assistantAnswer.rounds ?? 0} 轮推理
+                      {assistantAnswer.coordination_run_id ? ` · 记录 ${assistantAnswer.coordination_run_id}` : ""}
+                      {assistantAnswer.handled_by && assistantAnswer.handled_by !== "coordinator" ? " · 确定性处理（未调用大模型）" : ""}
+                    </small>
+                    <AssistantTimeline items={items} />
+                  </div>
+                );
+              }
+              if (assistantAnswer.handled_by && assistantAnswer.handled_by !== "coordinator") {
+                return (
+                  <div className="assistant-timeline-wrap">
+                    <small className="assistant-timeline-caption">
+                      确定性处理（{assistantAnswer.handled_by === "clarify" ? "信息不足追问" : "规则指令"}，未调用大模型，无调用链）
+                    </small>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             {/* P0：槽位追问（缺什么/为什么/补充后调用哪个智能体） */}
             {assistantAnswer.needs_input && (assistantAnswer.missing_slots?.length ?? 0) > 0 && (
               <div className="assistant-clarify">
@@ -673,22 +745,7 @@ export default function AssistantPanel({
                 )}
               </div>
             )}
-            {/* 调用链默认折叠：首屏留给结论与关键事实（交接文档 §7） */}
-            <details className="assistant-fold assistant-chain-details">
-              <summary>
-                调用链（{assistantAnswer.tool_count ?? 0} 次智能体调用 · {assistantAnswer.rounds ?? 0} 轮推理 · 记录 {assistantAnswer.coordination_run_id || "—"}
-                {assistantAnswer.handled_by && assistantAnswer.handled_by !== "coordinator" && (
-                  <>
-                    {" "}· <strong>确定性处理</strong>
-                    {assistantAnswer.handled_by === "clarify" ? "（信息不足，未调用大模型）" : "（未调用大模型）"}
-                  </>
-                )}
-                ，点击展开）
-              </summary>
-              {(assistantAnswer.call_chain ?? []).length > 0 && (
-                <AssistantCallChain steps={assistantAnswer.call_chain as AssistantCallStep[]} />
-              )}
-            </details>
+            {/* 调用链已并入上方执行时间轴（harness 步骤 E）；保留数据来源口径说明 */}
             <p className="field-hint">数据来源：{displaySystemText(assistantAnswer.authority)}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
           </div>
         )}

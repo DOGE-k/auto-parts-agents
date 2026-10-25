@@ -460,6 +460,8 @@ export type AssistantCallStep = {
   result_summary: string;
   status: string;
   elapsed_ms: number;
+  // harness 步骤 E：所属推理轮次（思考/调用交错时间轴排序依据；旧记录可能缺省）
+  round?: number;
 };
 
 // 任务型协同问答（P0）：会话/业务任务上下文字段

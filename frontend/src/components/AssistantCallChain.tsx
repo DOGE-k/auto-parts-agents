@@ -7,7 +7,8 @@ import { displaySystemText } from "../lib/system-labels";
 import { summarizeSkillResult } from "../lib/result-summary";
 
 // 技能中文名（与后端 coordinator.py 技能注册一一对应；未登记的 skill_id 原样显示，不编造翻译）
-const skillNames: Record<string, string> = {
+// harness 步骤 E：导出供 AssistantTimeline 复用，保持单一来源
+export const skillNames: Record<string, string> = {
   "quotation.get_real": "查询报价",
   "quotation.analyze_real": "报价分析",
   "quotation.assess_cost_impact": "加急成本评估",

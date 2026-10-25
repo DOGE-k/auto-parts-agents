@@ -2510,6 +2510,39 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 @media (prefers-reduced-motion: reduce) {
   .assistant-thinking-dot { animation: none; }
 }
+/* harness 步骤 E：交错执行时间轴（思考块 × 调用卡 × 答案） */
+.assistant-timeline { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.assistant-timeline-wrap { display: grid; gap: 4px; }
+.assistant-timeline-caption { color: var(--faint); font-size: 11px; font-family: var(--mono); }
+.timeline-thinking { border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--surface); padding: 5px 10px; }
+.timeline-thinking > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
+  display: flex; align-items: center; gap: 7px;
+}
+.assistant-timeline.live .timeline-thinking > summary { color: var(--teal-dark); }
+.timeline-thinking p { margin: 4px 0 2px; font-size: 12px; line-height: 1.7; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.timeline-step-card { border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--surface); }
+.timeline-step-card.error { background: rgba(196, 69, 60, 0.05); }
+.timeline-step-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; cursor: pointer; padding: 6px 10px;
+  list-style: none; user-select: none;
+}
+.timeline-step-row::-webkit-details-marker { display: none; }
+.timeline-step-body { border-top: 1px dashed var(--line-soft); padding: 8px 10px; display: grid; gap: 8px; }
+.timeline-step-brief { margin: 0; font-size: 12px; color: var(--ink); line-height: 1.6; }
+.timeline-args small, .timeline-raw small { display: block; color: var(--faint); font-size: 10px; margin-bottom: 3px; }
+.timeline-args ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.timeline-args li { display: flex; gap: 10px; font-size: 11px; }
+.timeline-args code { font-family: var(--mono); font-weight: 600; color: var(--teal-dark); }
+.timeline-args span { font-family: var(--mono); color: var(--ink-2); word-break: break-all; }
+.timeline-raw pre {
+  margin: 0; padding: 8px 10px; max-height: 200px; overflow: auto;
+  font-family: var(--mono); font-size: 11px; line-height: 1.55; color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  white-space: pre-wrap; word-break: break-all;
+}
+.assistant-timeline-history { margin-bottom: 6px; }
+.assistant-timeline-history[open] > summary { margin-bottom: 6px; }
 /* 历史会话切换器（2026-10-02：保留期内的旧对话可切回查看） */
 .assistant-sessions {
   border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 6px 10px; margin-top: 8px; background: var(--surface);
