@@ -467,7 +467,17 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
 
         amp_reporter = AmpKafkaReporter(config.amp)
         if config.amp.report_access:
-            original_dispatch = service.dispatch_rpc
+
+            def _rpc_wire_size(payload: Any) -> int | None:
+                """序列化后的真实线缆字节数（尽力而为，失败不阻断上报）。"""
+                try:
+                    if payload is None:
+                        return None
+                    if hasattr(payload, "model_dump_json"):
+                        return len(payload.model_dump_json().encode("utf-8"))
+                    return len(json.dumps(payload, default=str).encode("utf-8"))
+                except Exception:
+                    return None
 
             async def dispatch_rpc_with_amp(rpc_request):
                 started = time.monotonic()
@@ -481,6 +491,8 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
                         path=endpoint.rpc_path, status_code=500,
                         duration_ms=(time.monotonic() - started) * 1000,
                         caller_aic=caller, task_id=extract_task_id(rpc_request),
+                        route=endpoint.rpc_path,
+                        request_bytes=_rpc_wire_size(rpc_request),
                     )
                     raise
                 status_code = 200 if getattr(response, "error", None) is None else 500
@@ -490,6 +502,9 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
                     path=endpoint.rpc_path, status_code=status_code,
                     duration_ms=(time.monotonic() - started) * 1000,
                     caller_aic=caller, task_id=extract_task_id(rpc_request, response),
+                    route=endpoint.rpc_path,
+                    request_bytes=_rpc_wire_size(rpc_request),
+                    response_bytes=_rpc_wire_size(response),
                 )
                 return response
 
@@ -508,7 +523,7 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
         amp_task = None
         if amp_reporter is not None:
             amp_task = asyncio.create_task(
-                amp_reporter.run_heartbeat(endpoint.aic), name="amp-heartbeat",
+                amp_reporter.run_heartbeat(endpoint.aic, service_name=role), name="amp-heartbeat",
             )
         try:
             yield

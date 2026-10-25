@@ -44,15 +44,22 @@ class AmpSettings:
     report_access: bool = True
 
 
-def build_heartbeat_record(aic: str, uptime_seconds: float) -> dict:
-    """构造一条与 SDK HeartbeatLogRecord 线缆格式一致的心跳记录。"""
+def build_heartbeat_record(aic: str, uptime_seconds: float, *, service_name: str | None = None) -> dict:
+    """构造一条与 SDK HeartbeatLogRecord 线缆格式一致的心跳记录。
+
+    resource.service.name 与平台部署形态对齐（Discover alive 视图与统计归因使用）。
+    """
     record = HeartbeatLogRecord(
         log_id=HeartbeatLogRecord.new_log_id(),
         timestamp=datetime.now(timezone.utc).isoformat(),
         aic=aic,
         body=HeartbeatBody(uptime_seconds=round(uptime_seconds, 3)),
     )
-    return record.model_dump(mode="json", by_alias=True, exclude_none=True)
+    dumped = record.model_dump(mode="json", by_alias=True, exclude_none=True)
+    dumped["timestamp"] = dumped["timestamp"].replace("+00:00", "Z")
+    if service_name:
+        dumped["resource"] = {"service.name": service_name}
+    return dumped
 
 
 def build_access_record(
@@ -65,16 +72,22 @@ def build_access_record(
     duration_ms: float,
     caller_aic: str | None = None,
     task_id: str | None = None,
+    route: str | None = None,
+    request_bytes: int | None = None,
+    response_bytes: int | None = None,
 ) -> dict:
     """构造一条与 SDK AccessLogRecord 线缆格式一致的访问记录。
 
-    correlationId=taskId 满足平台「按 taskId 双方匹配作为一次调用/被调」的统计口径。
+    correlation_id=taskId 满足平台「按 taskId 双方匹配作为一次调用/被调」的统计口径；
+    route/bodySizeBytes/resource 等字段与平台部署形态对齐，避免统计侧解析丢弃。
     """
     body = AccessBody(
         duration_ms=round(duration_ms, 3),
-        request=AccessRequest(method=method, url=path),
-        response=AccessResponse(status_code=status_code),
-        caller=AccessParticipant(aic=caller_aic) if caller_aic else None,
+        request=AccessRequest(
+            method=method, url=path, route=route or path, body_size_bytes=request_bytes,
+        ),
+        response=AccessResponse(status_code=status_code, body_size_bytes=response_bytes),
+        caller=AccessParticipant(aic=caller_aic, service_name=caller_aic) if caller_aic else None,
         callee=AccessParticipant(aic=aic, service_name=role),
     )
     record = AccessLogRecord(
@@ -158,10 +171,10 @@ class AmpKafkaReporter:
             self._producer = None
             return False
 
-    async def send_heartbeat(self, aic: str) -> bool:
+    async def send_heartbeat(self, aic: str, *, service_name: str | None = None) -> bool:
         uptime = time.monotonic() - self._start_monotonic
         return await self.send(
-            HEARTBEAT_TOPIC, build_heartbeat_record(aic, uptime),
+            HEARTBEAT_TOPIC, build_heartbeat_record(aic, uptime, service_name=service_name),
         )
 
     async def report_access(self, **kwargs: Any) -> bool:
@@ -169,11 +182,11 @@ class AmpKafkaReporter:
             return False
         return await self.send(ACCESS_TOPIC, build_access_record(**kwargs))
 
-    async def run_heartbeat(self, aic: str) -> None:
+    async def run_heartbeat(self, aic: str, *, service_name: str | None = None) -> None:
         """周期发心跳直到被 cancel；单次失败不中断循环。"""
         interval = self._settings.heartbeat_interval_seconds
         while True:
-            await self.send_heartbeat(aic)
+            await self.send_heartbeat(aic, service_name=service_name)
             await asyncio.sleep(interval)
 
     async def aclose(self) -> None:
