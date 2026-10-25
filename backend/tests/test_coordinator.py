@@ -395,5 +395,58 @@ class ReasoningPassthroughTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["reasoning_rounds"], [])
 
 
+class _FakeStreamLLM(_FakeLLM):
+    """带 chat_completion_stream 的假客户端：协调者优先走流式路径（步骤 D）。"""
+
+    def __init__(self, script: list[dict], deltas: list[tuple[str, str]] | None = None):
+        super().__init__(script)
+        self._deltas = deltas or []
+
+    async def chat_completion_stream(self, messages, *, tools=None, tool_choice="auto", max_tokens=2048, on_delta=None):
+        self.calls.append({"messages": messages, "tools": tools, "stream": True})
+        for kind, fragment in self._deltas:
+            if on_delta is not None:
+                on_delta(kind, fragment)
+        return self.script.pop(0)
+
+
+class AnswerDeltaStreamingTests(unittest.IsolatedAsyncioTestCase):
+    """harness 改造步骤 D：答案片段增量透传（带轮次号），工具轮照常执行。"""
+
+    async def test_answer_deltas_tagged_with_round(self):
+        llm = _FakeStreamLLM(
+            [
+                {"choices": [{"message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [_tool_call("c1", "tracking__track_real", '{"work_order_id": "9"}')],
+                }}]},
+                {"choices": [{"message": {"role": "assistant", "content": "工单 9 完成 90%。"}}]},
+            ],
+            deltas=[("content", "工单 "), ("content", "9 完成 "), ("content", "90%。")],
+        )
+
+        async def fake_invoker(agent_type, skill_id, inputs):
+            return {"work_order_no": "WO-9", "completion_rate": 90.0, "authority": "OpenMES"}
+
+        deltas: list[dict] = []
+        coordinator = BusinessCoordinator(llm, skill_invoker=fake_invoker)
+        try:
+            result = await coordinator.ask(
+                "工单 9 进度？",
+                on_answer_delta=deltas.append,
+            )
+        finally:
+            await coordinator.aclose()
+
+        # 假流式客户端对每轮都推同样的片段：第 1 轮（工具轮）与第 2 轮（答案轮）
+        # 均带各自轮次号，前端按轮次重置缓冲；最终 answer 以结果为准。
+        self.assertEqual([d["round"] for d in deltas], [1, 1, 1, 2, 2, 2])
+        self.assertEqual("".join(d["text"] for d in deltas if d["round"] == 2), "工单 9 完成 90%。")
+        self.assertEqual(result["answer"], "工单 9 完成 90%。")
+        # 流式路径被实际使用
+        self.assertTrue(all(call.get("stream") for call in llm.calls))
+
+
 if __name__ == "__main__":
     unittest.main()

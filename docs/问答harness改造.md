@@ -73,7 +73,7 @@
 - 测试：`test_assistant_history_endpoint.py` 加带 run 的会话用例。
 - 验收：切回旧会话能看到当时的调用链。
 
-### ☐ 步骤 D：最终答案逐 token 打字机（全轮流式方案）
+### ☑ 步骤 D：最终答案逐 token 打字机（全轮流式方案）——完成
 
 - `deepseek.py`：加 `chat_completion_stream(messages, *, tools, max_tokens)` —— async iterator 产出解析后的 delta 事件（content 片段 / reasoning 片段 / tool_call 分片 / finish_reason / usage），用 `self._http._client.stream(...)`（或给 JsonHttpClient 加 `stream_lines` 方法，推荐后者，保持封装）；
 - `coordinator.py`：
@@ -107,4 +107,5 @@
 - 2026-10-25 步骤 A 完成：`coordinator.ask()` 加 `on_reasoning` 回调与 `result["reasoning_rounds"]`（每轮 + 空回答恢复路径的思考都采集）；回传 messages 前剥离 `reasoning_content`（修复既有 API 约定污染）；`assistant_session._finish()` 确定性路径补 `reasoning_rounds` 默认值。新增 `ReasoningPassthroughTests` 2 例（透传+剥离验证、无思考字段时空数组）。后端 686 passed（基线 684+2）。
 - 2026-10-25 步骤 B 完成：`handle_ask` 透传 `on_reasoning`；SSE 端点新增 `reasoning` 事件；`coordinator_extras` 补带 `reasoning_rounds`（done 事件含完整思考）；前端 `api.ts` 解析 reasoning 事件 + `AssistantAnswer.reasoning_rounds` 类型；新增 `AssistantThinking.tsx`（live 态逐轮滑出+呼吸点动画、完成态折叠保留），AssistantPanel 等待区与完成区接线；顺手修复 `test_lists_sessions_most_recent_first_without_messages` 的 limit=20 脆弱性（组合运行遗留会话挤掉新建会话，改用端点上限 50）。后端 687 passed（+1 reasoning 事件用例）、前端 vitest 163 passed、build 通过。
 - 2026-10-25 步骤 B 服务器验证通过（`31ea6c1`）：实测提问后思考块折叠显示「思考过程（3 轮）」，展开为模型真实推理原文（第 1-3 轮英文原文，与调用链 2 次调用对应），已截图。
-- 2026-10-25 步骤 C 完成：`sessions/{id}/messages` 端点按 `session_id` 关联查 `real_agent_runs`（coordinator:ask），贪心就近配对（run.started_at ≤ 助手消息 created_at）把 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附到对应助手消息；确定性回答无运行、自然不附带。前端 `AssistantHistoryMessage` 扩展可选字段，历史助手消息渲染折叠思考块与调用链（复用 AssistantThinking/AssistantCallChain）。新增端点配对用例 1 例。后端 688、前端 163 passed、build 通过。
+- 2026-10-25 步骤 C 完成：`sessions/{id}/messages` 端点按 `session_id` 关联查 `real_agent_runs`（coordinator:ask），贪心就近配对（run.started_at ≤ 助手消息 created_at）把 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附到对应助手消息；确定性回答无运行、自然不附带。前端 `AssistantHistoryMessage` 扩展可选字段，历史助手消息渲染折叠思考块与调用链（复用 AssistantThinking/AssistantCallChain）。新增端点配对用例 1 例。后端 688、前端 163 passed、build 通过。服务器验证：刷新页面后旧轮次带思考块与调用链（已截图）。
+- 2026-10-25 步骤 D 完成：`JsonHttpClient.stream_sse`（POST+SSE 增量读、错误语义与 request_json 一致）；`DeepSeekClient.chat_completion_stream`（content/reasoning 增量回调 + tool_calls 分片按 index 拼装，返回与非流式同构）；`coordinator._llm_round` 统一两处 LLM 调用——客户端有 stream 方法走流式（答案片段经 `on_answer_delta` 带轮次号透传），否则回退非流式（测试假客户端自动走老路径）；SSE 端点新增 `answer_delta` 事件；前端打字机缓冲（按轮次重置，done 后以权威 answer 覆盖，防丢字）+ 打字光标动画。新增 `test_deepseek_stream.py` 2 例（分片拼装/增量回调顺序）+ 协调者流式轮次标注 1 例。后端 691、前端 163 passed、build 通过。

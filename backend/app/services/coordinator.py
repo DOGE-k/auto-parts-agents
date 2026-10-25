@@ -616,6 +616,31 @@ class BusinessCoordinator:
         if self._deepseek is not None:
             await self._deepseek.aclose()
 
+    async def _llm_round(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None,
+        on_answer_delta: Callable[[dict[str, Any]], None] | None,
+        round_no: int,
+    ) -> dict[str, Any]:
+        """一轮 LLM 调用：客户端支持流式则流式（答案片段经 on_answer_delta
+        增量透传），否则回退非流式（测试注入的假客户端大多只有非流式方法）。
+        两种路径返回结构完全一致。"""
+        stream_fn = getattr(self._deepseek, "chat_completion_stream", None)
+        if stream_fn is None:
+            return await self._deepseek.chat_completion(
+                messages, tools=tools, max_tokens=4096
+            )
+
+        def _delta(kind: str, fragment: str) -> None:
+            if kind == "content" and on_answer_delta is not None:
+                on_answer_delta({"round": round_no, "text": fragment})
+
+        return await stream_fn(
+            messages, tools=tools, max_tokens=4096, on_delta=_delta
+        )
+
     async def ask(
         self,
         question: str,
@@ -623,6 +648,7 @@ class BusinessCoordinator:
         on_step: Callable[[dict[str, Any]], None] | None = None,
         run_meta: dict[str, Any] | None = None,
         on_reasoning: Callable[[dict[str, Any]], None] | None = None,
+        on_answer_delta: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
 
@@ -630,6 +656,9 @@ class BusinessCoordinator:
         端点用它把"协调者正在查什么"实时推给前端；同步端点不传，行为不变）。
         on_reasoning（可选）：每轮 LLM 返回后回调该轮思考过程原文（deepseek-flash
         混合推理模型的 reasoning_content；为空则不回调）。真实原文透传，不改写。
+        on_answer_delta（可选）：答案文本增量回调 {"round": n, "text": 片段}——
+        打字机效果用。工具轮若偶发带正文，片段照推（带轮次号），前端按轮次
+        重置缓冲即可；最终以 done 事件的完整 answer 为准。
         run_meta（可选）：session_id/business_task_id，用于会话关联与保留期。
         """
         if not question.strip():
@@ -668,8 +697,11 @@ class BusinessCoordinator:
         } for t in active_tools]
 
         for rounds in range(1, MAX_TOOL_ROUNDS + 1):
-            response = await self._deepseek.chat_completion(
-                messages, tools=tool_specs, max_tokens=4096
+            response = await self._llm_round(
+                messages,
+                tools=tool_specs,
+                on_answer_delta=on_answer_delta,
+                round_no=rounds,
             )
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls") or []
@@ -753,7 +785,9 @@ class BusinessCoordinator:
                 "role": "user",
                 "content": "请基于以上工具返回的真实数据，用中文直接给出最终回答；不要调用任何工具。",
             })
-            response = await self._deepseek.chat_completion(messages, max_tokens=4096)
+            response = await self._llm_round(
+                messages, tools=None, on_answer_delta=on_answer_delta, round_no=rounds + 1
+            )
             recovery_message = response["choices"][0]["message"]
             final_answer = (recovery_message.get("content") or "").strip()
             recovered = bool(final_answer)

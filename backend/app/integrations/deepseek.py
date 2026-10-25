@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.integrations.errors import IntegrationNotConfigured
@@ -65,3 +66,88 @@ class DeepSeekClient:
         if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
             raise ValueError("DeepSeek 未返回有效 assistant 消息")
         return result
+
+    async def chat_completion_stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] = "auto",
+        max_tokens: int = 2048,
+        on_delta=None,
+    ) -> dict[str, Any]:
+        """流式 chat completion：逐 delta 到达即回调，返回与非流式同构的结果。
+
+        on_delta(kind, fragment)：kind ∈ {"reasoning", "content"}；fragment 为该次
+        增量文本（打字机效果用）。tool_calls 分片按 index 在本地拼装，最终
+        message 结构与非流式完全一致（含 reasoning_content），调用方按既有
+        约定处理（展示透传 / 回传前剥离）。
+        """
+        if not messages:
+            raise ValueError("DeepSeek 请求必须包含至少一条消息")
+        if not 1 <= max_tokens <= 8192:
+            raise ValueError("max_tokens 必须在 1-8192 之间")
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls_by_index: dict[int, dict[str, Any]] = {}
+        finish_reason = ""
+
+        async for data in self._http.stream_sse("chat/completions", json_body=payload):
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            reasoning = delta.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                reasoning_parts.append(reasoning)
+                if on_delta is not None:
+                    on_delta("reasoning", reasoning)
+            text = delta.get("content")
+            if isinstance(text, str) and text:
+                content_parts.append(text)
+                if on_delta is not None:
+                    on_delta("content", text)
+            for call in delta.get("tool_calls") or []:
+                index = int(call.get("index") or 0)
+                slot = tool_calls_by_index.setdefault(
+                    index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                )
+                if call.get("id"):
+                    slot["id"] = call["id"]
+                function = call.get("function") or {}
+                if function.get("name"):
+                    slot["function"]["name"] += function["name"]
+                if function.get("arguments"):
+                    slot["function"]["arguments"] += function["arguments"]
+            if choices[0].get("finish_reason"):
+                finish_reason = choices[0]["finish_reason"]
+
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": "".join(content_parts) or None,
+        }
+        if reasoning_parts:
+            message["reasoning_content"] = "".join(reasoning_parts)
+        if tool_calls_by_index:
+            message["tool_calls"] = [
+                tool_calls_by_index[i] for i in sorted(tool_calls_by_index)
+            ]
+        return {
+            "id": "stream",
+            "model": self.model,
+            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason or "stop"}],
+        }
