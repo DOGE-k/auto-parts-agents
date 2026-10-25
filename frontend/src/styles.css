@@ -2559,14 +2559,116 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 .assistant-session-row.current { border-color: var(--teal); color: var(--muted); cursor: default; }
 .assistant-session-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .assistant-session-row time { color: var(--faint); font-size: 11px; white-space: nowrap; }
-.assistant-input-row { display: flex; gap: 10px; align-items: flex-end; }
-.assistant-input-row textarea {
-  flex: 1; resize: vertical; min-height: 48px;
-  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  font-size: 13px; font-family: inherit; color: var(--ink-2); background: var(--surface);
+/* ═══ harness 步骤 F：聊天式界面（DeepSeek/Codex 风） ═══
+   问答模块激活时 page-content 加 .chat-focused：隐藏标准页头，面板转为
+   全高聊天列（紧凑头部 / 滚动消息区 / 底部输入坞）。样式全部限定在
+   .assistant-panel.chat 作用域，其他模块不受影响。 */
+.chat-focused .page-heading { display: none; }
+.chat-focused { padding-bottom: 18px; }
+.assistant-panel.chat {
+  border: 0; background: transparent; box-shadow: none; margin-top: 0;
+  display: flex; flex-direction: column;
+  height: calc(100vh - 150px); min-height: 460px;
 }
-.assistant-input-row textarea:focus { outline: none; border-color: var(--teal); }
-.assistant-input-row .button { white-space: nowrap; }
+/* 遗留 craft-pass 给 .assistant-panel 的描边在聊天态取消 */
+.assistant-panel.chat { border-top: 0 !important; }
+.chat-header {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap;
+}
+.chat-header-main { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.chat-header-main h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
+.chat-session-id {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-header-actions { display: flex; align-items: center; gap: 8px; }
+.assistant-panel.chat .assistant-sessions { border: 0; padding: 0; background: transparent; margin: 0; }
+.chat-new-session { font-size: 12px; padding: 4px 10px; }
+.chat-sessions { position: relative; }
+.chat-sessions > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); user-select: none;
+  list-style: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.chat-sessions > summary::-webkit-details-marker { display: none; }
+.chat-sessions[open] > summary { color: var(--teal-dark); border-color: var(--teal); }
+.chat-sessions .assistant-sessions-list,
+.chat-sessions > p { position: absolute; right: 0; z-index: 20; }
+.chat-sessions[open] {
+  /* 下拉面板：绝对定位避免撑开头部 */
+}
+.chat-sessions .field-hint { display: none; }
+.chat-sessions[open] .assistant-sessions-list {
+  display: flex; top: 34px; width: min(360px, 80vw);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--shadow-overlay); padding: 6px;
+}
+.chat-sessions[open] .field-hint { display: none; }
+.chat-hint { margin: 6px 2px 0; font-size: 11px; color: var(--faint); }
+.chat-column {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  max-width: 860px; width: 100%; margin: 0 auto;
+}
+/* 消息区：占满剩余高度、内部滚动 */
+.assistant-messages.chat-messages {
+  flex: 1 1 auto; max-height: none; min-height: 120px; overflow-y: auto;
+  padding: 14px 2px 8px; margin-top: 4px; gap: 14px; overscroll-behavior: contain;
+}
+/* 用户消息：右侧气泡、无角色标签 */
+.assistant-msg.user {
+  align-self: flex-end; max-width: 78%;
+  border: 0; background: var(--teal-light); border-radius: 14px 14px 4px 14px;
+  padding: 9px 14px; font-size: 13px; line-height: 1.6; color: var(--ink);
+}
+/* 助手消息：全宽无气泡，小标签行（点头像）+ 内容 */
+.assistant-msg.assistant { border: 0; background: transparent; padding: 0; align-self: stretch; max-width: none; }
+.assistant-msg-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+}
+.assistant-avatar { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
+.assistant-msg.assistant .assistant-msg-body { font-size: 13.5px; line-height: 1.7; }
+/* 空会话欢迎态 */
+.chat-hero { text-align: center; padding: 9vh 12px 24px; display: grid; gap: 6px; justify-items: center; }
+.chat-hero h3 { margin: 0; font-size: 22px; font-weight: 700; color: var(--ink); }
+.chat-hero p { margin: 0 0 14px; font-size: 13px; color: var(--muted); max-width: 520px; line-height: 1.6; }
+.chat-hero-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: min(620px, 100%); }
+.chat-hero-card {
+  text-align: left; padding: 12px 14px; font-size: 13px; color: var(--ink-2); line-height: 1.5;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; cursor: pointer;
+  transition: border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.chat-hero-card:hover { border-color: var(--teal); transform: translateY(-1px); }
+/* 输入坞：停靠底部 */
+.chat-dock { flex: 0 0 auto; padding: 10px 0 2px; }
+.chat-input-box {
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+  padding: 10px 12px 8px; transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.chat-input-box:focus-within { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-glow); }
+.chat-input-box textarea {
+  width: 100%; resize: none; min-height: 44px; max-height: 160px;
+  border: 0; outline: none; background: transparent; padding: 2px 2px 0;
+  font-size: 13.5px; font-family: inherit; color: var(--ink); line-height: 1.6;
+}
+.chat-input-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.chat-send {
+  border: 0; cursor: pointer; padding: 7px 18px; border-radius: 999px;
+  background: var(--teal); color: #fff; font-size: 13px; font-weight: 600;
+  transition: background 0.15s var(--ease), opacity 0.15s var(--ease);
+}
+.chat-send:hover:not(:disabled) { background: var(--teal-dark); }
+.chat-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-stop { font-size: 12px; padding: 5px 12px; }
+.chat-footnote { margin: 8px 2px 0; text-align: center; font-size: 11px; color: var(--faint); }
+@media (max-width: 760px) {
+  .assistant-panel.chat { height: calc(100vh - 130px); }
+  .chat-session-id { display: none; }
+  .chat-hero-cards { grid-template-columns: 1fr; }
+  .assistant-msg.user { max-width: 92%; }
+}
 
 .assistant-result { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .assistant-answer {
@@ -2600,7 +2702,6 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 
 @media (max-width: 900px) {
   .assistant-step { grid-template-columns: 22px 1fr; }
-  .assistant-input-row { flex-direction: column; align-items: stretch; }
 }
 
 /* ===== 方案对比卡片（阶段六：方案化协同） ===== */
@@ -2962,15 +3063,7 @@ td small { font-size: 10px; color: var(--faint); margin-top: 5px; font-weight: 5
 /* 会话过期提醒（跳转系统连接） */
 .session-expiry-warning { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* 问答常用问题芯片 + 回答跳转 */
-.assistant-chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
-.chip-caption { font-size: 12px; color: var(--muted); }
-.assistant-chip {
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
-  border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
-}
-.assistant-chip:hover { border-color: var(--teal); color: var(--teal); background: var(--teal-light); }
-.assistant-chip:disabled { opacity: 0.5; cursor: default; }
+/* 问答常用问题芯片已由聊天欢迎态建议卡取代（harness 步骤 F），保留跳转行 */
 .assistant-jump-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
 
 /* 模块接续提示卡（销售/采购/生产模块间的引导） */

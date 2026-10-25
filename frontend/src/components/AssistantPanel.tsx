@@ -335,97 +335,86 @@ export default function AssistantPanel({
     if (box) box.scrollTop = box.scrollHeight;
   }, [assistantAnswer, streamTimeline.length, streamAnswer?.text, history.length, assistantLoading]);
 
+  // 空会话欢迎态：无历史且无进行中/已完成回答时展示（DeepSeek 式首页）
+  const chatEmpty = history.length === 0 && !assistantAnswer && !assistantLoading && !abortedRun;
+
   return (
-    <section className="panel assistant-panel">
-      <div className="panel-heading">
-        <div>
+    <section className="assistant-panel chat">
+      {/* 紧凑头部：标题 + 会话号 + 新会话/历史会话 */}
+      <header className="chat-header">
+        <div className="chat-header-main">
           <h2>智能协同问答</h2>
-          <p>直接用一句话提问（如"SAL-ORD-2026-00001 什么时候能做完"），协调智能体会自己判断需要什么数据，动态调用报价/采购/跟单/质量四个智能体查询真实 ERP/MES 后回答，调用链全程留痕</p>
+          <span className="badge blue-badge">动态协同 · 只读</span>
+          <span className="chat-session-id" title={sessionId ?? undefined}>
+            {sessionId ?? "新会话"}
+          </span>
         </div>
-        <span className="badge blue-badge">动态协同 · 只读</span>
-      </div>
-      {!sessionId ? (
-        <p className="field-hint">新会话，尚未关联业务对象；提问时请带上订单/工单/物料编号（如 SAL-ORD-2026-00001），或直接说明你想做什么。切到其他模块再回来，聊天记录会保留。</p>
-      ) : (
-        <p className="field-hint">当前会话 {sessionId} · 上一轮的客户/物料/订单/工单/数量/交期会自动沿用，回答中会回显；点"新会话"可重新开始（页面当前工单/订单不再自动带入）。</p>
-      )}
-      {/* 历史会话切换器：保留期内的旧对话可随时切回查看 */}
-      <details className="assistant-sessions">
-        <summary
-          onClick={() => {
-            // 展开时按需加载一次（sessions===null 为未加载标记；折叠再点不会重复请求）
-            if (sessions === null) void loadSessions();
-          }}
-        >
-          历史会话（点击展开切换回以前的对话）
-        </summary>
-        {sessionsLoading && <p className="field-hint">会话列表加载中…</p>}
-        {!sessionsLoading && (sessions ?? []).length === 0 && <p className="field-hint">还没有历史会话记录。</p>}
-        <div className="assistant-sessions-list">
-          {(sessions ?? []).map((s) => (
-            <button
-              key={s.session_id}
-              className={`assistant-session-row ${s.session_id === sessionId ? "current" : ""}`}
-              disabled={s.session_id === sessionId || switchingSession}
-              onClick={() => void switchToSession(s.session_id)}
-              title={s.session_id}
+        <div className="chat-header-actions">
+          <button className="button ghost chat-new-session" onClick={startNewSession} disabled={assistantLoading} title="清空当前会话上下文，重新开始一个业务任务（页面当前工单/订单不再自动带入）">
+            ＋ 新会话
+          </button>
+          {/* 历史会话切换器：保留期内的旧对话可随时切回查看 */}
+          <details className="assistant-sessions chat-sessions">
+            <summary
+              onClick={() => {
+                // 展开时按需加载一次（sessions===null 为未加载标记；折叠再点不会重复请求）
+                if (sessions === null) void loadSessions();
+              }}
             >
-              <span className="assistant-session-title">{displaySystemText(s.title || s.session_id)}</span>
-              <time>{s.last_active_at ? new Date(s.last_active_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</time>
-            </button>
-          ))}
+              历史会话
+            </summary>
+            {sessionsLoading && <p className="field-hint">会话列表加载中…</p>}
+            {!sessionsLoading && (sessions ?? []).length === 0 && <p className="field-hint">还没有历史会话记录。</p>}
+            <div className="assistant-sessions-list">
+              {(sessions ?? []).map((s) => (
+                <button
+                  key={s.session_id}
+                  className={`assistant-session-row ${s.session_id === sessionId ? "current" : ""}`}
+                  disabled={s.session_id === sessionId || switchingSession}
+                  onClick={() => void switchToSession(s.session_id)}
+                  title={s.session_id}
+                >
+                  <span className="assistant-session-title">{displaySystemText(s.title || s.session_id)}</span>
+                  <time>{s.last_active_at ? new Date(s.last_active_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</time>
+                </button>
+              ))}
+            </div>
+            <p className="field-hint">对话原文默认保留 90 天（ASSISTANT_RETENTION_DAYS 可配），到期自动清理。</p>
+          </details>
         </div>
-        <p className="field-hint">对话原文默认保留 90 天（ASSISTANT_RETENTION_DAYS 可配），到期自动清理。</p>
-      </details>
-      {/* 常用问题芯片 + 输入行：固定在消息列表上方，不随长回答滚走 */}
-      <div className="assistant-chip-row">
-        <span className="chip-caption">常用问题：</span>
-        {COMMON_QUESTIONS.map((q) => (
-          <button key={q} className="assistant-chip" disabled={assistantLoading} onClick={() => setAssistantQuestion(q)}>
-            {q}
-          </button>
-        ))}
-      </div>
-      <div className="assistant-input-row">
-        <textarea
-          value={assistantQuestion}
-          onChange={(e) => setAssistantQuestion(e.target.value)}
-          placeholder="例如：SAL-ORD-2026-00001 什么时候能做完？/ 这单为什么还不能发运？/ BD-2401 现在 2000 件多少钱？"
-          rows={2}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void submitAssistantQuestion();
-            }
-          }}
-        />
-        <button
-          className="button primary"
-          onClick={() => void submitAssistantQuestion()}
-          disabled={assistantLoading || !assistantQuestion.trim()}
-        >
-          {assistantLoading ? "协调智能体处理中..." : "提问 →"}
-        </button>
-        {assistantLoading && (
-          <button className="button ghost" onClick={stopAssistant} title="停止本轮问答，保留已完成的思考与智能体调用">
-            ■ 停止
-          </button>
-        )}
-        <button className="button ghost" onClick={startNewSession} disabled={assistantLoading} title="清空当前会话上下文，重新开始一个业务任务（页面当前工单/订单不再自动带入）">
-          新会话
-        </button>
-      </div>
-      {/* 消息列表：历史轮次（纯文本）+ 最新一轮（富展示），内部滚动区域 */}
-      <div className="assistant-messages" ref={messagesBoxRef}>
+      </header>
+      <p className="chat-hint">
+        {sessionId
+          ? "上一轮的客户/物料/订单/工单/数量/交期自动沿用并在回答中回显；页面当前工单/订单不自动带入。"
+          : "提问时带上订单/工单/物料编号（如 SAL-ORD-2026-00001）效果最好；切到其他模块再回来，聊天记录保留。"}
+      </p>
+      <div className="chat-column">
+        {/* 消息区：空会话欢迎态 + 历史轮次 + 当前轮，内部滚动 */}
+        <div className="assistant-messages chat-messages" ref={messagesBoxRef}>
+          {chatEmpty && (
+            <div className="chat-hero">
+              <h3>有什么可以帮你？</h3>
+              <p>协调智能体会调度报价 / 采购 / 跟单 / 质量四个智能体查询真实 ERP/MES 后回答，思考与调用全程留痕。</p>
+              <div className="chat-hero-cards">
+                {COMMON_QUESTIONS.map((q) => (
+                  <button key={q} className="chat-hero-card" onClick={() => setAssistantQuestion(q)}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         {history.map((m, i) => (
           m.role === "user" ? (
             <div key={`u-${m.id}-${i}`} className="assistant-msg user">
-              <span className="assistant-msg-role">我</span>
               <div className="assistant-msg-body">{displaySystemText(m.content)}</div>
             </div>
           ) : (
             <div key={`a-${m.id}-${i}`} className="assistant-msg assistant">
-              <span className="assistant-msg-role">协调智能体</span>
+              <div className="assistant-msg-head">
+                <i className="assistant-avatar" aria-hidden="true" />
+                协调智能体
+              </div>
               <div className="assistant-msg-body">
                 {/* harness 步骤 E：历史轮次同样渲染交错时间轴（旧记录无 round 时按原序展示） */}
                 {(() => {
@@ -749,6 +738,42 @@ export default function AssistantPanel({
             <p className="field-hint">数据来源：{displaySystemText(assistantAnswer.authority)}。回答由 DeepSeek 汇总真实工具结果生成；写入类操作不在本通道执行。</p>
           </div>
         )}
+        </div>
+        {/* 输入坞：停靠消息区底部（DeepSeek/Codex 式） */}
+        <div className="chat-dock">
+          <div className="chat-input-box">
+            <textarea
+              value={assistantQuestion}
+              onChange={(e) => setAssistantQuestion(e.target.value)}
+              placeholder={chatEmpty ? "例如：SAL-ORD-2026-00001 什么时候能做完？" : "继续提问（Enter 发送 / Shift+Enter 换行）"}
+              rows={2}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitAssistantQuestion();
+                }
+              }}
+            />
+            <div className="chat-input-actions">
+              {assistantLoading ? (
+                <button className="button ghost chat-stop" onClick={stopAssistant} title="停止本轮问答，保留已完成的思考与智能体调用">
+                  ■ 停止
+                </button>
+              ) : (
+                <button
+                  className="chat-send"
+                  onClick={() => void submitAssistantQuestion()}
+                  disabled={!assistantQuestion.trim()}
+                >
+                  提问 →
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="chat-footnote">
+            协调者动态调度报价/采购/跟单/质量四个智能体 · 数据来自真实 ERP/MES · 写入停在人工审批
+          </p>
+        </div>
       </div>
     </section>
   );

@@ -919,7 +919,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const displayStep = Math.min(step, objectProvenMaxStep);
 
   return (
-    <div className={`page-content ${activeModule === "quality" && qualityView === "ppap" ? "ppap-focused" : ""}`}>
+    <div className={`page-content ${activeModule === "quality" && qualityView === "ppap" ? "ppap-focused" : ""} ${activeModule === "assistant" ? "chat-focused" : ""}`}>
       <div className="page-heading">
         <div>
           <h1>{MODULE_META[activeModule].title}</h1>
