@@ -291,13 +291,15 @@ export default function AssistantPanel({
       }
       const target = typeTargetRef.current;
       const remaining = target.text.length - typeShownRef.current;
-      if (remaining > 0) {
+      // 答案满 24 字才放出：工具轮偶发的几个前导字符不展示（下一轮会被清空，
+      // 显示出来只会造成闪烁）；不足 24 字的最终答案直接由 done 交换完整展示。
+      if (remaining > 0 && target.text.length >= 24) {
         const step = Math.max(1, Math.ceil(remaining / 90));
         typeShownRef.current = Math.min(target.text.length, typeShownRef.current + step);
         setStreamAnswer({ round: target.round, text: target.text.slice(0, typeShownRef.current) });
         return;
       }
-      if (pendingAnswer) {
+      if ((remaining <= 0 || target.text.length < 24) && pendingAnswer) {
         setAssistantAnswer(pendingAnswer);
         setPendingAnswer(null);
         setStreamTimeline([]);
