@@ -95,6 +95,8 @@ export default function AssistantPanel({
   const [abortedRun, setAbortedRun] = useState(false);
   const abortedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // 步骤 F 修复：done 到达但打字机余量未放完时，先暂存结果，节拍器追平后再切换
+  const [pendingAnswer, setPendingAnswer] = useState<AssistantAnswer | null>(null);
   // 方案卡片执行闭环（阶段七+八）：报价未审批时走双审批线（报价+方案各留痕）
   const [proposalExec, setProposalExec] = useState<{
     option_id: string;
@@ -228,19 +230,23 @@ export default function AssistantPanel({
         sessionStorage.setItem(SESSION_STORAGE_KEY, result.session_id);
         setSessionId(result.session_id);
       }
-      setAssistantAnswer(result);
+      if (typeTargetRef.current.text) {
+        // 打字机还有余量：暂存权威结果，节拍器追平后由它切换（保持逐字观感）
+        setPendingAnswer(result);
+      } else {
+        // 无流式增量（同步回退/极短回答）：直接展示完整答案
+        setAssistantAnswer(result);
+      }
       notify("协调智能体已回答");
     } catch (e) {
       onError(displaySystemText(e instanceof Error ? e.message : "协调智能体调用失败"));
+      setStreamTimeline([]);
+      setStreamAnswer(null);
     } finally {
       // 新会话首问结束后恢复正常页面上下文策略（交接文档 §4.2）
       abortRef.current = null;
       setSuppressPageContext(false);
       setAssistantLoading(false);
-      if (!abortedRef.current) {
-        setStreamTimeline([]);
-        setStreamAnswer(null);
-      }
       setAssistantQuestion("");
     }
   }, [assistantQuestion, assistantAnswer, assistantLoading, currentErpDraftId, currentWorkOrderId, sessionId, suppressPageContext, notify, onError]);
@@ -251,20 +257,27 @@ export default function AssistantPanel({
   }, []);
 
   // 打字机节拍器：40ms 一拍，按剩余量比例放出（大答案 ≤ 约 4 秒追平），
-  // 与 SSE 到达速度解耦；停止后继续放完已收到的余量。
+  // 与 SSE 到达速度解耦；done 后不打断——余量放完再切换到权威答案；停止后放完余量。
   useEffect(() => {
-    if (!assistantLoading && !abortedRun) return;
+    if (!assistantLoading && !abortedRun && !pendingAnswer) return;
     const timer = window.setInterval(() => {
       const target = typeTargetRef.current;
-      if (!target.text) return;
       const remaining = target.text.length - typeShownRef.current;
-      if (remaining <= 0) return;
-      const step = Math.max(1, Math.ceil(remaining / 90));
-      typeShownRef.current = Math.min(target.text.length, typeShownRef.current + step);
-      setStreamAnswer({ round: target.round, text: target.text.slice(0, typeShownRef.current) });
+      if (remaining > 0) {
+        const step = Math.max(1, Math.ceil(remaining / 90));
+        typeShownRef.current = Math.min(target.text.length, typeShownRef.current + step);
+        setStreamAnswer({ round: target.round, text: target.text.slice(0, typeShownRef.current) });
+        return;
+      }
+      if (pendingAnswer) {
+        setAssistantAnswer(pendingAnswer);
+        setPendingAnswer(null);
+        setStreamTimeline([]);
+        setStreamAnswer(null);
+      }
     }, 40);
     return () => window.clearInterval(timer);
-  }, [assistantLoading, abortedRun]);
+  }, [assistantLoading, abortedRun, pendingAnswer]);
 
   const startNewSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -363,7 +376,7 @@ export default function AssistantPanel({
   }, [assistantAnswer, streamTimeline.length, streamAnswer?.text, history.length, assistantLoading]);
 
   // 空会话欢迎态：无历史且无进行中/已完成回答时展示（DeepSeek 式首页）
-  const chatEmpty = history.length === 0 && !assistantAnswer && !assistantLoading && !abortedRun;
+  const chatEmpty = history.length === 0 && !assistantAnswer && !assistantLoading && !abortedRun && !pendingAnswer;
 
   return (
     <section className="assistant-panel chat">
@@ -468,8 +481,9 @@ export default function AssistantPanel({
             </div>
           )
         ))}
-        {/* 流式进行中（harness）：思考/调用按真实顺序交错点亮 + 答案打字机 */}
-        {assistantLoading && streamTimeline.length > 0 && (
+        {/* 流式进行中（harness）：思考/调用按真实顺序交错点亮 + 答案打字机；
+            done 后余量未放完时（pendingAnswer）继续逐字放出，不整体替换 */}
+        {(assistantLoading || pendingAnswer) && streamTimeline.length > 0 && (
           <div className="assistant-result">
             <div className="assistant-chain">
               <small>
