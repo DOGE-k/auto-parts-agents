@@ -1,5 +1,7 @@
 # 问答 Harness 改造（DeepSeek/Codex 式）——设计与进度
 
+> **状态：全部 5 步已完成并上线（2026-10-25，服务器 `98682c0`+）**。本文档保留为改造记录与后续维护指引；接手者日常改动走《前端优化清单》惯例即可。
+
 > 用途：把「AI 协同问答」升级为 DeepSeek/Codex 式体验：思考过程展示 + 调用链交错时间轴 + 最终答案打字机。
 > **交接必读**：本文档随每一步实施同步更新（§6 进度日志 + §5 勾选）。如果你接手时发现 §5 有未勾选项，从第一个未勾选项继续；每一步的「验收」都写在该步旁边。
 > 创建：2026-10-25。关联文档：`docs/前端优化清单.md`（本任务超出该清单范围，单独立项）。
@@ -110,3 +112,5 @@
 - 2026-10-25 步骤 C 完成：`sessions/{id}/messages` 端点按 `session_id` 关联查 `real_agent_runs`（coordinator:ask），贪心就近配对（run.started_at ≤ 助手消息 created_at）把 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附到对应助手消息；确定性回答无运行、自然不附带。前端 `AssistantHistoryMessage` 扩展可选字段，历史助手消息渲染折叠思考块与调用链（复用 AssistantThinking/AssistantCallChain）。新增端点配对用例 1 例。后端 688、前端 163 passed、build 通过。服务器验证：刷新页面后旧轮次带思考块与调用链（已截图）。
 - 2026-10-25 步骤 D 完成：`JsonHttpClient.stream_sse`（POST+SSE 增量读、错误语义与 request_json 一致）；`DeepSeekClient.chat_completion_stream`（content/reasoning 增量回调 + tool_calls 分片按 index 拼装，返回与非流式同构）；`coordinator._llm_round` 统一两处 LLM 调用——客户端有 stream 方法走流式（答案片段经 `on_answer_delta` 带轮次号透传），否则回退非流式（测试假客户端自动走老路径）；SSE 端点新增 `answer_delta` 事件；前端打字机缓冲（按轮次重置，done 后以权威 answer 覆盖，防丢字）+ 打字光标动画。新增 `test_deepseek_stream.py` 2 例（分片拼装/增量回调顺序）+ 协调者流式轮次标注 1 例。后端 691、前端 163 passed、build 通过。服务器验证（`6a4d936`）：SSE 实测一问产生 3×reasoning + 5×step + **415×answer_delta** + done；浏览器采样打字机缓冲 6s 时 203 字 → 7s 时 561 字逐字增长，完成后被权威答案替换（注意：验证用问题需经协调者——确定性追问路径无 LLM、只有 done 事件，属正常）。已截图。
 - 2026-10-25 步骤 E 完成：① 后端 call_chain 步骤加 `round` 字段（交错排序依据，兼容旧记录缺省）；② 新增 `AssistantTimeline.tsx`（buildTimeline 把 reasoning_rounds 与带 round 的 call_chain 按轮交错；StepCard 可展开卡：行内=序号/岗位pill/技能/状态/耗时，展开=可读摘要+实参逐项+返回截断 JSON 原文）；③ AssistantPanel 重构：加载态/完成态/历史态统一走时间轴（完成后调用链不再沉底折叠，思考折叠、调用卡常显）；确定性回答无时间轴时保留「确定性处理（未调用大模型）」标注；④ Stop 按钮（AbortController→fetch signal，中断后保留已收到的思考与调用并如实标注「部分执行」，不触发同步回退——修复时注意 finally 读的是闭包旧值，用 ref 判定）。assistant-chain 底部旧折叠删除；AssistantThinking/AssistantCallChain 在面板中不再直接引用（组件保留）。后端 691、前端 163 passed、build 通过。
+- 2026-10-25 步骤 E 服务器验证通过（`98682c0`）：① 加载态——Stop 按钮在位，live 时间轴出现 2 个展开思考块 + 4 张调用卡交错；② 完成态——「执行时间轴 · 4 次智能体调用 · 3 轮推理 · 记录 RUN-…」标题 + 思考1→调用1,2→思考2→调用3,4→思考3→答案 的真实交错序；③ 调用卡展开显示实参与返回原文；④ Stop 实测——停止后保留部分执行并显示「已手动停止」提示；⑤ 历史轮次以「执行时间轴（N 次…）」折叠恢复。均截图。
+- **2026-10-25 改造收官**：5 步全部完成上线。测试基线：后端 pytest 691 passed（+7）、前端 vitest 163 passed、build 通过；GitHub CI 绿。后续维护注意：① 思考/答案全部来自模型真实返回，禁任何前端仿造；② reasoning_content 永远不得回传给 DeepSeek（coordinator 已剥离，改动时保持）；③ 假测试客户端没有 chat_completion_stream 方法会自动走非流式路径——新增流式相关用例请参照 `_FakeStreamLLM`；④ SSE 事件现有 step/reasoning/answer_delta/done/error 五种，扩展新事件沿用 main.py 流式端点的 queue 模式。
