@@ -393,10 +393,20 @@ export default function AssistantPanel({
           ) : (
             <div key={`a-${m.id}-${i}`} className="assistant-msg assistant">
               <span className="assistant-msg-role">协调智能体</span>
-              <div
-                className="assistant-msg-body md-body"
-                dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(m.content)) }}
-              />
+              <div className="assistant-msg-body">
+                {/* harness 步骤 C：历史轮次同样保留思考与调用链（折叠态，可回溯） */}
+                {(m.reasoning_rounds ?? []).length > 0 && <AssistantThinking rounds={m.reasoning_rounds!} />}
+                <div
+                  className="md-body"
+                  dangerouslySetInnerHTML={{ __html: formatAssistantAnswer(displaySystemText(m.content)) }}
+                />
+                {(m.call_chain ?? []).length > 0 && (
+                  <details className="assistant-fold assistant-chain-details">
+                    <summary>调用链（{(m.call_chain ?? []).length} 次智能体调用{m.coordination_run_id ? ` · 记录 ${m.coordination_run_id}` : ""}，点击展开）</summary>
+                    <AssistantCallChain steps={m.call_chain as AssistantCallStep[]} />
+                  </details>
+                )}
+              </div>
             </div>
           )
         ))}

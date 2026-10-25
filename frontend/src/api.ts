@@ -1047,6 +1047,10 @@ export type AssistantHistoryMessage = {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  // harness 步骤 C：协调运行按时间就近配对附带（确定性回答没有，字段缺省）
+  call_chain?: AssistantCallStep[];
+  reasoning_rounds?: { round: number; text: string }[];
+  coordination_run_id?: string;
 };
 
 export async function getAssistantSessionMessages(sessionId: string): Promise<AssistantHistoryMessage[]> {

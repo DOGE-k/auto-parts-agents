@@ -2255,13 +2255,15 @@ async def real_order_assistant_sessions(limit: int = 20) -> dict:
 async def real_order_assistant_session_messages(session_id: str) -> dict:
     """协同问答会话历史消息（只读；前端刷新后恢复聊天记录用）。
 
-    只返回 role/content/created_at 原文——不含会话令牌、凭据或完整工具参数；
-    消息按 ASSISTANT_RETENTION_DAYS 过期清理，过期后自然返回空列表。
+    返回 role/content/created_at 原文——不含会话令牌、凭据或完整工具参数；
+    harness 步骤 C：助手消息附带当轮协调运行的调用链/思考过程/记录号（来自
+    real_agent_runs.result_json，与消息同保留期，按时间就近配对，确定性回答
+    没有协调运行、自然不附带）。消息按 ASSISTANT_RETENTION_DAYS 过期清理。
     """
     from sqlalchemy import select
 
     from app.persistence.database import SessionLocal
-    from app.persistence.models import AssistantMessageRow
+    from app.persistence.models import AssistantMessageRow, RealAgentRunRow
 
     with SessionLocal() as db:
         rows = db.execute(
@@ -2270,17 +2272,40 @@ async def real_order_assistant_session_messages(session_id: str) -> dict:
             .order_by(AssistantMessageRow.id.asc())
             .limit(200)
         ).scalars().all()
+        runs = db.execute(
+            select(RealAgentRunRow)
+            .where(
+                RealAgentRunRow.session_id == session_id.strip(),
+                RealAgentRunRow.agent_type == "coordinator",
+                RealAgentRunRow.operation == "ask",
+            )
+            .order_by(RealAgentRunRow.started_at.asc())
+            .limit(200)
+        ).scalars().all()
+
+    # 就近配对：协调运行在消息落库前保存（started_at ≤ 该轮助手消息 created_at），
+    # 贪心地把每个运行挂到第一条未占用的、时间不早于它的助手消息上。
+    pending_runs = list(runs)
+    messages: list[dict] = []
+    for row in rows:
+        item = {
+            "id": row.id,
+            "role": row.role,
+            "content": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+        if row.role == "assistant" and pending_runs:
+            run = pending_runs[0]
+            if row.created_at and row.created_at >= (run.started_at or row.created_at):
+                result = run.result_json if isinstance(run.result_json, dict) else {}
+                item["call_chain"] = result.get("call_chain") or []
+                item["reasoning_rounds"] = result.get("reasoning_rounds") or []
+                item["coordination_run_id"] = run.run_id
+                pending_runs.pop(0)
+        messages.append(item)
     return {
         "session_id": session_id,
-        "messages": [
-            {
-                "id": row.id,
-                "role": row.role,
-                "content": row.content,
-                "created_at": row.created_at.isoformat() if row.created_at else "",
-            }
-            for row in rows
-        ],
+        "messages": messages,
     }
 
 

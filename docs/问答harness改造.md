@@ -66,7 +66,7 @@
 - 测试：vitest（AssistantPanel 相关用例不回归）；`test_assistant_stream.py` 加 reasoning 事件透传用例。
 - 验收：浏览器提问，等待期看到每轮思考滑出；服务器部署后截图。
 
-### ☐ 步骤 C：历史轮次调用链/思考恢复
+### ☑ 步骤 C：历史轮次调用链/思考恢复——完成
 
 - `main.py` `sessions/{id}/messages` 端点：查 `real_agent_runs`（agent_type='coordinator'、session_id 匹配、按 started_at 排序），把 `result_json` 里的 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附加到**第一条 created_at ≥ run.started_at 的助手消息**上（确定性回答无 run，自然跳过）；
 - `api.ts` `AssistantHistoryMessage` 加可选 `call_chain`/`reasoning_rounds`；`AssistantPanel` 历史助手消息渲染折叠的调用链（复用 AssistantCallChain）与思考块。
@@ -106,3 +106,5 @@
 - 2026-10-25 创建文档；完成全部前置探测（模型 reasoning_content / 流式格式 / 存储层路径），设计已与用户确认（交错时间轴、工具轮非逐字、思考整段、最终轮打字机、历史链路恢复）。下一步：步骤 A。
 - 2026-10-25 步骤 A 完成：`coordinator.ask()` 加 `on_reasoning` 回调与 `result["reasoning_rounds"]`（每轮 + 空回答恢复路径的思考都采集）；回传 messages 前剥离 `reasoning_content`（修复既有 API 约定污染）；`assistant_session._finish()` 确定性路径补 `reasoning_rounds` 默认值。新增 `ReasoningPassthroughTests` 2 例（透传+剥离验证、无思考字段时空数组）。后端 686 passed（基线 684+2）。
 - 2026-10-25 步骤 B 完成：`handle_ask` 透传 `on_reasoning`；SSE 端点新增 `reasoning` 事件；`coordinator_extras` 补带 `reasoning_rounds`（done 事件含完整思考）；前端 `api.ts` 解析 reasoning 事件 + `AssistantAnswer.reasoning_rounds` 类型；新增 `AssistantThinking.tsx`（live 态逐轮滑出+呼吸点动画、完成态折叠保留），AssistantPanel 等待区与完成区接线；顺手修复 `test_lists_sessions_most_recent_first_without_messages` 的 limit=20 脆弱性（组合运行遗留会话挤掉新建会话，改用端点上限 50）。后端 687 passed（+1 reasoning 事件用例）、前端 vitest 163 passed、build 通过。
+- 2026-10-25 步骤 B 服务器验证通过（`31ea6c1`）：实测提问后思考块折叠显示「思考过程（3 轮）」，展开为模型真实推理原文（第 1-3 轮英文原文，与调用链 2 次调用对应），已截图。
+- 2026-10-25 步骤 C 完成：`sessions/{id}/messages` 端点按 `session_id` 关联查 `real_agent_runs`（coordinator:ask），贪心就近配对（run.started_at ≤ 助手消息 created_at）把 `call_chain`/`reasoning_rounds`/`coordination_run_id` 附到对应助手消息；确定性回答无运行、自然不附带。前端 `AssistantHistoryMessage` 扩展可选字段，历史助手消息渲染折叠思考块与调用链（复用 AssistantThinking/AssistantCallChain）。新增端点配对用例 1 例。后端 688、前端 163 passed、build 通过。

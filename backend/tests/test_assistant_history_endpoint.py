@@ -61,6 +61,60 @@ class AssistantHistoryEndpointTests(unittest.IsolatedAsyncioTestCase):
         paths = {getattr(r, "path", "") for r in fastapi_app.routes}
         self.assertIn("/api/real-orders/assistant/sessions/{session_id}/messages", paths)
 
+    async def test_assistant_messages_carry_call_chain_from_coordinator_run(self):
+        """harness 步骤 C：协调运行按时间就近配对到助手消息（确定性轮次不附带）。"""
+        from datetime import timedelta
+
+        from app.main import real_order_assistant_session_messages
+        from app.persistence.models import RealAgentRunRow
+        from app.services.assistant_session import _now
+
+        session_id = f"ASST-{uuid4().hex[:12].upper()}"
+        run_started = _now()
+        with SessionLocal() as db:
+            db.add(AssistantSessionRow(session_id=session_id, title="链路恢复测试"))
+            db.add(AssistantMessageRow(session_id=session_id, role="user", content="工单 7 进度？", created_at=run_started))
+            db.add(RealAgentRunRow(
+                run_id=f"RUN-COORD-{uuid4().hex[:6].upper()}",
+                agent_type="coordinator",
+                operation="ask",
+                result_status="ok",
+                result_summary="",
+                input_json={},
+                result_json={
+                    "call_chain": [{"seq": 1, "skill_id": "tracking.track_real", "status": "ok"}],
+                    "reasoning_rounds": [{"round": 1, "text": "先查工单进度。"}],
+                },
+                started_at=run_started,
+                finished_at=run_started,
+                session_id=session_id,
+            ))
+            db.add(AssistantMessageRow(
+                session_id=session_id, role="assistant", content="完成率 90%。",
+                created_at=run_started + timedelta(seconds=1),
+            ))
+            # 第二轮：确定性回答（无协调运行）
+            db.add(AssistantMessageRow(
+                session_id=session_id, role="user", content="数量改成 3000",
+                created_at=run_started + timedelta(seconds=2),
+            ))
+            db.add(AssistantMessageRow(
+                session_id=session_id, role="assistant", content="数量已改，请重新确认。",
+                created_at=run_started + timedelta(seconds=3),
+            ))
+            db.commit()
+
+        result = await real_order_assistant_session_messages(session_id)
+        messages = result["messages"]
+        self.assertEqual([m["role"] for m in messages], ["user", "assistant", "user", "assistant"])
+        first_assistant = messages[1]
+        self.assertEqual(first_assistant["call_chain"][0]["skill_id"], "tracking.track_real")
+        self.assertEqual(first_assistant["reasoning_rounds"][0]["text"], "先查工单进度。")
+        self.assertTrue(first_assistant["coordination_run_id"].startswith("RUN-COORD-"))
+        # 用户消息与无协调运行的助手消息不附带链路
+        self.assertNotIn("call_chain", messages[0])
+        self.assertNotIn("call_chain", messages[3])
+
 
 class AssistantSessionListTests(unittest.IsolatedAsyncioTestCase):
     """历史会话列表（"历史会话"切换器）：按最近活跃倒序，只含会话元数据。"""
