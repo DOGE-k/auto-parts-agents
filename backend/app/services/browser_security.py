@@ -14,6 +14,7 @@ from http.cookies import SimpleCookie
 from starlette.responses import JSONResponse
 
 from app.services.project_auth import PROJECT_SESSION_COOKIE, resolve_project_token
+from app.services.local_aip_transport import local_aip_session, session_for_backend
 
 browser_actor: ContextVar[str | None] = ContextVar("browser_actor", default=None)
 PUBLIC_PATHS = frozenset({"/api/health", "/api/runtime/surface", "/api/auth/login", "/api/auth/me", "/api/auth/logout"})
@@ -91,8 +92,15 @@ class BrowserSecurityMiddleware:
 
             receive = replay_receive
         context = browser_actor.set(identity.actor_id if identity is not None else None)
+        # Only browser assistant requests may delegate their verified session to
+        # this backend's own AIP listener. Nested AIP/business handlers get none.
+        aip_context = local_aip_session.set(
+            session_for_backend(scope, token)
+            if identity is not None and path in ASSISTANT_PATHS else None
+        )
         scope.setdefault("state", {})["project_identity"] = identity
         try:
             return await self.app(scope, receive, send)
         finally:
+            local_aip_session.reset(aip_context)
             browser_actor.reset(context)

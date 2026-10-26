@@ -597,9 +597,13 @@ class BusinessCoordinator:
 
     def _aip_client(self, agent_type: str) -> AipAgentClient:
         if agent_type not in self._aip_clients:
+            from app.services.local_aip_transport import BrowserSessionAipTransport
+
+            partner_url = f"{self._self_base_url}/aip/{agent_type}/rpc"
             self._aip_clients[agent_type] = AipAgentClient(
-                partner_url=f"{self._self_base_url}/aip/{agent_type}/rpc",
+                partner_url=partner_url,
                 leader_id="local-coordinator-001",
+                transport=BrowserSessionAipTransport(partner_url),
             )
         return self._aip_clients[agent_type]
 
