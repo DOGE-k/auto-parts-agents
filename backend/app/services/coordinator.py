@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 12
 TOOL_TIMEOUT_SECONDS = 60.0
+LIST_TOOL_CONTEXT_LIMIT = 8000
 
 # 真实技能能力目录：协调者"发现能力"的依据（动态选择，不预写顺序）。
 # agent_type/skill_id 与 AIP 服务注册的真实技能一一对应。
@@ -501,6 +502,8 @@ SYSTEM_PROMPT = """你是汽车零部件工厂的协调智能体。用户会用�
 4. 拿到足够信息后，用中文给出结论式回答：先直接回答用户的问题，再列出依据（真实记录编号、来源系统、时间）。
 5. 数据缺失或未建立关联时，明确说缺什么、需要谁补录，不要给猜测性答案。用户给出 WO- 开头的工单编号时，先调用 tracking.find_real_by_no 换成数字 work_order_id，再调用其他工单工具；严禁把编号中的数字当成数据库 ID。
    用户问当前有哪些 ERP 销售订单或 MES 生产工单且没有提供订单号时，分别调用 quotation.list_real_sales_orders、tracking.list_real_work_orders；结果达到 limit 时说明可能还有后续记录，不称为全量。
+   列表结果的 count 仅是本次接口返回条数，不是数据库总数。columns 是字段名，rows 中每个数组是一条记录的摘要，按 columns 对应，null 表示该字段未提供。
+   context_omitted_count 表示模型摘要因预算省略的记录数，与源接口的 possibly_truncated 分开；不得把摘要省略说成 MES 故障、数据损坏或 JSON 被截断。列表技能只有 limit，没有翻页参数，不得声称已读取其他页或编造总数。
 6. 你只有只读查询能力；不要承诺任何写入操作（创建订单/审批/发运等），如用户要求，告知需在真实业务页面走审批流程。
 7. 回答保持简洁，用短段落或列表。
 
@@ -569,6 +572,75 @@ def _summarize_result(result: dict[str, Any], limit: int = 400) -> str:
     except Exception:
         text = str(result)
     return text[:limit]
+
+
+_LIST_TOOL_FIELDS = {
+    "tracking.list_real_work_orders": (
+        "work_order_id", "work_order_no", "customer_order_no", "product_id",
+        "product_name", "quantity", "completed_qty", "rejected_qty", "status",
+        "due_date", "line_name",
+    ),
+    "quotation.list_real_sales_orders": (
+        "order_id", "customer_id", "customer_name", "transaction_date",
+        "delivery_date", "status", "total_qty", "total", "currency",
+    ),
+}
+
+
+def _model_tool_content(skill_id: str, result: dict[str, Any]) -> str:
+    """Compact list context as valid JSON, independently of the display trace.
+
+    Repeated field names/source labels are moved into a header. Values and raw
+    dates are preserved, and only whole rows may be omitted to fit the bounded
+    model context. The original result/collected evidence is never modified.
+    """
+    import json
+
+    fields = _LIST_TOOL_FIELDS.get(skill_id)
+    orders = result.get("orders")
+    if fields is None or not isinstance(orders, list):
+        return _summarize_result(result, limit=4000)
+    columns = [key for key in fields if any(key in row for row in orders)]
+    # Normally these labels are identical on all rows. Retain differences if a
+    # future source supplies mixed provenance rather than silently merging it.
+    columns.extend(key for key in ("authority", "data_source")
+                   if any(key in row and row[key] != result.get(key) for row in orders))
+    payload = {key: result[key] for key in (
+        "count", "limit", "possibly_truncated", "adapter_mode", "authority", "data_source",
+        "error", "status", "note",
+    ) if key in result}
+    payload.update({
+        "count_scope": "本次接口返回条数，不是数据库总数；未提供总数或下一页游标",
+        "context_included_count": 0,
+        "context_omitted_count": len(orders),
+        "columns": columns,
+        "rows": [],
+    })
+
+    def encode() -> str:
+        return json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+
+    # The source may ignore its requested limit, so do not assume <=100 rows.
+    # Serialize after each complete row; never slice a serialized JSON string.
+    text = encode()
+    if len(text) > LIST_TOOL_CONTEXT_LIMIT:
+        return json.dumps({
+            "context_error": "list_metadata_exceeds_context_budget",
+            "source_has_error": bool(result.get("error")),
+            "context_included_count": 0,
+            "context_omitted_count": len(orders),
+            "context_note": "源元数据超过摘要预算，未展示记录；不能据此判断数据库总数、空列表或 MES 故障。",
+            "columns": [], "rows": [],
+        }, ensure_ascii=False, separators=(",", ":"))
+    for row in orders:
+        payload["rows"].append([row.get(key) for key in columns])
+        payload["context_included_count"] += 1
+        payload["context_omitted_count"] -= 1
+        candidate = encode()
+        if len(candidate) > LIST_TOOL_CONTEXT_LIMIT:
+            break
+        text = candidate
+    return text
 
 
 class BusinessCoordinator:
@@ -785,7 +857,7 @@ class BusinessCoordinator:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", ""),
-                    "content": _summarize_result(step_result, limit=4000),
+                    "content": _model_tool_content(skill_id, step_result),
                 })
         else:
             final_answer = "达到工具调用轮次上限，未能形成最终回答。"
