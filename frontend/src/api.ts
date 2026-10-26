@@ -511,6 +511,7 @@ export type AssistantAnswer = {
   session_id?: string;
   business_task_id?: string;
   applied_context?: string;
+  conversation_context?: { included_turns: number; max_turns: number };
   context_updates?: string[];
   needs_input?: boolean;
   missing_slots?: AssistantMissingSlot[];

@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from app.persistence.database import SessionLocal
 from app.persistence.models import (
@@ -34,6 +34,7 @@ from app.persistence.models import (
     RealAgentRunRow,
 )
 from app.services.browser_security import browser_actor
+from app.services.conversation_history import MAX_HISTORY_TURNS, recent_conversation
 from app.services import real_order
 from app.services.assistant_context import (
     CONTEXT_FIELDS,
@@ -138,14 +139,33 @@ def _save_task(task: BusinessTaskRow) -> None:
         session.commit()
 
 
-def _save_message(session_id: str, role: str, content: str) -> None:
+def _load_conversation_history(session_id: str) -> list[dict[str, str]]:
+    """Load only this verified session's recent, unexpired dialogue."""
     with SessionLocal() as session:
-        session.add(AssistantMessageRow(
-            session_id=session_id,
-            role=role,
-            content=content,
-            expires_at=retention_expiry(),
-        ))
+        owner = session.get(AssistantSessionRow, session_id)
+        actor = browser_actor.get()
+        if owner is None or (actor is not None and owner.owner_subject != actor):
+            raise PermissionError("会话不存在或无权访问")
+        rows = session.execute(
+            select(AssistantMessageRow)
+            .where(AssistantMessageRow.session_id == session_id)
+            .where(AssistantMessageRow.role.in_(("user", "assistant")))
+            .where(or_(AssistantMessageRow.expires_at.is_(None), AssistantMessageRow.expires_at > _now()))
+            .order_by(AssistantMessageRow.id.desc())
+            .limit(MAX_HISTORY_TURNS * 2 + 2)
+        ).scalars().all()
+        messages = [{"role": row.role, "content": row.content} for row in reversed(rows)]
+    return recent_conversation(messages)
+
+
+def _save_turn(session_id: str, question: str, answer: str) -> None:
+    """Commit a completed pair together, including concurrent requests."""
+    expires_at = retention_expiry()
+    with SessionLocal() as session:
+        session.add_all([
+            AssistantMessageRow(session_id=session_id, role=role, content=content, expires_at=expires_at)
+            for role, content in (("user", question), ("assistant", answer))
+        ])
         session.commit()
 
 
@@ -372,8 +392,7 @@ async def handle_ask(
         result.setdefault("coordination_run_id", "")
         task.summary = f"最近问题：{question[:120]} | 沿用：{echo[:160]}"
         _save_task(task)
-        _save_message(session_row.session_id, "user", question)
-        _save_message(session_row.session_id, "assistant", answer)
+        _save_turn(session_row.session_id, question, answer)
         return result
 
     # ---- 确定性指令 1：数量变更 → 只读重新报价 + 下游标记 ----
@@ -501,11 +520,17 @@ async def handle_ask(
         if value not in (None, ""):
             ask_context[f"沿用_{key}"] = value
     ask_context["business_task_id"] = task.task_id
+    history = _load_conversation_history(session_row.session_id)
+    result["conversation_context"] = {
+        "included_turns": len(history) // 2,
+        "max_turns": MAX_HISTORY_TURNS,
+    }
     coordinator = coordinator_factory()
     try:
         coordinator_result = await coordinator.ask(
             question,
             context=ask_context,
+            history=history,
             on_step=on_step,
             on_reasoning=on_reasoning,
             on_answer_delta=on_answer_delta,

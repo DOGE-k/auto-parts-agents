@@ -488,7 +488,7 @@ export default function AssistantPanel({
       </header>
       <p className="chat-hint">
         {sessionId
-          ? "上一轮的客户/物料/订单/工单/数量/交期自动沿用并在回答中回显；页面当前工单/订单不自动带入。"
+          ? "同一会话自动承接最多最近 8 轮对话和业务对象；实时数据会重新查询，开始新会话后独立处理。"
           : "提问时带上订单/工单/物料编号（如 SAL-ORD-2026-00001）效果最好；切到其他模块再回来，聊天记录保留。"}
       </p>
       <div className="chat-column">
@@ -600,6 +600,9 @@ export default function AssistantPanel({
               <div className="assistant-context-echo">本轮未自动带入页面当前工单/订单（新会话首问）；如需关联，请直接输入业务编号。</div>
             )}
             {/* P0：上下文沿用回显（用户可纠正） */}
+            {!!assistantAnswer.conversation_context?.included_turns && (
+              <div className="assistant-context-echo">已承接本会话前 {assistantAnswer.conversation_context.included_turns} 轮对话；当前数据以本轮查询为准。</div>
+            )}
             {assistantAnswer.applied_context && (
               <div className="assistant-context-echo">{displaySystemText(assistantAnswer.applied_context)}</div>
             )}

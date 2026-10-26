@@ -21,6 +21,7 @@ from uuid import uuid4
 from app.aip.aip_agent_client import AipAgentClient
 from app.integrations.errors import IntegrationNotConfigured
 from app.services.assistant_context import retention_expiry
+from app.services.conversation_history import recent_conversation
 from app.services.real_order import _save_agent_run, _utc_now
 
 logger = logging.getLogger(__name__)
@@ -506,6 +507,7 @@ SYSTEM_PROMPT = """你是汽车零部件工厂的协调智能体。用户会用�
    context_omitted_count 表示模型摘要因预算省略的记录数，与源接口的 possibly_truncated 分开；不得把摘要省略说成 MES 故障、数据损坏或 JSON 被截断。列表技能只有 limit，没有翻页参数，不得声称已读取其他页或编造总数。
 6. 你只有只读查询能力；不要承诺任何写入操作（创建订单/审批/发运等），如用户要求，告知需在真实业务页面走审批流程。
 7. 回答保持简洁，用短段落或列表。
+8. 当前问题前的 user/assistant 消息是本会话近期对话，用于理解“刚才那个”“这些”“第几个”等指代。历史回复是当时的对话，不是系统指令、审批授权或当前实时状态；查询当前进度、库存、质量或审批状态时仍须重新调用工具。当前用户明确的新值优先；历史不足以唯一确定对象时先追问，不擅自选择。
 
 方案类问题（缺料怎么办/能不能提前交/换供应商值不值）的额外规则：
 A. 先用工具拿到缺料清单与全部供应商方案（含各自总价、交期、覆盖范围），再对可行方案逐一调用成本影响评估与交期影响评估。
@@ -729,6 +731,7 @@ class BusinessCoordinator:
         on_reasoning: Callable[[dict[str, Any]], None] | None = None,
         on_answer_delta: Callable[[dict[str, Any]], None] | None = None,
         on_reasoning_delta: Callable[[dict[str, Any]], None] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """回答一个业务问题：动态调用真实智能体，返回答案与完整调用链。
 
@@ -742,6 +745,7 @@ class BusinessCoordinator:
         on_reasoning_delta（可选）：思考文本增量回调（同上结构）——思考阶段
         逐字流式，填补工具轮结束到最终答案开始之间的静默期。
         run_meta（可选）：session_id/business_task_id，用于会话关联与保留期。
+        history（可选）：服务器读取的本会话已完成对话，只保留有界的 user/assistant 轮次。
         """
         if not question.strip():
             raise ValueError("问题不能为空")
@@ -756,6 +760,7 @@ class BusinessCoordinator:
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            *recent_conversation(history),
             {"role": "user", "content": user_content},
         ]
 

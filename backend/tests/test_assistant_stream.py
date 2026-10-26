@@ -92,7 +92,7 @@ class _FakeStreamCoordinator:
         self._reasoning = reasoning or []
         self.closed = False
 
-    async def ask(self, question, context, on_step=None, run_meta=None, on_reasoning=None, on_answer_delta=None, on_reasoning_delta=None):
+    async def ask(self, question, context, on_step=None, run_meta=None, on_reasoning=None, on_answer_delta=None, on_reasoning_delta=None, history=None):
         if self._error is not None:
             raise self._error
         if on_reasoning is not None:

@@ -43,8 +43,8 @@ class _FakeCoordinator:
         self.error = error
         self.closed = False
 
-    async def ask(self, question, context=None, on_step=None, run_meta=None, on_reasoning=None, on_answer_delta=None, on_reasoning_delta=None):
-        self.calls.append({"question": question, "context": context, "run_meta": run_meta})
+    async def ask(self, question, context=None, on_step=None, run_meta=None, on_reasoning=None, on_answer_delta=None, on_reasoning_delta=None, history=None):
+        self.calls.append({"question": question, "context": context, "run_meta": run_meta, "history": history})
         if self.error is not None:
             raise self.error
         return dict(self.result)
