@@ -263,6 +263,7 @@ class AssistantSessionRow(Base):
     __tablename__ = "assistant_sessions"
 
     session_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    owner_subject: Mapped[str | None] = mapped_column(String(200), index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(200), default="")
     business_task_id: Mapped[str | None] = mapped_column(String(60), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

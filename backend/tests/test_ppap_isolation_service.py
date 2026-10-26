@@ -206,6 +206,8 @@ def test_parallel_alias_keys_cannot_create_two_specs():
 
 
 def test_mode_filter_route_uses_actual_service_contract(monkeypatch):
+    # Isolate the existing PPAP route contract; strict perimeter has separate integration coverage.
+    monkeypatch.setenv("PROJECT_AUTH_REQUIRE_LOGIN", "false")
     from fastapi.testclient import TestClient
     from app import main
     from app.services.identity import RealIdentity

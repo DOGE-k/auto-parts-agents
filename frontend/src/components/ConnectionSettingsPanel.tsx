@@ -78,7 +78,7 @@ export default function ConnectionSettingsPanel(props: Props) {
           </div>
           <div className="connection-row">
             <span className="source-tag erp">项目身份</span>
-            <span>只读查询无需登录；审批、报工、处置等写入需要项目账号登录</span>
+            <span>业务查询、问答和历史记录均需项目账号登录；写入另需角色权限</span>
             <b className={props.hasProjectSession ? "text-green" : ""}>
               {props.hasProjectSession ? "已登录" : "未登录（需要项目账号）"}
             </b>
@@ -90,7 +90,7 @@ export default function ConnectionSettingsPanel(props: Props) {
         <div className="panel-heading">
           <div>
             <h2>项目登录</h2>
-            <p>登录一次即可操作 ERP 系统 与 MES 系统；审批、报工、NCR 处置等写入都使用该项目会话。</p>
+            <p>登录后可查询业务和使用问答；审批、报工、NCR 处置等写入还会核验项目角色权限。</p>
           </div>
         </div>
         {hasProjectSession && identity ? (

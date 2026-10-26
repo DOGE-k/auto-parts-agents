@@ -53,6 +53,7 @@ from app.services.project_auth import (
     project_session_ttl_seconds,
     resolve_project_token,
 )
+from app.services.browser_security import BrowserSecurityMiddleware, browser_actor
 from app.runtime.scenarios import decide_approval, get_snapshot, reset_project, run_scenario
 from app.aip import init_aip_agents
 
@@ -81,6 +82,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Real-Write-Token"],
 )
+
+app.add_middleware(BrowserSecurityMiddleware, token_resolver=lambda token: resolve_project_token(token))
 
 
 @app.middleware("http")
@@ -290,6 +293,10 @@ async def require_real_identity(
                 detail={"code": "invalid_authorization", "message": "Authorization 必须是 Bearer 会话"},
             )
         bearer = value.strip()
+    if bearer:
+        project_identity = resolve_project_token(bearer)
+        if project_identity is not None:
+            return project_identity
     try:
         return await resolve_real_identity(request_bearer_token=bearer)
     except IntegrationError as exc:
@@ -2087,7 +2094,19 @@ async def real_order_search_items(keyword: str = "", limit: int = 20) -> list[di
 async def real_order_agent_runs(agent_type: str = "", limit: int = 50) -> list[dict]:
     """查询 Agent 运行记录（输入/状态摘要；完整结果按 run_id 查询）。"""
     from app.services.real_order import list_agent_runs
-    return list_agent_runs(agent_type=agent_type, limit=min(limit, 200))
+    items = list_agent_runs(agent_type=agent_type, limit=min(limit, 200))
+    actor = browser_actor.get()
+    if actor is None:
+        return items
+    from app.persistence.models import AssistantSessionRow, RealAgentRunRow
+    with SessionLocal() as db:
+        allowed = set(db.scalars(select(RealAgentRunRow.run_id).outerjoin(
+            AssistantSessionRow, AssistantSessionRow.session_id == RealAgentRunRow.session_id,
+        ).where(
+            RealAgentRunRow.run_id.in_([item["run_id"] for item in items]),
+            (RealAgentRunRow.session_id.is_(None)) | (AssistantSessionRow.owner_subject == actor),
+        )))
+    return [item for item in items if item.get("run_id") in allowed]
 
 
 @app.get("/api/real-orders/agent-runs/{run_id}", tags=["real-orders"])
@@ -2095,6 +2114,15 @@ async def real_order_agent_run_detail(run_id: str) -> dict:
     """查询单次 Agent 运行的完整记录（含决策依据与所用 ERP/MES 证据）。"""
     from app.services.real_order import get_agent_run
     result = get_agent_run(run_id)
+    actor = browser_actor.get()
+    if actor is not None:
+        from app.persistence.models import AssistantSessionRow, RealAgentRunRow
+        with SessionLocal() as db:
+            row = db.get(RealAgentRunRow, run_id)
+            if row is not None and row.session_id:
+                owner = db.get(AssistantSessionRow, row.session_id)
+                if owner is None or owner.owner_subject != actor:
+                    raise HTTPException(status_code=404, detail="运行记录不存在")
     if result is None:
         raise HTTPException(status_code=404, detail=f"运行记录不存在: {run_id}")
     return result
@@ -2237,6 +2265,7 @@ async def real_order_assistant_sessions(limit: int = 20) -> dict:
     with SessionLocal() as db:
         rows = db.execute(
             select(AssistantSessionRow)
+            .where(AssistantSessionRow.owner_subject == browser_actor.get() if browser_actor.get() is not None else True)
             .order_by(AssistantSessionRow.last_active_at.desc())
             .limit(max(1, min(limit, 50)))
         ).scalars().all()
@@ -2265,9 +2294,14 @@ async def real_order_assistant_session_messages(session_id: str) -> dict:
     from sqlalchemy import select
 
     from app.persistence.database import SessionLocal
-    from app.persistence.models import AssistantMessageRow, RealAgentRunRow
+    from app.persistence.models import AssistantMessageRow, AssistantSessionRow, RealAgentRunRow
 
     with SessionLocal() as db:
+        actor = browser_actor.get()
+        if actor is not None:
+            session_row = db.get(AssistantSessionRow, session_id.strip())
+            if session_row is None or session_row.owner_subject != actor:
+                raise HTTPException(status_code=404, detail="会话不存在或无权访问")
         rows = db.execute(
             select(AssistantMessageRow)
             .where(AssistantMessageRow.session_id == session_id.strip())

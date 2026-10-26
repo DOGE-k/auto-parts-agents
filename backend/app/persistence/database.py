@@ -49,6 +49,9 @@ def init_database() -> None:
         details = f"缺少表：{', '.join(missing)}" if missing else "缺少 alembic_version"
         raise RuntimeError(f"数据库迁移未完成（{details}）；请在 backend 目录运行 `alembic upgrade head`。")
 
+    if "owner_subject" not in {column["name"] for column in inspector.get_columns("assistant_sessions")}:
+        raise RuntimeError("数据库迁移未完成（缺少会话归属列）；请在 backend 目录运行 `alembic upgrade head`。")
+
 
 def get_session():
     with SessionLocal() as session:

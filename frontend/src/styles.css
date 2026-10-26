@@ -3730,3 +3730,12 @@ tr.row-clickable td:first-child { position: relative; }
 
 /* 刷新反馈：最近刷新时间戳（与加载态一起让刷新按钮"看得到效果"） */
 .refresh-stamp { color: var(--faint); font-size: 11px; font-family: var(--mono); white-space: nowrap; }
+
+/* Server-verified project login before mounting business modules. */
+.browser-login-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.browser-login-panel { width: min(100%, 480px); }
+.browser-login-panel h1 { font-size: 22px; line-height: 1.5; }
+.browser-login-panel p { line-height: 1.7; }
+.browser-login-panel form { display: grid; gap: 16px; margin-top: 24px; }
+.browser-login-panel label { display: grid; gap: 8px; }
+.browser-login-panel input { width: 100%; box-sizing: border-box; }

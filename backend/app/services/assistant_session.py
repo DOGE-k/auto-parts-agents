@@ -33,6 +33,7 @@ from app.persistence.models import (
     BusinessTaskRow,
     RealAgentRunRow,
 )
+from app.services.browser_security import browser_actor
 from app.services import real_order
 from app.services.assistant_context import (
     CONTEXT_FIELDS,
@@ -94,11 +95,15 @@ def _get_or_create_session(session_id: str | None, question: str) -> tuple[Assis
         if session_id:
             row = session.get(AssistantSessionRow, session_id)
             if row is not None:
+                actor = browser_actor.get()
+                if actor is not None and row.owner_subject != actor:
+                    raise PermissionError("会话不存在或无权访问")
                 row.last_active_at = _now()
                 session.commit()
                 return row, False
         row = AssistantSessionRow(
             session_id=_new_id("ASST"),
+            owner_subject=browser_actor.get(),
             title=question.strip()[:200],
         )
         session.add(row)

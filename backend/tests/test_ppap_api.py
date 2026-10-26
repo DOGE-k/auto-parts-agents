@@ -28,7 +28,9 @@ POST_CASES = [
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    # These tests isolate PPAP role/dependency contracts; perimeter is covered by test_browser_security.
+    monkeypatch.setenv("PROJECT_AUTH_REQUIRE_LOGIN", "false")
     # No lifespan is started: API tests must not migrate or probe deployed systems.
     return TestClient(main.app)
 

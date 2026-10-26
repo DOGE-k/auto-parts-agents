@@ -1,6 +1,6 @@
 import { SseParser } from "./lib/sse";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:9000/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const REAL_SESSION_TOKEN_KEY = "real_business_session_token";
 const REAL_SESSION_ISSUED_KEY = "real_business_session_issued_at";
 const REAL_WRITE_TOKEN_KEY = "real_business_write_token";
@@ -159,6 +159,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const detail = data?.detail;
+    if (response.status === 401 && ["project_login_required", "project_session_expired"].includes(detail?.code) && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("project-auth-required"));
+    }
     // detail 可能是字符串，也可能是 {code, message} 结构化错误
     const message =
       typeof detail === "string"
@@ -673,6 +676,7 @@ export async function loginRealSession(username: string, password: string): Prom
 
 export async function logoutProjectSession(): Promise<void> {
   await api<{ status: string }>("/auth/logout", { method: "POST", body: JSON.stringify({}) });
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("project-auth-required"));
 }
 
 export type ProposalOptions = {
@@ -1115,6 +1119,9 @@ export async function askAssistantStream(
     try {
       const data = await response.json();
       const detail = data?.detail;
+      if (response.status === 401 && ["project_login_required", "project_session_expired"].includes(detail?.code) && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("project-auth-required"));
+      }
       message = typeof detail === "string" ? detail : detail?.message ?? message;
     } catch {
       // 保留默认消息

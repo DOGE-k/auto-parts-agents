@@ -124,6 +124,14 @@ def _parse_sse(raw: str) -> list[tuple[str, dict]]:
 
 
 class AssistantStreamEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Isolate SSE event contracts; production authentication/limits are
+        # covered by test_browser_security with the real ASGI application.
+        import os
+        self._boundary_patch = patch.dict(os.environ, {"PROJECT_AUTH_REQUIRE_LOGIN": "false"})
+        self._boundary_patch.start()
+        self.addCleanup(self._boundary_patch.stop)
+
     def _app(self):
         from app.main import app
 

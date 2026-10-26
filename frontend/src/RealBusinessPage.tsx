@@ -945,7 +945,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
                 <span className="ds-label">项目账号未登录</span>
                 <details className="identity-roles">
                   <summary>身份详情</summary>
-                  <p>只读查询无需登录；审批、报工、NCR 处置等写入需要项目账号登录（到「系统连接」登录）。</p>
+                  <p>业务查询、问答和历史记录均需项目账号登录；审批、报工、NCR 处置还需相应角色权限。</p>
                   {identity && (
                     <p>ERP 系统数据连接账号：{identity.actor_id}（服务端集成账号，用于读取 ERP 数据，不是浏览器用户，不代表当前审批人）</p>
                   )}

@@ -315,7 +315,12 @@ def test_complete_alembic_upgrade_on_isolated_database(tmp_path):
     migrated_engine = create_engine(environment["DATABASE_URL"])
     try:
         with migrated_engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "a8c4d12e9f60"
+            from alembic.config import Config
+            from alembic.script import ScriptDirectory
+            migration_config = Config(str(backend_dir / "alembic.ini"))
+            migration_config.set_main_option("script_location", str(backend_dir / "migrations"))
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == ScriptDirectory.from_config(migration_config).get_current_head()
+            assert "owner_subject" in {column["name"] for column in inspect(connection).get_columns("assistant_sessions")}
             tables = inspect(connection).get_table_names()
             assert "project_users" in tables and "projects" in tables
             assert len([name for name in tables if name.startswith("ppap_")]) == 8
