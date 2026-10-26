@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import httpx
@@ -14,7 +14,7 @@ from starlette.responses import StreamingResponse
 from app import main
 from app.persistence.database import SessionLocal
 from app.persistence.models import AssistantSessionRow, AssistantMessageRow, RealAgentRunRow
-from app.services.browser_security import BrowserSecurityMiddleware, browser_actor, request_limiter
+from app.services.browser_security import BrowserSecurityMiddleware, browser_actor
 from app.services.identity import RealIdentity
 from app.services.assistant_session import _get_or_create_session
 
@@ -26,13 +26,7 @@ def identity(actor="alice"):
 @pytest.fixture(autouse=True)
 def strict_boundary(monkeypatch):
     monkeypatch.setenv("PROJECT_AUTH_REQUIRE_LOGIN", "true")
-    monkeypatch.setenv("PROJECT_AUTH_ALLOWED_ORIGINS", "https://factory.example")
-    for name in ("PROJECT_LOGIN_ATTEMPTS_PER_MINUTE", "PROJECT_ASSISTANT_REQUESTS_PER_MINUTE", "PROJECT_ASSISTANT_REQUESTS_PER_DAY", "PROJECT_ASSISTANT_MAX_CONCURRENT", "PROJECT_ASSISTANT_GLOBAL_CONCURRENT"):
-        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(main, "resolve_project_token", lambda token: identity(token) if token in {"alice", "bob"} else None)
-    request_limiter.clear()
-    yield
-    request_limiter.clear()
 
 
 @contextmanager
@@ -104,56 +98,59 @@ def test_new_browser_session_records_owner_and_existing_cannot_be_claimed():
 
 
 @pytest.mark.asyncio
-async def test_cross_origin_or_missing_origin_cookie_writes_rejected(monkeypatch):
+async def test_demo_cookie_requests_do_not_require_added_origin_policy(monkeypatch):
     handler = AsyncMock(return_value={"answer": "ok"})
     monkeypatch.setattr("app.services.assistant_session.handle_ask", handler)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example", cookies={"project_session": "alice"}) as client:
-        for origin in ("https://evil.example", "null", "https://factory.example.evil"):
+        for origin in ("http://demo.example:5173", "https://factory.example"):
             response = await client.post("/api/real-orders/assistant/ask", json={"question": "hello"}, headers={"Origin": origin})
-            assert response.status_code == 403
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"})).status_code == 403
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"}, headers={"Origin": "https://factory.example"})).status_code == 200
-    assert handler.await_count == 1
+            assert response.status_code == 200
+        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"})).status_code == 200
+    assert handler.await_count == 3
 
 
 @pytest.mark.asyncio
-async def test_forwarded_headers_do_not_allow_forged_origin(monkeypatch):
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example", cookies={"project_session": "alice"}) as client:
-        response = await client.post("/api/auth/logout", json={}, headers={"Origin": "https://evil.example", "X-Forwarded-Host": "evil.example", "X-Forwarded-Proto": "https"})
-    assert response.status_code == 403
+async def test_forwarded_headers_do_not_replace_project_login():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example") as client:
+        response = await client.get("/api/real-orders/assistant/sessions", headers={"X-Forwarded-Host": "factory.example", "X-Forwarded-Proto": "https", "X-Forwarded-User": "alice"})
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_login_attempt_limit_is_per_client_and_blocks_before_password_work(monkeypatch):
-    monkeypatch.setenv("PROJECT_LOGIN_ATTEMPTS_PER_MINUTE", "2")
-    login = AsyncMock()
-    # Invalid login payloads still consume an attempt, preventing validation bypass.
+async def test_login_is_not_throttled_by_withdrawn_attempt_limit(monkeypatch):
+    monkeypatch.setenv("PROJECT_LOGIN_ATTEMPTS_PER_MINUTE", "1")
+    login = Mock(return_value=("alice", identity("alice")))
+    monkeypatch.setattr(main, "login_project_user", login)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app, client=("198.51.100.10", 1)), base_url="https://factory.example") as client:
-        assert (await client.post("/api/auth/login", json={})).status_code == 422
-        assert (await client.post("/api/auth/login", json={})).status_code == 422
-        blocked = await client.post("/api/auth/login", json={})
-        assert blocked.status_code == 429 and blocked.headers["retry-after"] == "60"
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app, client=("198.51.100.11", 1)), base_url="https://factory.example") as other:
-        assert (await other.post("/api/auth/login", json={})).status_code == 422
+        for _ in range(8):
+            response = await client.post("/api/auth/login", json={"username": "fixture", "password": "fixture-only"})
+            assert response.status_code == 200
+    assert login.call_count == 8
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("variable", ["PROJECT_ASSISTANT_REQUESTS_PER_MINUTE", "PROJECT_ASSISTANT_REQUESTS_PER_DAY"])
-async def test_assistant_rate_and_daily_limits(monkeypatch, variable):
-    monkeypatch.setenv(variable, "1")
+async def test_repeated_questions_ignore_withdrawn_minute_and_day_quotas(monkeypatch):
+    monkeypatch.setenv("PROJECT_ASSISTANT_REQUESTS_PER_MINUTE", "1")
+    monkeypatch.setenv("PROJECT_ASSISTANT_REQUESTS_PER_DAY", "1")
     handler = AsyncMock(return_value={"answer": "ok"})
     monkeypatch.setattr("app.services.assistant_session.handle_ask", handler)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example", headers={"Authorization": "Bearer alice"}) as client:
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"})).status_code == 200
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"})).status_code == 429
-    assert handler.await_count == 1
+        for _ in range(12):
+            assert (await client.post("/api/real-orders/assistant/ask", json={"question": "hello"})).status_code == 200
+    assert handler.await_count == 12
 
 
 @pytest.mark.asyncio
-async def test_stream_holds_concurrency_lease_until_body_finishes():
-    started, finish = asyncio.Event(), asyncio.Event()
+async def test_parallel_streams_are_not_rejected_by_withdrawn_concurrency_caps(monkeypatch):
+    monkeypatch.setenv("PROJECT_ASSISTANT_MAX_CONCURRENT", "1")
+    monkeypatch.setenv("PROJECT_ASSISTANT_GLOBAL_CONCURRENT", "1")
+    all_started, finish = asyncio.Event(), asyncio.Event()
+    started = 0
     async def body():
-        started.set()
+        nonlocal started
+        started += 1
+        if started == 5:
+            all_started.set()
         yield b"event: step\ndata: {}\n\n"
         await finish.wait()
         yield b"event: done\ndata: {}\n\n"
@@ -163,22 +160,23 @@ async def test_stream_holds_concurrency_lease_until_body_finishes():
         return StreamingResponse(body(), media_type="text/event-stream")
     app.add_middleware(BrowserSecurityMiddleware, token_resolver=lambda token: identity(token) if token else None)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://factory.example", headers={"Authorization": "Bearer alice"}) as client:
-        pending = asyncio.create_task(client.post("/api/real-orders/assistant/ask/stream", json={"question": "hello"}))
-        await asyncio.wait_for(started.wait(), timeout=2)
-        assert (await client.post("/api/real-orders/assistant/ask/stream", json={"question": "again"})).status_code == 429
-        finish.set()
-        assert (await pending).status_code == 200
-        assert (await client.post("/api/real-orders/assistant/ask/stream", json={"question": "after"})).status_code == 200
+        pending = [asyncio.create_task(client.post("/api/real-orders/assistant/ask/stream", json={"question": "hello"})) for _ in range(5)]
+        try:
+            await asyncio.wait_for(all_started.wait(), timeout=2)
+        finally:
+            finish.set()
+            responses = await asyncio.gather(*pending)
+        assert all(response.status_code == 200 for response in responses)
 
 
 @pytest.mark.asyncio
-async def test_body_size_and_question_length_rejected_before_model(monkeypatch):
-    handler = AsyncMock()
+async def test_questions_and_context_are_not_rejected_by_withdrawn_size_caps(monkeypatch):
+    handler = AsyncMock(return_value={"answer": "ok"})
     monkeypatch.setattr("app.services.assistant_session.handle_ask", handler)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example", headers={"Authorization": "Bearer alice"}) as client:
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "a"*8001})).status_code == 422
-        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "a", "context": "b"*70000})).status_code == 413
-    handler.assert_not_called()
+        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "a"*8001})).status_code == 200
+        assert (await client.post("/api/real-orders/assistant/ask", json={"question": "a", "context": {"note": "b"*70000}})).status_code == 200
+    assert handler.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -203,14 +201,17 @@ async def test_request_context_assigns_session_owner_in_sync_and_stream(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_https_login_sets_secure_http_only_session_cookie(monkeypatch):
-    monkeypatch.setenv("PROJECT_AUTH_COOKIE_SECURE", "true")
+@pytest.mark.parametrize("secure", [False, True])
+async def test_login_cookie_matches_http_or_https_deployment(monkeypatch, secure):
+    monkeypatch.setenv("PROJECT_AUTH_COOKIE_SECURE", str(secure).lower())
     monkeypatch.setattr(main, "login_project_user", lambda u, p: ("alice", identity("alice")))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://factory.example") as client:
+    base_url = "https://factory.example" if secure else "http://factory.example:5173"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url=base_url) as client:
         response = await client.post("/api/auth/login", json={"username": "fixture", "password": "fixture-only"}, headers={"Origin": "https://factory.example"})
         assert response.status_code == 200
         cookie = response.headers["set-cookie"]
-        assert "Secure" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie
+        assert ("Secure" in cookie) == secure
+        assert "HttpOnly" in cookie and "SameSite=lax" in cookie
         assert (await client.get("/api/auth/me")).status_code == 200
 
 

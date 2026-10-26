@@ -236,13 +236,16 @@ function App() {
 
   // 统一连接文案（评审意见③）：区分"已连接"（真实探测通过）与"探测中/异常"，
   // 项目登录状态单独由"当前项目用户"表达，不混在连接文案里。
+  const connectionState = !isRealModule(page) ? "mock"
+    : connStatus?.erpnext === "error" || connStatus?.openmes === "error" ? "error"
+      : connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "connected" : "pending";
   const connectionText = !isRealModule(page)
     ? "Mock + MES 只读"
-    : connStatus === null
+    : connectionState === "pending"
       ? "连接探测中…"
-      : connStatus.erpnext === "connected" && connStatus.openmes === "connected"
+      : connectionState === "connected"
         ? "业务系统 · 已连接"
-        : connStatus.erpnext === "connected"
+        : connStatus?.erpnext === "connected"
           ? "ERP 已连接 · MES 异常"
           : "连接异常 · 见系统连接页";
 
@@ -250,7 +253,7 @@ function App() {
   const currentApprovals = useMemo(() => approvals.filter((item) => item.project_id === projectId), [approvals, projectId]);
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}${page === "assistant" ? " chat-shell" : ""}`}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
@@ -266,8 +269,8 @@ function App() {
             </svg>
           </div>
           <div className="brand-text">
-            <strong>制造运营智能体平台</strong>
-            <span>汽车零部件工厂</span>
+            <strong>制造协同工作台</strong>
+            <span>汽车零部件 · 智能体平台</span>
           </div>
           <button
             type="button"
@@ -317,12 +320,12 @@ function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
-          <div className={`mode-indicator ${isRealModule(page) && connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "real-mode" : ""}`}>
+          <div className={`mode-indicator connection-state-${connectionState} ${connectionState === "connected" ? "real-mode" : ""}`}>
             <i />
             <span className="nav-label">{connectionText}</span>
           </div>
           <p className="sidebar-approver">
-            当前项目用户：<b>{realIdentity ? `${realIdentity.actor_id}` : "未登录"}</b>
+            当前账号：<b>{realIdentity ? (realIdentity.display_name || realIdentity.actor_id) : "未登录"}</b>
           </p>
           <div className="version-tag">Runtime · {pkg.version}</div>
         </div>
@@ -332,11 +335,11 @@ function App() {
         <header className="topbar">
           <div className="breadcrumbs"><span>汽车零部件</span><b>/</b><strong>{pageLabels[page] ?? page}</strong></div>
           <div className="topbar-actions">
-            <div className={`connection ${isRealModule(page) && connStatus?.erpnext === "connected" && connStatus?.openmes === "connected" ? "real-mode" : ""}`}>
+            <div className={`connection connection-state-${connectionState} ${connectionState === "connected" ? "real-mode" : ""}`}>
               <i />
               {connectionText}
             </div>
-            <span className="topbar-approver">当前项目用户：<b>{realIdentity ? realIdentity.actor_id : "未登录"}</b></span>
+            <span className="topbar-approver" title={realIdentity?.actor_id}>当前账号：<b>{realIdentity ? (realIdentity.display_name || realIdentity.actor_id) : "未登录"}</b></span>
             {mockDemoEnabled && projects.length > 0 && !isRealModule(page) && <select aria-label="当前项目" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.project_id} value={item.project_id}>{item.project_id} · {item.scenario === "normal_order" ? "正常订单" : item.scenario === "material_shortage" ? "缺料协作" : item.scenario === "quality_hold" ? "质量冻结" : "订单加急"}</option>)}
             </select>}

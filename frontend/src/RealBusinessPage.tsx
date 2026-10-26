@@ -138,6 +138,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [identity, setIdentity] = useState<RealIdentity | null>(null);
+  const [identityError, setIdentityError] = useState(false);
   const [sessionToken, setSessionToken] = useState(() => getRealSessionToken());
   const [writeToken, setWriteToken] = useState(() => getRealWriteToken());
   const [loginUsername, setLoginUsername] = useState("");
@@ -166,7 +167,8 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
   };
 
   // 连接状态（评审意见③）：来自真实探测，不把"已配置"说成"已连接"。
-  // ERPNext=身份解析成功即已连接；OpenMES=工单列表真实可读即已连接。
+  // ERPNext=客户和物料接口均真实可读；OpenMES=工单列表真实可读。
+  // 项目登录身份不作为业务系统的连通证据。
   const [connErp, setConnErp] = useState<"pending" | "connected" | "error">("pending");
   const [connMes, setConnMes] = useState<"pending" | "connected" | "error">("pending");
 
@@ -182,10 +184,10 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
     void getRealIdentity()
       .then((id) => {
         setIdentity(id);
-        setConnErp("connected");
+        setIdentityError(false);
       })
       .catch((e) => {
-        setConnErp("error");
+        setIdentityError(true);
         setError(e instanceof Error ? e.message : "真实身份解析失败");
       });
   }, []);
@@ -200,9 +202,11 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
         ]);
         setCustomers(custs);
         setItems(its);
+        setConnErp("connected");
         if (custs.length) setSelectedCustomer(custs[0].customer_id);
         if (its.length) setSelectedItem(its[0].item_code);
       } catch (e) {
+        setConnErp("error");
         setError(e instanceof Error ? e.message : "加载 ERP 数据失败");
       }
       try {
@@ -926,7 +930,7 @@ export default function RealBusinessPage({ activeModule, onNavigate, onIdentityC
           <p>{MODULE_META[activeModule].subtitle}</p>
           <div className="real-identity-compact">
             <span className="source-tag erp">项目身份</span>
-            {identity === null && connErp === "error" ? (
+            {identity === null && identityError ? (
               // 身份解析已失败（如 OpenMES 会话过期——后端安全设计：失效会话不回退
               // 集成账号，直接报错），不能显示成"正在解析"误导用户
               <span className="ds-label">项目登录会话已失效，请到「系统连接」重新登录</span>

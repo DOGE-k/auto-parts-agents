@@ -47,6 +47,19 @@ describe("浏览器项目登录门禁", () => {
     expect(container.querySelector('[data-testid="business"]')).toBeTruthy();
     expect(Number(window.sessionStorage.getItem("project_session_expires_at"))).toBeGreaterThan(Date.now());
   });
+  it("可切换密码可见性且不会提交登录", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error("请先登录"));
+    await mount();
+    await act(async () => { setInput("密码", "test-only-password"); });
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="显示密码"]')!;
+    expect(toggle.type).toBe("button");
+    await act(async () => { toggle.click(); });
+    expect(container.querySelector('input[autocomplete="current-password"]')?.getAttribute("type")).toBe("text");
+    expect(container.querySelector('button[aria-label="隐藏密码"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(loginRealSession).not.toHaveBeenCalled();
+    await act(async () => { toggle.click(); });
+    expect(container.querySelector('input[type="password"]')).toBeTruthy();
+  });
   it("登录成功后显示业务并清除密码输入框", async () => {
     vi.mocked(api).mockRejectedValueOnce(new Error("请先登录"));
     vi.mocked(loginRealSession).mockResolvedValueOnce({ identity: account, expires_in: 600 });

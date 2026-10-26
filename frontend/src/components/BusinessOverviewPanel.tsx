@@ -92,10 +92,10 @@ export default function BusinessOverviewPanel({ hasProjectSession, qualityTodoCo
       <section className="andon-banner" aria-label="运营总览">
         <div>
           <h2>{greeting} · 制造运营总览</h2>
-          <p className="andon-sub">{today} · 四岗智能体在线 · ERP/MES 实时连接 · 写入停在人工审批</p>
+          <p className="andon-sub">{today} · 订单、物料、进度与质量协同 · 关键写入经人工审批</p>
         </div>
         <div className="andon-stats">
-          <div className="andon-stat g"><b>4</b><span>岗位智能体在线</span></div>
+          <div className="andon-stat g"><b>4</b><span>协同业务岗位</span></div>
           <div className="andon-stat a"><b>{openTodo}</b><span>待处理事项</span></div>
           <div className="andon-stat r"><b>{signalCount}</b><span>缺料/风险信号</span></div>
         </div>

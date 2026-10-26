@@ -30,6 +30,7 @@ frontend/vite-dev.log
 frontend/vite-5173*.log
 # Local audit work and source artifacts; never publish pending anonymous copies.
 work/security-anonymity-*/
+work/ui-polish-*/
 .taste-skill/
 deliverables/docx_work/
 deliverables/anonymous-review/

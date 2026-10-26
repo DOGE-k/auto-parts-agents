@@ -496,8 +496,9 @@ export default function AssistantPanel({
         <div className="assistant-messages chat-messages" ref={messagesBoxRef}>
           {chatEmpty && (
             <div className="chat-hero">
-              <h3>有什么可以帮你？</h3>
-              <p>协调智能体会调度报价 / 采购 / 跟单 / 质量四个智能体查询真实 ERP/MES 后回答，思考与调用全程留痕。</p>
+              <span className="chat-hero-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M10 9h12M10 23h12M9 10v12m14-12v12" stroke="currentColor" strokeWidth="1.6" /><rect x="4" y="4" width="10" height="10" rx="3" fill="currentColor" /><rect x="18" y="4" width="10" height="10" rx="3" fill="currentColor" opacity=".5" /><rect x="4" y="18" width="10" height="10" rx="3" fill="currentColor" opacity=".5" /><rect x="18" y="18" width="10" height="10" rx="3" fill="currentColor" /></svg></span>
+              <h3>从一个业务问题开始</h3>
+              <p>查询订单、核对物料、跟进生产与质量。协调智能体按需调度四个岗位，展示数据来源与调用过程。</p>
               <div className="chat-hero-cards">
                 {COMMON_QUESTIONS.map((q) => (
                   <button key={q} className="chat-hero-card" onClick={() => setAssistantQuestion(q)}>
