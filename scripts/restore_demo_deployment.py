@@ -209,15 +209,18 @@ def apply(root, original, state, secure_state):
     # Existing source defaults remain same-origin; do not restore the browser's loopback API bug.
     environment = os.environ.copy()
     environment.update({"VITE_API_BASE_URL": "/api", "PROJECT_AUTH_REQUIRE_LOGIN": "true", "PROJECT_AUTH_COOKIE_SECURE": "false"})
-    result = subprocess.run(["bash", "scripts/start_app.sh"], cwd=root, env=environment,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    (state / "start-demo.log").write_text(result.stdout, encoding="utf-8")
+    # The helper starts background shell jobs. A pipe may remain open in those
+    # shells after the helper exits, so capture to a regular private file.
+    with (state / "start-demo.log").open("w", encoding="utf-8") as output:
+        result = subprocess.run(["bash", "scripts/start_app.sh"], cwd=root, env=environment,
+                                stdout=output, stderr=subprocess.STDOUT, text=True,
+                                timeout=180)
     if result.returncode:
         raise RuntimeError("Demo startup failed; diagnostic output retained privately")
     for command in [["bash", "scripts/stop_wutong.sh"], ["bash", "scripts/start_wutong.sh", str(runtime)]]:
-        result = subprocess.run(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=180)
         with (state / "aip-restart.log").open("a", encoding="utf-8") as output:
-            output.write(result.stdout)
+            result = subprocess.run(command, cwd=root, stdout=output,
+                                    stderr=subprocess.STDOUT, text=True, timeout=180)
         if result.returncode:
             raise RuntimeError("AIP restart failed; diagnostic output retained privately")
     verify(root, state)
