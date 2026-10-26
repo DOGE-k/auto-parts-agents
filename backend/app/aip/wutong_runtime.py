@@ -467,6 +467,7 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
 
         amp_reporter = AmpKafkaReporter(config.amp)
         if config.amp.report_access:
+            original_dispatch = service.dispatch_rpc
 
             def _rpc_wire_size(payload: Any) -> int | None:
                 """序列化后的真实线缆字节数（尽力而为，失败不阻断上报）。"""
