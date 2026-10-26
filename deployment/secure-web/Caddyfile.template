@@ -1,0 +1,42 @@
+{
+    auto_https disable_redirects
+}
+(openmes_private) {
+    handle /app/* {
+        reverse_proxy reverb:8080
+    }
+    handle {
+        reverse_proxy backend:8000
+    }
+}
+:8081 {
+    import openmes_private
+}
+http://:80 {
+    @web host @@DOMAIN@@
+    redir @web https://@@DOMAIN@@{uri} 308
+    respond 404
+}
+@@DOMAIN@@ {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        -Server
+    }
+    @backend path /api /api/* /aip /aip/* /docs /docs/* /redoc /redoc/* /openapi.json
+    handle @backend {
+        reverse_proxy unix//run/auto-parts-api/backend.sock {
+            # Overwrite client-supplied forwarding headers at the private UDS boundary.
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Host {host}
+            flush_interval -1
+        }
+    }
+    handle {
+        root * /srv/auto-parts
+        try_files {path} /index.html
+        file_server
+    }
+}

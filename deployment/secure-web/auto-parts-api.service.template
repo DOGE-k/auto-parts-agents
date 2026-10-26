@@ -1,0 +1,28 @@
+[Unit]
+Description=Automotive agent browser API via private Unix socket
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=@@USER@@
+Group=@@GROUP@@
+WorkingDirectory=@@ROOT@@/backend
+EnvironmentFile=@@STATE@@/backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+# The wildcard is allowed ONLY with this private Unix socket. Never copy it to public TCP.
+ExecStart=@@ROOT@@/.venv/bin/python -m uvicorn app.main:app --uds /run/auto-parts-api/backend.sock --workers 1 --proxy-headers --forwarded-allow-ips=*
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+RuntimeDirectory=auto-parts-api
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

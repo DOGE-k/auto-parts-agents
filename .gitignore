@@ -28,3 +28,12 @@ backend/qid.txt
 backend/uvicorn-9000*.log
 frontend/vite-dev.log
 frontend/vite-5173*.log
+# Local audit work and source artifacts; never publish pending anonymous copies.
+work/security-anonymity-*/
+.taste-skill/
+deliverables/docx_work/
+deliverables/anonymous-review/
+# Original submission sources and raw evidence retain personal metadata.
+deliverables/汽车零部件四智能体协作平台_技术报告_V3.docx
+deliverables/路演PPT-汽车零部件制造运营管理智能体平台-v3.pptx
+gui-test-screenshots/wutong-20261026-*.png

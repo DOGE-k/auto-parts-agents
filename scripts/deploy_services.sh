@@ -37,9 +37,22 @@ if [ ! -f "$frappeDir/.env" ]; then
   echo "[待办] 已生成 services/frappe_docker/.env——请设置 DB_PASSWORD（MariaDB root 密码）。"
 fi
 
-echo "[部署] 启动 OpenMES（project: openmes，端口 80/443）..."
-docker compose --project-name openmes --env-file "$openmesDir/.env" \
-  -f "$openmesDir/docker-compose.yml" up -d
+secureState="${SECURE_WEB_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/auto-parts-secure-web}"
+secureOverride="$secureState/openmes.override.yml"
+openmesCompose=(docker compose --project-name openmes --env-file "$openmesDir/.env"
+  -f "$openmesDir/docker-compose.yml")
+openmesUi="http://127.0.0.1/"
+if [[ -f "$secureOverride" ]]; then
+  openmesCompose+=(-f "$secureOverride")
+  openmesUi="http://127.0.0.1:18081/"
+  echo "[部署] OpenMES 使用现有正式网页安全 override，管理入口保持回环访问。"
+elif [[ -d "$secureState" || -f /etc/systemd/system/auto-parts-api.service ]]; then
+  echo "[失败] 检测到正式部署状态但安全 override 缺失；拒绝回退为公网 OpenMES。请核对 SECURE_WEB_STATE。" >&2
+  exit 1
+else
+  echo "[部署] 启动本地 OpenMES（project: openmes，端口 80/443）..."
+fi
+"${openmesCompose[@]}" up -d
 
 echo "[部署] 启动 ERPNext（project: erpnext，端口 8080，首次会拉取镜像）..."
 docker compose --project-name erpnext \
@@ -51,7 +64,7 @@ docker compose --project-name erpnext \
 
 echo ""
 echo "两个系统已启动。首次部署还需手工初始化（详见 README.md 第 3 节）："
-echo "  OpenMES: 管理员按 services/OpenMes/.env 的 ADMIN_USERNAME/ADMIN_PASSWORD 自动创建；登录页 http://127.0.0.1/"
+echo "  OpenMES: 管理员按 services/OpenMes/.env 的 ADMIN_USERNAME/ADMIN_PASSWORD 自动创建；登录页 $openmesUi"
 echo "  ERPNext 建站（一次性，站点名必须叫 localhost）："
 echo "    docker compose --project-name erpnext exec backend bench new-site localhost --mariadb-user-host-login-scope=% --db-root-password <DB_PASSWORD> --admin-password <管理员密码> --install-app erpnext"
 echo "  之后回到 README.md 第 4 节继续。"

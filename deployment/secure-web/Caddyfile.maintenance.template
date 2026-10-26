@@ -1,0 +1,19 @@
+{
+    auto_https disable_redirects
+}
+:8081 {
+    handle /app/* {
+        reverse_proxy reverb:8080
+    }
+    handle {
+        reverse_proxy backend:8000
+    }
+}
+http://:80 {
+    @web host @@DOMAIN@@
+    redir @web https://@@DOMAIN@@{uri} 308
+    respond 404
+}
+@@DOMAIN@@ {
+    respond "Service temporarily unavailable" 503
+}
