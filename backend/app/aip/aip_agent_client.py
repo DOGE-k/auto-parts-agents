@@ -5,14 +5,45 @@ AIP 智能体客户端封装。
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 import json
 import logging
+import time
 from uuid import uuid4
 from typing import Any, Optional
 
 from acps_sdk.aip import AipRpcClient, TaskState
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class OutboundAccessInfo:
+    """一次出站技能调用的遥测摘要。
+
+    供 AMP caller 侧 access 记录使用：taskId 与对端 callee 记录的 correlationId
+    同源，平台按 taskId 双方匹配计一次调用。
+    """
+
+    task_id: str
+    skill_id: str
+    session_id: str
+    status_code: int
+    duration_ms: float
+    request_bytes: int | None = None
+    response_bytes: int | None = None
+
+
+AccessReporter = Callable[[OutboundAccessInfo], Awaitable[None]]
+
+
+def _wire_size(data: dict[str, Any]) -> int | None:
+    """响应序列化后的真实字节数（尽力而为，失败不阻断调用）。"""
+    try:
+        return len(json.dumps(data, ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return None
 
 
 class AipAgentClient:
@@ -34,6 +65,7 @@ class AipAgentClient:
         identity_binding_enabled: bool = False,
         expected_partner_aic: str | None = None,
         transport=None,
+        access_reporter: AccessReporter | None = None,
     ):
         self.partner_url = partner_url
         self.leader_id = leader_id
@@ -41,6 +73,7 @@ class AipAgentClient:
         self.identity_binding_enabled = identity_binding_enabled
         self.expected_partner_aic = expected_partner_aic
         self.transport = transport
+        self._access_reporter = access_reporter
         self._client: Optional[AipRpcClient] = None
 
     async def _get_client(self) -> AipRpcClient:
@@ -93,11 +126,12 @@ class AipAgentClient:
         client = await self._get_client()
         # Allocate before start: even a lost/late start response can be cancelled.
         task_id = f"task-{uuid4()}"
+        payload = f"{skill_id}|{json.dumps(inputs, ensure_ascii=False)}"
 
         async def invoke() -> dict[str, Any]:
             result = await client.start_task(
                 session_id=session_id,
-                user_input=f"{skill_id}|{json.dumps(inputs, ensure_ascii=False)}",
+                user_input=payload,
                 task_id=task_id,
             )
             if result.taskId != task_id:
@@ -120,12 +154,39 @@ class AipAgentClient:
                     raise RuntimeError("AIP 任务完成确认未被接受")
             return data
 
+        started = time.monotonic()
+        status_code = 500
+        response_bytes: int | None = None
         try:
             # Bound the whole exchange, including network calls and acknowledgement.
-            return await asyncio.wait_for(invoke(), timeout=timeout)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+            data = await asyncio.wait_for(invoke(), timeout=timeout)
+        except asyncio.CancelledError:
+            status_code = 499
             await self._cancel_remote(client, task_id, session_id)
             raise
+        except asyncio.TimeoutError:
+            status_code = 504
+            await self._cancel_remote(client, task_id, session_id)
+            raise
+        else:
+            status_code = 200
+            response_bytes = _wire_size(data)
+            return data
+        finally:
+            await self._report_outbound_access(OutboundAccessInfo(
+                task_id=task_id, skill_id=skill_id, session_id=session_id,
+                status_code=status_code, duration_ms=(time.monotonic() - started) * 1000,
+                request_bytes=len(payload.encode("utf-8")), response_bytes=response_bytes,
+            ))
+
+    async def _report_outbound_access(self, info: OutboundAccessInfo) -> None:
+        """尽力而为的出站 access 上报；任何失败都不影响调用结果。"""
+        if self._access_reporter is None:
+            return
+        try:
+            await self._access_reporter(info)
+        except Exception:
+            logger.warning("出站 AIP access 上报失败", exc_info=True)
 
     @staticmethod
     def _terminal_states() -> set[TaskState]:

@@ -6,9 +6,14 @@ import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from acps_sdk.aip import TaskState
+from acps_sdk.aip.aip_base_model import StructuredDataItem
+
+from app.aip.aip_agent_client import AipAgentClient, OutboundAccessInfo
 from app.aip.amp_reporter import (
     ACCESS_TOPIC,
     AmpKafkaReporter,
@@ -18,7 +23,7 @@ from app.aip.amp_reporter import (
     build_heartbeat_record,
     extract_task_id,
 )
-from app.aip.wutong_runtime import load_config
+from app.aip.wutong_runtime import AgentEndpoint, _outbound_access_reporter, load_config
 
 
 def test_build_heartbeat_record_matches_sdk_wire_format():
@@ -274,3 +279,165 @@ def test_extract_task_id_prefers_command_then_response():
     ) == "t-resp"
     assert extract_task_id(_Request("get", _Command(None)), _Response({"taskId": "t-dict"})) == "t-dict"
     assert extract_task_id(_Request("get", _Command(None)), _Response(_Result("ignored"))) is None
+
+
+LEADER_AIC = "1.2.156.3088.1.BUPT.R2QTUC.LEAD.A.B.C"
+PARTNER_AIC = "1.2.156.3088.1.BUPT.R2QTUC.QUOT.A.B.C"
+
+
+def _partner_endpoint(tmp_path: Path | None = None) -> AgentEndpoint:
+    base = tmp_path or Path(".")
+    return AgentEndpoint(
+        role="quotation", aic=PARTNER_AIC, port=9444,
+        cert_file=base / "partner.pem", key_file=base / "partner.key",
+        allowed_callers=(LEADER_AIC,),
+    )
+
+
+def test_build_access_record_caller_side_swaps_callee_participant():
+    from acps_sdk.amp.models import AccessLogRecord
+
+    record = build_access_record(
+        aic=LEADER_AIC, role="leader",
+        method="POST", path="/aip/quotation/rpc", status_code=200,
+        duration_ms=12.0, caller_aic=LEADER_AIC,
+        callee_aic=PARTNER_AIC, callee_service_name="quotation",
+        task_id="task-pair-1", request_bytes=64, response_bytes=256,
+    )
+    restored = AccessLogRecord.model_validate(record)
+    assert restored.aic == LEADER_AIC
+    assert restored.correlation_id == "task-pair-1"
+    assert restored.body.caller.aic == LEADER_AIC
+    assert restored.body.callee.aic == PARTNER_AIC
+    assert restored.body.callee.service_name == "quotation"
+    assert restored.body.request.body_size_bytes == 64
+    assert restored.body.response.body_size_bytes == 256
+
+
+def test_outbound_access_reporter_builds_paired_caller_side_record(tmp_path):
+    async def run():
+        producer = FakeProducer()
+        reporter = await _reporter_with(producer)
+        hook = _outbound_access_reporter(reporter, LEADER_AIC, "leader", _partner_endpoint(tmp_path))
+        assert hook is not None
+        await hook(OutboundAccessInfo(
+            task_id="task-pair-2", skill_id="quotation.calculate_cost", session_id="ns",
+            status_code=200, duration_ms=3.5, request_bytes=64, response_bytes=256,
+        ))
+        return producer
+
+    producer = asyncio.run(run())
+    assert [m[0] for m in producer.messages] == [ACCESS_TOPIC]
+    record = producer.messages[0][1]
+    assert record["aic"] == LEADER_AIC
+    assert record["correlation_id"] == "task-pair-2"
+    body = record["body"]
+    assert body["caller"] == {"aic": LEADER_AIC, "serviceName": LEADER_AIC}
+    assert body["callee"] == {"aic": PARTNER_AIC, "serviceName": "quotation"}
+    assert body["request"]["route"] == "/aip/quotation/rpc"
+    assert body["request"]["bodySizeBytes"] == 64
+    assert body["response"]["bodySizeBytes"] == 256
+
+
+def test_outbound_access_reporter_without_amp_is_none():
+    assert _outbound_access_reporter(None, LEADER_AIC, "leader", _partner_endpoint()) is None
+
+
+def _completed_result(task_id):
+    return SimpleNamespace(
+        taskId=task_id,
+        status=SimpleNamespace(state=TaskState.Completed, dataItems=[]),
+        products=[SimpleNamespace(dataItems=[StructuredDataItem(data={"ok": 1})])],
+    )
+
+
+class _FakeRpc:
+    def __init__(self, *, error=None, hang=False):
+        self.error = error
+        self.hang = hang
+        self.starts = []
+        self.cancels = []
+
+    async def start_task(self, session_id, user_input, task_id):
+        self.starts.append((session_id, user_input, task_id))
+        if self.hang:
+            await asyncio.sleep(5)
+        if self.error is not None:
+            raise self.error
+        return _completed_result(task_id)
+
+    async def cancel_task(self, task_id, session_id):
+        self.cancels.append(task_id)
+
+
+def _client_with(fake_rpc, reporter):
+    client = AipAgentClient(
+        "https://peer.example:9444/aip/quotation/rpc", leader_id=LEADER_AIC,
+        access_reporter=reporter,
+    )
+    client._client = fake_rpc
+    return client
+
+
+def test_invoke_skill_reports_caller_side_access_on_success():
+    infos = []
+
+    async def reporter(info):
+        infos.append(info)
+
+    async def run():
+        fake = _FakeRpc()
+        client = _client_with(fake, reporter)
+        data = await client.invoke_skill("quotation.calculate_cost", {"order": "SAL-1"}, timeout=5)
+        return data, fake
+
+    data, fake = asyncio.run(run())
+    assert data == {"ok": 1}
+    assert len(infos) == 1
+    info = infos[0]
+    assert info.task_id == fake.starts[0][2]
+    assert info.skill_id == "quotation.calculate_cost"
+    assert info.status_code == 200
+    assert info.request_bytes == len(fake.starts[0][1].encode("utf-8"))
+    assert info.response_bytes and info.response_bytes > 0
+
+
+def test_invoke_skill_reports_failed_status():
+    infos = []
+
+    async def reporter(info):
+        infos.append(info)
+
+    async def run():
+        client = _client_with(_FakeRpc(error=RuntimeError("技能未成功")), reporter)
+        with pytest.raises(RuntimeError):
+            await client.invoke_skill("quotation.calculate_cost", {}, timeout=5)
+
+    asyncio.run(run())
+    assert infos[0].status_code == 500
+
+
+def test_invoke_skill_reports_timeout_and_cancels_remote():
+    infos = []
+
+    async def reporter(info):
+        infos.append(info)
+
+    async def run():
+        fake = _FakeRpc(hang=True)
+        client = _client_with(fake, reporter)
+        with pytest.raises(asyncio.TimeoutError):
+            await client.invoke_skill("quotation.calculate_cost", {}, timeout=0.05, poll_interval=0.01)
+        return fake
+
+    fake = asyncio.run(run())
+    assert infos[0].status_code == 504
+    assert fake.cancels
+
+
+def test_invoke_skill_without_reporter_still_works():
+    async def run():
+        client = _client_with(_FakeRpc(), None)
+        return await client.invoke_skill("quotation.calculate_cost", {"a": 1}, timeout=5)
+
+    assert asyncio.run(run()) == {"ok": 1}

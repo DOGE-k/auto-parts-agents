@@ -423,6 +423,31 @@ def _partner_services(config: RuntimeConfig) -> dict:
     return services
 
 
+def _outbound_access_reporter(amp_reporter, leader_aic: str, leader_role: str,
+                              partner_endpoint: AgentEndpoint):
+    """Leader 出站 Partner 调用的 caller 侧 access 上报钩子。
+
+    平台按 taskId 双方匹配计一次调用：Partner 进程已上报 callee 侧记录，
+    出站侧必须补一条 caller 记录（caller/callee 对调、correlationId 用同一
+    taskId），任务才能配对计入调用量/被调用量统计。
+    """
+    if amp_reporter is None or not amp_reporter.settings.report_access:
+        return None
+
+    async def report(info) -> None:
+        await amp_reporter.report_access(
+            aic=leader_aic, role=leader_role,
+            method="POST", path=partner_endpoint.rpc_path, route=partner_endpoint.rpc_path,
+            status_code=info.status_code, duration_ms=info.duration_ms,
+            caller_aic=leader_aic,
+            callee_aic=partner_endpoint.aic, callee_service_name=partner_endpoint.role,
+            task_id=info.task_id,
+            request_bytes=info.request_bytes, response_bytes=info.response_bytes,
+        )
+
+    return report
+
+
 def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_factory=None):
     """Build only the selected role's authenticated RPC surface.
 
@@ -434,6 +459,11 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
     from app.aip.aip_agent_service import register_aip_agent_router
 
     endpoint = config.agents[role]
+    amp_reporter = None
+    if config.amp is not None:
+        from app.aip.amp_reporter import AmpKafkaReporter
+
+        amp_reporter = AmpKafkaReporter(config.amp)
     outbound_clients: dict = {}
     if service is None:
         from app.aip.aip_agent_client import AipAgentClient
@@ -451,6 +481,9 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
                 ssl_context=context, identity_binding_enabled=True,
                 expected_partner_aic=config.agents[partner].aic,
                 transport=LocalPeerTransport(config.public_host, connect_host, context),
+                access_reporter=_outbound_access_reporter(
+                    amp_reporter, endpoint.aic, role, config.agents[partner],
+                ),
             ) for partner in ROLES if partner != "leader"}
             service = create_leader_aip_service(
                 endpoint.aic, outbound_clients=outbound_clients, coordinator_factory=coordinator_factory,
@@ -460,56 +493,53 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
     if service.aic != endpoint.aic:
         raise ValueError("Service identity differs from TLS listener configuration")
 
-    amp_reporter = None
     _caller_aic: list[str | None] = []
-    if config.amp is not None:
-        from app.aip.amp_reporter import AmpKafkaReporter, extract_task_id
+    if amp_reporter is not None and config.amp.report_access:
+        from app.aip.amp_reporter import extract_task_id
 
-        amp_reporter = AmpKafkaReporter(config.amp)
-        if config.amp.report_access:
-            original_dispatch = service.dispatch_rpc
+        original_dispatch = service.dispatch_rpc
 
-            def _rpc_wire_size(payload: Any) -> int | None:
-                """序列化后的真实线缆字节数（尽力而为，失败不阻断上报）。"""
-                try:
-                    if payload is None:
-                        return None
-                    if hasattr(payload, "model_dump_json"):
-                        return len(payload.model_dump_json().encode("utf-8"))
-                    return len(json.dumps(payload, default=str).encode("utf-8"))
-                except Exception:
+        def _rpc_wire_size(payload: Any) -> int | None:
+            """序列化后的真实线缆字节数（尽力而为，失败不阻断上报）。"""
+            try:
+                if payload is None:
                     return None
+                if hasattr(payload, "model_dump_json"):
+                    return len(payload.model_dump_json().encode("utf-8"))
+                return len(json.dumps(payload, default=str).encode("utf-8"))
+            except Exception:
+                return None
 
-            async def dispatch_rpc_with_amp(rpc_request):
-                started = time.monotonic()
-                caller = _caller_aic[0] if _caller_aic else None
-                try:
-                    response = await original_dispatch(rpc_request)
-                except Exception:
-                    await amp_reporter.report_access(
-                        aic=endpoint.aic, role=role,
-                        method=getattr(rpc_request, "method", None),
-                        path=endpoint.rpc_path, status_code=500,
-                        duration_ms=(time.monotonic() - started) * 1000,
-                        caller_aic=caller, task_id=extract_task_id(rpc_request),
-                        route=endpoint.rpc_path,
-                        request_bytes=_rpc_wire_size(rpc_request),
-                    )
-                    raise
-                status_code = 200 if getattr(response, "error", None) is None else 500
+        async def dispatch_rpc_with_amp(rpc_request):
+            started = time.monotonic()
+            caller = _caller_aic[0] if _caller_aic else None
+            try:
+                response = await original_dispatch(rpc_request)
+            except Exception:
                 await amp_reporter.report_access(
                     aic=endpoint.aic, role=role,
                     method=getattr(rpc_request, "method", None),
-                    path=endpoint.rpc_path, status_code=status_code,
+                    path=endpoint.rpc_path, status_code=500,
                     duration_ms=(time.monotonic() - started) * 1000,
-                    caller_aic=caller, task_id=extract_task_id(rpc_request, response),
+                    caller_aic=caller, task_id=extract_task_id(rpc_request),
                     route=endpoint.rpc_path,
                     request_bytes=_rpc_wire_size(rpc_request),
-                    response_bytes=_rpc_wire_size(response),
                 )
-                return response
+                raise
+            status_code = 200 if getattr(response, "error", None) is None else 500
+            await amp_reporter.report_access(
+                aic=endpoint.aic, role=role,
+                method=getattr(rpc_request, "method", None),
+                path=endpoint.rpc_path, status_code=status_code,
+                duration_ms=(time.monotonic() - started) * 1000,
+                caller_aic=caller, task_id=extract_task_id(rpc_request, response),
+                route=endpoint.rpc_path,
+                request_bytes=_rpc_wire_size(rpc_request),
+                response_bytes=_rpc_wire_size(response),
+            )
+            return response
 
-            service.dispatch_rpc = dispatch_rpc_with_amp  # type: ignore[method-assign]
+        service.dispatch_rpc = dispatch_rpc_with_amp  # type: ignore[method-assign]
 
     async def authorize(request: Request, command) -> None:
         peer = get_request_peer_aic(request)
@@ -553,6 +583,7 @@ def create_app(config: RuntimeConfig, role: str, *, service=None, coordinator_fa
 
     app.state.wutong_service = service
     app.state.amp_reporter = amp_reporter
+    app.state.outbound_clients = outbound_clients
     return app
 
 

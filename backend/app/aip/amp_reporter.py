@@ -75,11 +75,15 @@ def build_access_record(
     route: str | None = None,
     request_bytes: int | None = None,
     response_bytes: int | None = None,
+    callee_aic: str | None = None,
+    callee_service_name: str | None = None,
 ) -> dict:
     """构造一条与 SDK AccessLogRecord 线缆格式一致的访问记录。
 
     correlation_id=taskId 满足平台「按 taskId 双方匹配作为一次调用/被调」的统计口径；
     route/bodySizeBytes/resource 等字段与平台部署形态对齐，避免统计侧解析丢弃。
+    入站（callee 侧）记录的被调方默认是本身份；出站（caller 侧）记录用
+    callee_aic/callee_service_name 指向对端 Partner，双方记录才能按 taskId 配对。
     """
     body = AccessBody(
         duration_ms=round(duration_ms, 3),
@@ -88,7 +92,7 @@ def build_access_record(
         ),
         response=AccessResponse(status_code=status_code, body_size_bytes=response_bytes),
         caller=AccessParticipant(aic=caller_aic, service_name=caller_aic) if caller_aic else None,
-        callee=AccessParticipant(aic=aic, service_name=role),
+        callee=AccessParticipant(aic=callee_aic or aic, service_name=callee_service_name or role),
     )
     record = AccessLogRecord(
         log_id=AccessLogRecord.new_log_id(),
